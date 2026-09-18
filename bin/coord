@@ -228,6 +228,8 @@ function cmdInit(workspace, flags)
     const chatLink = ensureLink(CORE_CHAT, path.join(devin, "chat"));
     const hooksLink = ensureLink(CORE_HOOKS, path.join(devin, "hooks"));
     const toolsLink = ensureLink(CORE_TOOLS, path.join(workspace, "tools", "coord"));
+    const skillLinks = ["team", "recess"].map((skill) =>
+        `${skill}: ${ensureLink(path.join(ROOT, "core", "skills", skill), path.join(devin, "skills", `${project}-${skill}`))}`);
 
     const coordMd = copyTemplate("COORDINATION.md", workspace);
     const organics = copyTemplate("ORGANICS.md", workspace);
@@ -245,6 +247,7 @@ function cmdInit(workspace, flags)
     console.log(`  chat link:   ${chatLink}`);
     console.log(`  hooks link:  ${hooksLink}`);
     console.log(`  tools link:  ${toolsLink}`);
+    console.log(`  skill links: ${skillLinks.join("  ")}`);
     console.log(`  COORDINATION.md: ${coordMd}   ORGANICS.md: ${organics}`);
     console.log(`  next: coord chat start ${workspace}`);
 }
@@ -352,6 +355,19 @@ function cmdUpdate(workspace)
             report.push(`${name}: linked → ${readlinkSync(link)}${readlinkSync(link) === target ? " (ok)" : " (STALE)"}`);
         else
             report.push(`${name}: real dir present — DIVERGED copy, diff against ${target} before removing`);
+    }
+    const coord = coordJsonOf(workspace);
+    for (const skill of ["team", "recess"])
+    {
+        const link = path.join(devin, "skills", `${coord?.project ?? path.basename(workspace)}-${skill}`);
+        const target = path.join(ROOT, "core", "skills", skill);
+        const stat = lstatSync(link, { throwIfNoEntry: false });
+        if (!stat)
+            report.push(`${skill} skill: MISSING (run coord init)`);
+        else if (stat.isSymbolicLink())
+            report.push(`${skill} skill: linked → ${readlinkSync(link)}${readlinkSync(link) === target ? " (ok)" : " (STALE)"}`);
+        else
+            report.push(`${skill} skill: real dir present — local override`);
     }
     for (const doc of ["COORDINATION.md", "ORGANICS.md"])
         report.push(`${doc}: ${existsSync(path.join(workspace, doc)) ? "present" : "missing (run coord init)"}`);
