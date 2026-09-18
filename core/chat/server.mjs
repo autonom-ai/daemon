@@ -267,14 +267,34 @@ async function fanoutMentions(room, text)
         return [];
     }
     const seats = Object.keys(registry).filter((id) => id !== human);
+    // @ works on the seat id and on the display name — @rose pings rose.
+    const aliases = new Map();
+    for (const id of seats)
+    {
+        const role = registry[id].role;
+        const display = typeof role === "object" && role ? role.displayName : (typeof role === "string" ? role : null);
+        if (display)
+            aliases.set(String(display).toLowerCase(), id);
+    }
     const mentioned = new Set();
     if (/@(everyone|all)\b/i.test(text))
         for (const id of seats)
             mentioned.add(id);
-    else
-        for (const id of seats)
-            if (new RegExp(`@${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text))
-                mentioned.add(id);
+    for (const match of text.matchAll(/@([A-Za-z0-9_-]+)/g))
+    {
+        const name = match[1];
+        if (seats.includes(name))
+            mentioned.add(name);
+        else if (aliases.has(name.toLowerCase()))
+            mentioned.add(aliases.get(name.toLowerCase()));
+    }
+    // #room pings every member of that room — the bus equivalent of walking
+    // the message over to where the people are.
+    const rooms = await store.getRooms().catch(() => ({}));
+    for (const match of text.matchAll(/#([A-Za-z0-9_-]+)/g))
+        for (const member of rooms[match[1]]?.members ?? [])
+            if (member !== human && registry[member])
+                mentioned.add(member);
     const preview = text.length > 300 ? `${text.slice(0, 300)}…` : text;
     for (const id of mentioned)
     {

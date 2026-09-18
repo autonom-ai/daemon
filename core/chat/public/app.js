@@ -124,7 +124,7 @@ function displayName(id)
 // A stable muted color per seat — deterministic, so a seat keeps its color
 // across workspaces and no per-project name list is needed. The human gets
 // the accent-warm --human tone rather than a palette entry.
-const SEAT_COLORS = ["#7fa6d9", "#6fbf9a", "#b08fd4", "#d1a06a", "#7fbfc4", "#c9879b", "#9ab06b", "#8f9ed0"];
+const SEAT_COLORS = ["#6d9ce8", "#5ec9a0", "#b78fe0", "#d99a55", "#5fc4cb", "#d9899e", "#a3bb6a", "#8f9ede"];
 function seatColor(id)
 {
     if (id === state.human)
@@ -198,7 +198,7 @@ function visible(message)
     return true;
 }
 
-function renderMessages()
+function renderMessages(shouldScroll = true)
 {
     const shown = state.messages.filter(visible);
     let prev = null;
@@ -229,7 +229,7 @@ function renderMessages()
         </li>`;
     }).join("");
     el.count.textContent = `${shown.length} / ${state.messages.length}`;
-    if (el.autoscroll.checked)
+    if (shouldScroll && el.autoscroll.checked)
         el.messages.scrollTop = el.messages.scrollHeight;
 }
 
@@ -400,7 +400,9 @@ function connect()
             {
                 state.messages.push(payload.entry);
                 state.messages.sort((a, b) => a.ts - b.ts);
-                renderMessages();
+                // Only scroll for a message the current view actually shows —
+                // traffic in another room shouldn't yank the scroll position.
+                renderMessages(visible(payload.entry));
                 markSeen();
                 renderSidebar();
                 if (payload.entry.from !== state.human && payload.entry.stream === "room")
@@ -493,9 +495,10 @@ function closeMentions()
 
 function renderMentions()
 {
+    const sigil = mentionState.sigil ?? "@";
     el.mentions.innerHTML = mentionState.items.map((item, index) =>
         `<li data-name="${esc(item.name)}" class="${index === mentionState.active ? "active" : ""}">
-            <span class="who" style="color:${seatColor(item.name)}">@${esc(item.name)}</span>
+            <span class="who" style="color:${sigil === "#" ? "var(--accent)" : seatColor(item.name)}">${sigil}${esc(item.name)}</span>
             <span class="meta">${esc(item.role)}</span>
         </li>`).join("");
 }
@@ -505,17 +508,17 @@ function renderMentions()
 function mentionQuery()
 {
     const caret = el.text.selectionStart;
-    const match = /(^|[\s(])@([A-Za-z0-9_-]*)$/.exec(el.text.value.slice(0, caret));
+    const match = /(^|[\s(])([@#])([A-Za-z0-9_-]*)$/.exec(el.text.value.slice(0, caret));
     if (!match)
         return null;
-    return { query: match[2].toLowerCase(), start: caret - match[2].length - 1 };
+    return { query: match[3].toLowerCase(), sigil: match[2], start: caret - match[3].length - 1 };
 }
 
 function updateMentions()
 {
     const found = mentionQuery();
     const items = found
-        ? mentionCandidates().filter((item) => item.name.toLowerCase().startsWith(found.query))
+        ? mentionCandidates(found.sigil).filter((item) => item.name.toLowerCase().startsWith(found.query))
         : [];
 
     if (items.length === 0)
@@ -528,6 +531,7 @@ function updateMentions()
     mentionState.items = items;
     mentionState.active = 0;
     mentionState.start = found.start;
+    mentionState.sigil = found.sigil;
     el.mentions.hidden = false;
     renderMentions();
 }
@@ -539,7 +543,7 @@ function acceptMention(item)
     const caret = el.text.selectionStart;
     const before = el.text.value.slice(0, mentionState.start);
     const after = el.text.value.slice(caret);
-    el.text.value = `${before}@${item.name} ${after}`;
+    el.text.value = `${before}${mentionState.sigil ?? "@"}${item.name} ${after}`;
     const at = before.length + item.name.length + 2;
     el.text.setSelectionRange(at, at);
     closeMentions();
