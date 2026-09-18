@@ -375,17 +375,20 @@ function cmdUpdate(workspace)
             report.push(`${name}: real dir present — DIVERGED copy, diff against ${target} before removing`);
     }
     const coord = coordJsonOf(workspace);
+    const project = coord?.project ?? path.basename(workspace);
     for (const skill of ["team", "recess"])
     {
-        const link = path.join(devin, "skills", `${coord?.project ?? path.basename(workspace)}-${skill}`);
-        const target = path.join(ROOT, "core", "skills", skill);
-        const stat = lstatSync(link, { throwIfNoEntry: false });
+        const dir = path.join(devin, "skills", `${project}-${skill}`);
+        const skillFile = path.join(dir, "SKILL.md");
+        const stat = lstatSync(dir, { throwIfNoEntry: false });
         if (!stat)
             report.push(`${skill} skill: MISSING (run coord init)`);
         else if (stat.isSymbolicLink())
-            report.push(`${skill} skill: linked → ${readlinkSync(link)}${readlinkSync(link) === target ? " (ok)" : " (STALE)"}`);
+            report.push(`${skill} skill: linked → ${readlinkSync(dir)} — stale layout, re-run coord init to render`);
+        else if (existsSync(skillFile) && readFileSync(skillFile, "utf8").includes(`name: ${project}-${skill}`))
+            report.push(`${skill} skill: rendered (ok)`);
         else
-            report.push(`${skill} skill: real dir present — local override`);
+            report.push(`${skill} skill: dir present but SKILL.md missing/misnamed — check ${skillFile}`);
     }
     for (const doc of ["COORDINATION.md", "ORGANICS.md"])
         report.push(`${doc}: ${existsSync(path.join(workspace, doc)) ? "present" : "missing (run coord init)"}`);
