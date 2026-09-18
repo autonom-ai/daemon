@@ -34,8 +34,10 @@ const AGENTS_DIR = path.join(ROOT, "agents");
 const TEMPLATES = path.join(ROOT, "templates");
 const PORTS_FILE = path.join(ROOT, "ports.json");
 const SERVER_JS = path.join(ROOT, "node_modules", "agent-coord-mcp", "dist", "server.js");
-const AGENTS_BLOCK_BEGIN = "<!-- devin-coord:begin -->";
-const AGENTS_BLOCK_END = "<!-- devin-coord:end -->";
+const AGENTS_BLOCK_BEGIN = "<!-- agent-coord:begin -->";
+const AGENTS_BLOCK_END = "<!-- agent-coord:end -->";
+const LEGACY_BLOCK_BEGIN = "<!-- devin-coord:begin -->";
+const LEGACY_BLOCK_END = "<!-- devin-coord:end -->";
 
 function fail(msg)
 {
@@ -164,6 +166,10 @@ ORGANICS.md to tune this team's default behavior.
 ${AGENTS_BLOCK_END}
 `;
     let current = existsSync(file) ? readFileSync(file, "utf8") : "";
+    // Workspaces wired before the rename still carry the devin-coord markers;
+    // translate them in place rather than appending a second block.
+    if (current.includes(LEGACY_BLOCK_BEGIN))
+        current = current.replace(LEGACY_BLOCK_BEGIN, AGENTS_BLOCK_BEGIN).replace(LEGACY_BLOCK_END, AGENTS_BLOCK_END);
     if (current.includes(AGENTS_BLOCK_BEGIN))
     {
         const re = new RegExp(`${AGENTS_BLOCK_BEGIN}[\\s\\S]*?${AGENTS_BLOCK_END}`);
