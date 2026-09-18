@@ -192,10 +192,10 @@ async function registerHuman()
     await store.addMember(teamRoom, human);
     // Default channels so the room list is not a single line. Topics are
     // hints, not rules — the team can redirect a conversation by moving rooms.
+    // Anything project-specific gets created by the people who need it, not
+    // seeded here.
     const defaultRooms = [
         { name: "general", topic: "the room — talk, decisions, anything the whole team sees" },
-        { name: "search", topic: "job-search runs — providers, longlists, live-status checks" },
-        { name: "eval", topic: "evaluate-roles and evaluate-role-deep — tiers, audits, disputed verdicts" },
         { name: "ui", topic: "the team chat UI and anything front-of-house" },
     ];
     for (const room of defaultRooms)
@@ -515,6 +515,10 @@ function parseArgs(argv)
 await registerHuman();
 setInterval(() => heartbeat().catch(() => { }), 30_000).unref();
 setInterval(pump, 400);
+// A data-frame heartbeat: half-open SSE connections only die on a failed
+// write, so without a periodic frame a silently-dead client looks live
+// forever. The client also uses these to detect a stalled stream.
+setInterval(() => broadcast({ type: "ping", ts: Date.now() }), 15_000).unref();
 
 server.listen(port, host, () =>
 {

@@ -4,10 +4,11 @@ const state = {
     messages: [],
     rooms: [],
     agents: [],
-    seen: JSON.parse(localStorage.getItem("jobs-chat-seen") ?? "{}"),
+    seen: JSON.parse(localStorage.getItem("coord-chat-seen") ?? "{}"),
     room: null,
     dm: null,
     human: "cet",
+    project: "team",
     teamRoom: "general",
     standDown: false,
     recess: { active: false },
@@ -96,6 +97,20 @@ function displayName(id)
     return (agent && agent.role) ? agent.role : id;
 }
 
+// A stable muted color per seat — deterministic, so a seat keeps its color
+// across workspaces and no per-project name list is needed. The human gets
+// the accent-warm --human tone rather than a palette entry.
+const SEAT_COLORS = ["#7fa6d9", "#6fbf9a", "#b08fd4", "#d1a06a", "#7fbfc4", "#c9879b", "#9ab06b", "#8f9ed0"];
+function seatColor(id)
+{
+    if (id === state.human)
+        return "var(--human)";
+    let hash = 0;
+    for (const ch of String(id))
+        hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    return SEAT_COLORS[hash % SEAT_COLORS.length];
+}
+
 function renderText(text)
 {
     const known = knownMentions();
@@ -162,7 +177,7 @@ function renderMessages()
         return `<li class="msg ${m.stream === "dm" ? "dm" : ""} ${ping} ${mine ? "me" : ""}" data-id="${esc(m.id ?? "")}">
             <span class="when" title="${new Date(m.ts).toLocaleString()}">${clock(m.ts)}</span>
             <div class="body">
-                <div class="meta"><span class="who ${esc(m.from)}">${esc(displayName(m.from))}</span>${badge}${tag}</div>
+                <div class="meta"><span class="who" style="color:${seatColor(m.from)}">${esc(displayName(m.from))}</span>${badge}${tag}</div>
                 <div class="text">${renderText(m.text ?? "")}</div>
             </div>
         </li>`;
@@ -266,9 +281,11 @@ function renderDocs(payload)
 function absorb(payload)
 {
     state.human = payload.human;
+    state.project = payload.project ?? state.project;
     state.teamRoom = payload.teamRoom;
     state.rooms = payload.rooms;
     state.agents = payload.agents;
+    document.title = `${state.project} team room`;
     if (!state.room && !state.dm)
         state.room = state.teamRoom;
     renderSidebar();
@@ -297,17 +314,25 @@ function markSeen()
         else if (state.dm && message.from === state.dm)
             state.seen[`dm:${state.dm}`] = Math.max(state.seen[`dm:${state.dm}`] ?? 0, message.ts);
     }
-    localStorage.setItem("jobs-chat-seen", JSON.stringify(state.seen));
+    localStorage.setItem("coord-chat-seen", JSON.stringify(state.seen));
 }
 
 let sseUp = false;
+let source = null;
+// The server pings every 15s, so a stream that has shown no frame at all in
+// 45s is silently dead — the browser's EventSource never reports a half-open
+// connection as an error. The watchdog below forces a real reconnect.
+let lastFrame = 0;
+const FRAME_STALE_MS = 45_000;
 
 function connect()
 {
-    const source = new EventSource("/api/stream");
+    source?.close();
+    source = new EventSource("/api/stream");
     source.onopen = () =>
     {
         sseUp = true;
+        lastFrame = Date.now();
         el.conn.textContent = "live";
         el.conn.className = "conn live";
         // Catch anything (rooms, docs, agents) that changed while we were down.
@@ -321,6 +346,7 @@ function connect()
     };
     source.onmessage = (event) =>
     {
+        lastFrame = Date.now();
         const payload = JSON.parse(event.data);
         if (payload.type === "message")
         {
@@ -337,8 +363,27 @@ function connect()
         }
         else if (payload.type === "standdown" || payload.type === "recess")
             refresh().catch(() => { });
+        // "ping" and "hello" only prove the stream is alive — lastFrame is
+        // already updated, nothing else to do.
     };
 }
+
+setInterval(() =>
+{
+    if (sseUp && Date.now() - lastFrame > FRAME_STALE_MS)
+    {
+        sseUp = false;
+        connect();
+    }
+}, 10_000);
+
+// Waking the tab is the other moment the view can be stale: whatever the
+// stream missed while the page was frozen is picked up here.
+document.addEventListener("visibilitychange", () =>
+{
+    if (document.visibilityState === "visible")
+        refresh().catch(() => { });
+});
 
 let flashed = false;
 function flash()
@@ -346,8 +391,8 @@ function flash()
     if (flashed)
         return;
     flashed = true;
-    document.title = "* Jobs team room";
-    setTimeout(() => { flashed = false; document.title = "Jobs team room"; }, 2000);
+    document.title = `* ${state.project} team room`;
+    setTimeout(() => { flashed = false; document.title = `${state.project} team room`; }, 2000);
 }
 
 async function send()
@@ -404,7 +449,7 @@ function renderMentions()
 {
     el.mentions.innerHTML = mentionState.items.map((item, index) =>
         `<li data-name="${esc(item.name)}" class="${index === mentionState.active ? "active" : ""}">
-            <span class="who ${esc(item.name)}">@${esc(item.name)}</span>
+            <span class="who" style="color:${seatColor(item.name)}">@${esc(item.name)}</span>
             <span class="meta">${esc(item.role)}</span>
         </li>`).join("");
 }
