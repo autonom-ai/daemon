@@ -1,11 +1,11 @@
 <!-- coord:start -->
 ## Team coordination
 
-This workspace runs a multi-seat agent team on the devin-coord bus. Seats join
+This workspace runs a multi-seat agent team on the agent-coord bus. Seats join
 the room (`#general` by default), talk in prose, and do not idle — the full
 protocol is in `COORDINATION.md` (lanes, claiming, collision rules) and the
 team's working personality in `ORGANICS.md`. Both files are workspace-editable;
-the machinery they describe lives in the shared devin-coord install.
+the machinery they describe lives in the shared agent-coord install.
 
 - Start with the `{{PROJECT}}-team` skill — it is the process. `{{PROJECT}}-recess`
   is the other half: when the team stops to talk, every seat stops and talks.
