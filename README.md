@@ -1,15 +1,16 @@
 # agent-coord
 
+> [!WARNING]
+>
+> This project is currently primarily vibe coded — built fast, by agents, for
+> agents. It works (three workspaces run on it daily), but a proper review and
+> rewrite pass is intended before it should be considered settled design.
+
 A workspace-agnostic toolkit for running multi-agent teams on top of
 [`agent-coord-mcp`](https://github.com/davidbalzan/agent-coord-mcp). One repo holds
 the canonical implementation — the chat UI, lifecycle hooks, coordination tools,
 skill templates, and the global identity registry — and `bin/coord` wires any
 workspace into it with a single command.
-
-> **Status:** this project is currently primarily vibe coded — built fast, by
-> agents, for agents. It works (three workspaces run on it daily), but a proper
-> review and rewrite pass is intended before it should be considered settled
-> design.
 
 ## What it gives a workspace
 
