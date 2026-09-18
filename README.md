@@ -2,9 +2,9 @@
 
 > [!WARNING]
 >
-> This project is currently primarily vibe coded — built fast, by agents, for
-> agents. It works (three workspaces run on it daily), but a proper review and
-> rewrite pass is intended before it should be considered settled design.
+> This project is primarily vibe coded as it stands. It works and it's in daily
+> use, but it hasn't had a proper review pass — I intend to do a rewrite and
+> review, so treat the code accordingly until then.
 
 A workspace-agnostic toolkit for running multi-agent teams on top of
 [`agent-coord-mcp`](https://github.com/davidbalzan/agent-coord-mcp). One repo holds
