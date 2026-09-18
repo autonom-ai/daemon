@@ -186,6 +186,25 @@ function copyTemplate(name, workspace)
     return "copied";
 }
 
+// Skills render {{PROJECT}} into their frontmatter name, so they cannot be
+// symlinks — copy each file with the substitution applied.
+function installSkill(skill, project, devin)
+{
+    const srcDir = path.join(ROOT, "core", "skills", skill);
+    const destDir = path.join(devin, "skills", `${project}-${skill}`);
+    if (!existsSync(srcDir))
+        return "missing-skill";
+    if (existsSync(destDir))
+        return "kept-local";
+    mkdirSync(destDir, { recursive: true });
+    for (const name of readdirSync(srcDir))
+    {
+        const raw = readFileSync(path.join(srcDir, name), "utf8");
+        writeFileSync(path.join(destDir, name), raw.replaceAll("{{PROJECT}}", project), "utf8");
+    }
+    return "rendered";
+}
+
 function cmdInit(workspace, flags)
 {
     if (!workspace)
@@ -228,8 +247,7 @@ function cmdInit(workspace, flags)
     const chatLink = ensureLink(CORE_CHAT, path.join(devin, "chat"));
     const hooksLink = ensureLink(CORE_HOOKS, path.join(devin, "hooks"));
     const toolsLink = ensureLink(CORE_TOOLS, path.join(workspace, "tools", "coord"));
-    const skillLinks = ["team", "recess"].map((skill) =>
-        `${skill}: ${ensureLink(path.join(ROOT, "core", "skills", skill), path.join(devin, "skills", `${project}-${skill}`))}`);
+    const skillResults = ["team", "recess"].map((skill) => `${skill}: ${installSkill(skill, project, devin)}`);
 
     const coordMd = copyTemplate("COORDINATION.md", workspace);
     const organics = copyTemplate("ORGANICS.md", workspace);
@@ -247,7 +265,7 @@ function cmdInit(workspace, flags)
     console.log(`  chat link:   ${chatLink}`);
     console.log(`  hooks link:  ${hooksLink}`);
     console.log(`  tools link:  ${toolsLink}`);
-    console.log(`  skill links: ${skillLinks.join("  ")}`);
+    console.log(`  skills:      ${skillResults.join("  ")}`);
     console.log(`  COORDINATION.md: ${coordMd}   ORGANICS.md: ${organics}`);
     console.log(`  next: coord chat start ${workspace}`);
 }
