@@ -46,33 +46,40 @@ const el = {
 };
 
 // The seats that can be pinged, plus @everyone. `cet` is excluded: pinging
-// yourself is not a ping.
-function mentionCandidates()
+// yourself is not a ping. Display names ping too (@rose hits rose), and
+// #room pings every member of that room.
+function mentionCandidates(sigil)
 {
+    if (sigil === "#")
+        return state.rooms.map((room) => ({ name: room.name, role: `every member of #${room.name}` }));
     const ret = [{ name: "everyone", role: "every seat in the room" }];
     for (const agent of state.agents)
         if (agent.id !== state.human)
+        {
             ret.push({ name: agent.id, role: displayName(agent.id) });
+            const display = displayName(agent.id);
+            if (display.toLowerCase() !== agent.id.toLowerCase())
+                ret.push({ name: display, role: `display name of ${agent.id}` });
+        }
+    return ret;
+}
+
+// display name (lowercase) → seat id, mirroring the server's ping resolution.
+function displayAliases()
+{
+    const ret = new Map();
+    for (const agent of state.agents)
+    {
+        const display = displayName(agent.id);
+        if (display.toLowerCase() !== agent.id.toLowerCase())
+            ret.set(display.toLowerCase(), agent.id);
+    }
     return ret;
 }
 
 function knownMentions()
 {
     return new Set(["everyone", ...state.agents.map((agent) => agent.id)]);
-}
-
-// Every @name in `text` that names a real seat. Unknown @words are left alone,
-// so an email address or a stray @ does not become a ping.
-function mentionTokens(text)
-{
-    const known = knownMentions();
-    const ret = [];
-    const pattern = /@([A-Za-z0-9_-]+)/g;
-    let match;
-    while ((match = pattern.exec(text ?? "")) !== null)
-        if (known.has(match[1]) && !ret.includes(match[1]))
-            ret.push(match[1]);
-    return ret;
 }
 
 // A ping is a room message that names cet or everyone. This is the "priority #1"
@@ -82,7 +89,19 @@ function isPing(message)
 {
     if (message.stream !== "room")
         return false;
-    return mentionTokens(message.text).some((name) => name === "everyone" || name === state.human);
+    const aliases = displayAliases();
+    const me = state.human.toLowerCase();
+    for (const match of (message.text ?? "").matchAll(/@([A-Za-z0-9_-]+)/g))
+    {
+        const name = match[1].toLowerCase();
+        if (name === "everyone" || name === "all" || name === me || aliases.get(name) === state.human)
+            return true;
+    }
+    // #room pings its members — the human is in every room the server seeded.
+    for (const match of (message.text ?? "").matchAll(/#([A-Za-z0-9_-]+)/g))
+        if (state.rooms.some((room) => room.name === match[1] && room.members.includes(state.human)))
+            return true;
+    return false;
 }
 
 function esc(text)
@@ -94,7 +113,12 @@ function esc(text)
 function displayName(id)
 {
     const agent = state.agents.find((a) => a.id === id);
-    return (agent && agent.role) ? agent.role : id;
+    const role = agent?.role;
+    if (typeof role === "string" && role)
+        return role;
+    if (typeof role === "object" && role?.displayName)
+        return role.displayName;
+    return id;
 }
 
 // A stable muted color per seat — deterministic, so a seat keeps its color
@@ -114,15 +138,25 @@ function seatColor(id)
 function renderText(text)
 {
     const known = knownMentions();
+    const aliases = displayAliases();
+    const me = state.human.toLowerCase();
     return esc(text)
         .replace(/`([^`\n]+)`/g, "<code>$1</code>")
         .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
         .replace(/(https?:\/\/[^\s<)&"'`]+[^\s<).,;:!?"'`])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
-        .replace(/@([A-Za-z0-9_-]+)/g, (full, name) =>
+        .replace(/([@#])([A-Za-z0-9_-]+)/g, (full, sigil, name) =>
         {
-            if (!known.has(name))
+            if (sigil === "#")
+            {
+                if (!state.rooms.some((room) => room.name === name))
+                    return full;
+                return `<span class="mention">#${esc(name)}</span>`;
+            }
+            const lower = name.toLowerCase();
+            const isMe = lower === me || aliases.get(lower) === state.human;
+            if (!known.has(name) && !aliases.has(lower) && !isMe)
                 return full;
-            const extra = name === "everyone" ? " everyone" : (name === state.human ? " you" : "");
+            const extra = lower === "everyone" ? " everyone" : (isMe ? " you" : "");
             return `<span class="mention${extra}">@${esc(name)}</span>`;
         });
 }
@@ -167,17 +201,29 @@ function visible(message)
 function renderMessages()
 {
     const shown = state.messages.filter(visible);
+    let prev = null;
     el.messages.innerHTML = shown.map((m) =>
     {
         const mine = m.from === state.human;
+        // A run of consecutive messages from one sender shows the name once —
+        // on the first. A badge or a ping still earns its own meta row, and a
+        // stream or room change ends the run even from the same sender.
+        const merged = prev !== null
+            && prev.from === m.from
+            && prev.stream === m.stream
+            && (prev.room ?? null) === (m.room ?? null)
+            && !m.kind
+            && !isPing(m);
+        prev = m;
         const tag = m.stream === "dm" ? `<span class="tag">dm ${mine ? "→ " + esc(displayName(m.to ?? "")) : "from " + esc(displayName(m.from))}</span>`
             : (state.room ? "" : `<span class="tag">#${esc(m.room ?? "")}</span>`);
         const badge = m.kind ? `<span class="badge ${esc(m.kind)}">${esc(m.kind)}</span>` : "";
         const ping = isPing(m) ? "ping" : "";
-        return `<li class="msg ${m.stream === "dm" ? "dm" : ""} ${ping} ${mine ? "me" : ""}" data-id="${esc(m.id ?? "")}">
+        const meta = merged ? "" : `<div class="meta"><span class="who" style="color:${seatColor(m.from)}">${esc(displayName(m.from))}</span>${badge}${tag}</div>`;
+        return `<li class="msg ${m.stream === "dm" ? "dm" : ""} ${ping} ${mine ? "me" : ""} ${merged ? "merged" : ""}" data-id="${esc(m.id ?? "")}">
             <span class="when" title="${new Date(m.ts).toLocaleString()}">${clock(m.ts)}</span>
             <div class="body">
-                <div class="meta"><span class="who" style="color:${seatColor(m.from)}">${esc(displayName(m.from))}</span>${badge}${tag}</div>
+                ${meta}
                 <div class="text">${renderText(m.text ?? "")}</div>
             </div>
         </li>`;

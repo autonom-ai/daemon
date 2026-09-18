@@ -263,6 +263,13 @@ input[type="checkbox"]:checked::after { transform: translateX(13px); background:
     align-items: flex-start;
 }
 
+/* A continuation bubble: no name row, hugging the message above it. */
+.msg.merged
+{
+    padding: 1px 0;
+    margin-top: -2px;
+}
+
 .msg .when { color: var(--faint); font-size: 11px; padding-top: 3px; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
 .msg .body { min-width: 0; max-width: 72%; }
 .msg .who { font-weight: 600; font-size: 12.5px; }
