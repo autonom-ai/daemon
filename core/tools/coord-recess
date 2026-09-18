@@ -6,12 +6,29 @@
 #   tools/coord-recess status
 #
 # Starting one writes the marker the lifecycle hooks read and announces the
-# recess in #general. Any seat can call it; so can the user, from the chat UI.
+# recess in the team room. Any seat can call it; so can the user, from the
+# chat UI.
 
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export DEVIN_PROJECT_DIR="${DEVIN_PROJECT_DIR:-$root}"
+canonical="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../.." && pwd)"
+root="${DEVIN_PROJECT_DIR:-}"
+if [ -z "$root" ]; then
+    dir="$(pwd)"
+    while [ "$dir" != "/" ]; do
+        if [ -d "$dir/.devin" ]; then
+            root="$dir"
+            break
+        fi
+        dir="$(dirname "$dir")"
+    done
+fi
+if [ -z "$root" ]; then
+    echo "coord-recess: cannot locate the workspace (.devin/ not found above cwd; set DEVIN_PROJECT_DIR)" >&2
+    exit 1
+fi
+
+export DEVIN_PROJECT_DIR="$root"
 export COORD_SEAT="${COORD_SEAT:-${USER:-unknown}}"
 
-exec node "$root/.devin/chat/recess-cli.mjs" "$@"
+exec node "$canonical/core/chat/recess-cli.mjs" "$@"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Team chat UI — cet's seat on the jobs bus.
+# Team chat UI — the user's seat on this workspace's coord bus.
 #
-#   tools/coord-web                 start the chat UI (defaults: 127.0.0.1:7777, seat $USER)
+#   tools/coord-web                 start the chat UI (port from .devin/coord.json)
 #   tools/coord-web --port 8080     somewhere else
 #   tools/coord-web --restart       kill the listener on the port and relaunch detached
 #   tools/coord-web --stand-down    release the never-end stop hook so seats can close turns
@@ -14,7 +14,23 @@
 
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+canonical="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../.." && pwd)"
+root="${DEVIN_PROJECT_DIR:-}"
+if [ -z "$root" ]; then
+    dir="$(pwd)"
+    while [ "$dir" != "/" ]; do
+        if [ -d "$dir/.devin" ]; then
+            root="$dir"
+            break
+        fi
+        dir="$(dirname "$dir")"
+    done
+fi
+if [ -z "$root" ]; then
+    echo "coord-web: cannot locate the workspace (.devin/ not found above cwd; set DEVIN_PROJECT_DIR)" >&2
+    exit 1
+fi
+
 stand_down="$root/.devin/collaboration/stand-down"
 restart=0
 
@@ -41,14 +57,19 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+port="${COORD_CHAT_PORT:-}"
+if [ -z "$port" ]; then
+    port="$(node -e 'try{const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(c.port??c.chatPort??"")}catch{console.log("")}' "$root/.devin/coord.json" 2>/dev/null || true)"
+fi
+prev=""
+for arg in "$@"; do
+    case "$arg" in --port=*) port="${arg#--port=}" ;; esac
+    [ "$prev" = "--port" ] && port="$arg"
+    prev="$arg"
+done
+port="${port:-7777}"
+
 if [ "$restart" -eq 1 ]; then
-    port="${JOBS_CHAT_PORT:-7778}"
-    prev=""
-    for arg in "$@"; do
-        case "$arg" in --port=*) port="${arg#--port=}" ;; esac
-        [ "$prev" = "--port" ] && port="$arg"
-        prev="$arg"
-    done
     pid="$(ss -tlnpH 2>/dev/null | awk -v port=":$port" '$4 ~ port"$"' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
     if [ -n "$pid" ]; then
         kill "$pid"
@@ -58,7 +79,7 @@ if [ "$restart" -eq 1 ]; then
         done
     fi
     mkdir -p "$root/.devin/agent-coord/state"
-    setsid nohup node "$root/.devin/chat/server.mjs" "$@" >>"$root/.devin/agent-coord/state/chat-server.log" 2>&1 &
+    setsid nohup env DEVIN_PROJECT_DIR="$root" node "$canonical/core/chat/server.mjs" "$@" >>"$root/.devin/agent-coord/state/chat-server.log" 2>&1 &
     echo "coord-web restarted detached on port $port (pid $!), log: .devin/agent-coord/state/chat-server.log"
     exit 0
 fi
@@ -67,4 +88,4 @@ if [ -f "$stand_down" ] && [ $# -eq 0 ]; then
     echo "note: stand-down is active; seats may end their turns until you run --resume" >&2
 fi
 
-exec node "$root/.devin/chat/server.mjs" "$@"
+exec env DEVIN_PROJECT_DIR="$root" node "$canonical/core/chat/server.mjs" "$@"

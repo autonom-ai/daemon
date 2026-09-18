@@ -376,19 +376,19 @@ function cmdUpdate(workspace)
     }
     const coord = coordJsonOf(workspace);
     const project = coord?.project ?? path.basename(workspace);
-    for (const skill of ["team", "recess"])
+    for (const [label, configured] of [["team", coord?.teamSkill ?? `${project}-team`], ["recess", coord?.recessSkill ?? `${project}-recess`]])
     {
-        const dir = path.join(devin, "skills", `${project}-${skill}`);
+        const dir = path.join(devin, "skills", configured);
         const skillFile = path.join(dir, "SKILL.md");
         const stat = lstatSync(dir, { throwIfNoEntry: false });
         if (!stat)
-            report.push(`${skill} skill: MISSING (run coord init)`);
+            report.push(`${label} skill (${configured}): MISSING`);
         else if (stat.isSymbolicLink())
-            report.push(`${skill} skill: linked → ${readlinkSync(dir)} — stale layout, re-run coord init to render`);
-        else if (existsSync(skillFile) && readFileSync(skillFile, "utf8").includes(`name: ${project}-${skill}`))
-            report.push(`${skill} skill: rendered (ok)`);
+            report.push(`${label} skill (${configured}): linked → ${readlinkSync(dir)}`);
+        else if (existsSync(skillFile))
+            report.push(`${label} skill (${configured}): present`);
         else
-            report.push(`${skill} skill: dir present but SKILL.md missing/misnamed — check ${skillFile}`);
+            report.push(`${label} skill (${configured}): dir present but no SKILL.md — check ${skillFile}`);
     }
     for (const doc of ["COORDINATION.md", "ORGANICS.md"])
         report.push(`${doc}: ${existsSync(path.join(workspace, doc)) ? "present" : "missing (run coord init)"}`);
