@@ -206,20 +206,22 @@ function renderMessages(shouldScroll = true)
     {
         const mine = m.from === state.human;
         // A run of consecutive messages from one sender shows the name once —
-        // on the first. A badge or a ping still earns its own meta row, and a
-        // stream or room change ends the run even from the same sender.
+        // on the first. A ping still earns its full meta row, and a stream or
+        // room change ends the run even from the same sender. A kind badge on a
+        // merged message keeps a slim meta row so the badge is not hidden.
         const merged = prev !== null
             && prev.from === m.from
             && prev.stream === m.stream
             && (prev.room ?? null) === (m.room ?? null)
-            && !m.kind
             && !isPing(m);
         prev = m;
         const tag = m.stream === "dm" ? `<span class="tag">dm ${mine ? "→ " + esc(displayName(m.to ?? "")) : "from " + esc(displayName(m.from))}</span>`
             : (state.room ? "" : `<span class="tag">#${esc(m.room ?? "")}</span>`);
         const badge = m.kind ? `<span class="badge ${esc(m.kind)}">${esc(m.kind)}</span>` : "";
         const ping = isPing(m) ? "ping" : "";
-        const meta = merged ? "" : `<div class="meta"><span class="who" style="color:${seatColor(m.from)}">${esc(displayName(m.from))}</span>${badge}${tag}</div>`;
+        const meta = merged
+            ? (badge || tag ? `<div class="meta">${badge}${tag}</div>` : "")
+            : `<div class="meta"><span class="who" style="color:${seatColor(m.from)}">${esc(displayName(m.from))}</span>${badge}${tag}</div>`;
         return `<li class="msg ${m.stream === "dm" ? "dm" : ""} ${ping} ${mine ? "me" : ""} ${merged ? "merged" : ""}" data-id="${esc(m.id ?? "")}">
             <span class="when" title="${new Date(m.ts).toLocaleString()}">${clock(m.ts)}</span>
             <div class="body">
