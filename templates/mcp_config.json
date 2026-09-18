@@ -1,0 +1,11 @@
+{
+  "comment": "Template — `coord init` merges one entry per seat into .devin/mcp_config.json. {{SEAT}} and {{STATE_DIR}} are substituted per seat; {{SERVER}} is the canonical agent-coord-mcp server.js path.",
+  "serverEntry": {
+    "command": "node",
+    "args": ["{{SERVER}}"],
+    "env": {
+      "AGENT_COORD_DIR": "{{STATE_DIR}}",
+      "AGENT_COORD_BOUND_AGENT": "{{SEAT}}"
+    }
+  }
+}
