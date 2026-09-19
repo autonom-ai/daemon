@@ -10,7 +10,7 @@
 // Release: `.devin/collaboration/stand-down` (tools/coord-web --stand-down, or
 // the button in the chat UI). While it exists, stopping is allowed again.
 
-import { CONFIG, HUMAN_SEAT, TEAM_ROOM, detectIdentity, emit, formatEntries, recess, standDown, unread } from "./coord.mjs";
+import { CONFIG, HUMAN_SEAT, TEAM_ROOM, detectIdentity, emit, formatEntries, recess, seatFor, standDown, unread } from "./coord.mjs";
 
 if (standDown())
     process.exit(0);
@@ -20,10 +20,14 @@ const { dms, room } = unread(seat);
 const recessState = recess();
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
 
-// Identical cadences make a convoy: three seats on the same 60s wait wake and
-// reply in lockstep. A stable per-seat offset (45–105s, hashed from the
-// identity) staggers the wakes so backlog arrives already-batched.
-const seatWaitMs = 45_000 + ([...(seat ?? "x")].reduce((a, c) => a + c.charCodeAt(0), 0) % 5) * 15_000;
+// Identical cadences make a convoy: three seats on the same wait wake and
+// reply in lockstep. The stagger must sit UNDER the bus's 60s wait clamp, so
+// we key on the seat letter (stable across persona renames): a→30s, b→40s,
+// c→50s, d→60s; unseated identities fall back to a name hash in the same range.
+const seatIdx = "abcd".indexOf(seatFor(seat) ?? "");
+const seatWaitMs = seatIdx >= 0
+    ? 30_000 + seatIdx * 10_000
+    : 30_000 + ([...(seat ?? "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0) >>> 0 % 4) * 10_000;
 
 const lines = recessState.active
     ? [

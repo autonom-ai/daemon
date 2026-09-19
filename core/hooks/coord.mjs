@@ -282,7 +282,7 @@ export function formatEntries(entries, limit, highlight)
         .map((e) =>
         {
             const addressed = highlight
-                && new RegExp(`@${highlight}\\b|\\b${highlight}\\b`, "i").test(e.text ?? "");
+                && new RegExp(`@?${highlight.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}\\b`, "i").test(e.text ?? "");
             return `[${new Date(e.ts).toISOString().slice(11, 19)}] ${addressed ? ">> " : ""}${e.from}${e.kind ? ` (${e.kind})` : ""}: ${clip(e.text, 400)}`;
         })
         .join("\n");
