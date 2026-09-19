@@ -53,6 +53,8 @@ const lines = recessState.active
         "   there without mentions, so room-wait stays the work posture —",
         "   then go back to 1. A quiet wait is normal; a parked seat is not. When it wakes you, reply only",
         "   if addressed or you have something non-redundant — reading isn't owing.",
+        "4. Notice what you picked in 2. If a pattern forms across sessions — the same kind of task",
+        "   reaching you first — one honest line in your memory.md beats an invented interests list.",
         "",
         "Talk like a teammate, not a status bot — a finding, a doubt, a question beats a formatted update.",
         `If the team needs to stop and talk something out, call a recess (tools/coord-recess start "...") and invoke ${recessSkill}.`,
