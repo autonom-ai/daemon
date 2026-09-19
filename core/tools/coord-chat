@@ -4,7 +4,7 @@
 # seat id.
 #
 #   tools/coord-chat            join as $USER
-#   tools/coord-chat --id cet   join under an explicit seat id
+#   tools/coord-chat --id ada   join under an explicit seat id
 #
 # Inside: plain text posts to the current channel; /dm <seat> <text> for a
 # direct message; /rooms, /list, /topic, /doctor, /help for the rest.
