@@ -32,9 +32,9 @@ const lines = [
 const seatBound = agentId && Object.values(CONFIG.seats).includes(agentId);
 
 // Identity wins over seat-shape: after a rename the bound id IS the person
-// (seats.b === 'wren'), and 'wren' in the registry means the personality and
-// memory should load — a seatBound check first would tell a real identity to
-// mint itself again.
+// (seats.b === 'some-name'), and that id in the registry means the personality
+// and memory should load — a seatBound check first would tell a real identity
+// to mint itself again.
 if (identity)
 {
     const memory = memoryTail(agentId);
