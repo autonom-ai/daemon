@@ -304,6 +304,9 @@ function renderComposeMode()
     el.composeMode.innerHTML = mode === "dm"
         ? `direct to <strong>${esc(displayName(name))}</strong> — only ${esc(displayName(name))} sees this.<button type="button" id="compose-mode-exit">send to #general instead</button>`
         : `to <strong>#${esc(name)}</strong> — everyone in the room sees this`;
+    el.text.placeholder = mode === "dm"
+        ? `Direct to ${displayName(name)} — only they see it. Enter sends, shift+enter for a newline.`
+        : `To #${name} — enter sends, shift+enter for a newline. @ pings a seat or display name, # pings a room.`;
 }
 
 function openDm(seat)
