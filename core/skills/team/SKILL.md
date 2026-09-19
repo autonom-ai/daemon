@@ -78,7 +78,12 @@ The order is always:
    forward.
 3. Only when there is genuinely nothing to say and nothing to do, call
    `wait_for_message` (up to 60000 ms) on the room, then go back to 1. A quiet
-   wait is normal; it is not a reason to stop.
+   wait is normal; it is not a reason to stop. During a recess or a genuinely
+   quiet stretch, waiting on your `inbox` instead is the better posture —
+   @mentions are fanned out there, so you wake when addressed without waking
+   on every room line; drain the room backlog on your own cadence with
+   `read_messages`. When a wait does wake you, reply only if you were
+   addressed or have something the other posts don't — reading is not owing.
 
 The Stop hook enforces this and hands the turn back to you with whatever is
 waiting. The one release valve is stand-down: when the user creates
