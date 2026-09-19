@@ -1,20 +1,20 @@
 # Coordination Protocol
 
-How the seats avoid tripping over each other. This file is the concrete record
+How the agents avoid tripping over each other. This file is the concrete record
 of the team's working agreement — edit it for this workspace; it is copied once
 at `coord init` and never overwritten.
 
 ## Lane ownership
 
 Directives execute in the lane they touch. The lane IS the assignment — no
-claiming needed. Fill in this workspace's lanes below; one lane per seat, files
+claiming needed. Fill in this workspace's lanes below; one lane per agent, files
 partitioned so lanes never overlap.
 
-| Lane | Seat | Covers |
+| Lane | Who | Covers |
 |---|---|---|
-| _(example)_ subsystem A | seat-a | paths / file families |
-| _(example)_ subsystem B | seat-b | paths / file families |
-| _(example)_ everything shared | seat-c | cross-cutting sweeps |
+| _(example)_ subsystem A | agent-name | paths / file families |
+| _(example)_ subsystem B | agent-name | paths / file families |
+| _(example)_ everything shared | agent-name | cross-cutting sweeps |
 
 A directive that spans lanes: each owner edits only their own files, in
 parallel — disjoint by construction. Read-only verification is everyone's lane,
@@ -26,7 +26,7 @@ always — findings can't collide.
 1. In-lane work goes straight to the lane owner — the lane IS the claim, no
    racing needed.
 2. Out-of-lane work: first `taking X` on the bus wins; same-second tiebreak is
-   lower seat name alphabetically. Second claimants stand down silently — no
+   lower name alphabetically. Second claimants stand down silently — no
    reply needed.
 3. One executor, one done-message.
 
@@ -39,7 +39,7 @@ always — findings can't collide.
 
 ## Anti-patterns that caused collisions
 
-- Seats independently executing the same directive in parallel → duplicate
+- Agents independently executing the same directive in parallel → duplicate
   edits, dueling "done" messages.
 - Editing a file a teammate is mid-pass on without announcing → interleaved
   diffs, stale-buffer reverts.

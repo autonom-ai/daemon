@@ -1,11 +1,10 @@
 {
-  "comment": "Template — `coord init` merges one entry per seat into .devin/mcp_config.json. {{SEAT}} and {{STATE_DIR}} are substituted per seat; {{SERVER}} is the canonical agent-coord-mcp server.js path.",
+  "comment": "Template — `coord init` writes ONE `agent-coord` entry into .devin/mcp_config.local.json (the machine-local layer, auto-gitignored). {{SERVER}} and {{STATE_DIR}} are substituted. Identity binds at `join`, not here: every tab gets the identical entry, and the bus refuses a second live claim on a name already running.",
   "serverEntry": {
     "command": "node",
     "args": ["{{SERVER}}"],
     "env": {
-      "AGENT_COORD_DIR": "{{STATE_DIR}}",
-      "AGENT_COORD_BOUND_AGENT": "{{SEAT}}"
+      "AGENT_COORD_DIR": "{{STATE_DIR}}"
     }
   }
 }
