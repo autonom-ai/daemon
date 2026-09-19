@@ -261,6 +261,7 @@ function renderSidebar()
 // out of the list entirely unless it left unread pings (those dim instead).
 // The list doubles as the DM target picker, so a hidden seat cannot be
 // written to at all — hiding is a reachability claim, not just decluttering.
+// Your own seat is excluded for the same reason: you cannot DM yourself.
 const DM_INACTIVE_MS = 30 * 60_000;
 
 function renderDms()
@@ -270,22 +271,18 @@ function renderDms()
         && message.ts > (state.seen[`dm:${agent.id}`] ?? 0)).length;
 
     const shown = state.agents
-        .filter((agent) => agent.id === state.human
-            || Date.now() - (agent.lastActive ?? 0) < DM_INACTIVE_MS
-            || unreadFor(agent) > 0)
-        .sort((a, b) => (a.id === state.human ? -1 : b.id === state.human ? 1 : 0)
-            || (b.lastActive ?? 0) - (a.lastActive ?? 0));
+        .filter((agent) => agent.id !== state.human
+            && (Date.now() - (agent.lastActive ?? 0) < DM_INACTIVE_MS || unreadFor(agent) > 0))
+        .sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0));
 
     el.dms.innerHTML = shown.map((agent) =>
     {
-        const isMe = agent.id === state.human;
         const unread = unreadFor(agent);
         const active = state.dm === agent.id ? "active" : "";
         const stale = agent.online ? "" : "offline";
-        const label = esc(displayName(agent.id));
-        return `<li class="${active} ${stale} ${isMe ? "me" : ""}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
-            <span class="name">${label}</span>
-            <span class="meta">${isMe ? "" : unread ? `${unread} unread` : "1:1"}</span>
+        return `<li class="${active} ${stale}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
+            <span class="name">${esc(displayName(agent.id))}</span>
+            <span class="meta">${unread ? `${unread} unread` : "1:1"}</span>
         </li>`;
     }).join("");
 }
