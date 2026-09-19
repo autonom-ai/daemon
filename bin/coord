@@ -328,6 +328,39 @@ function listenerPid(port)
     return null;
 }
 
+// The respawn wrapper's command line embeds this workspace's logFile path —
+// the reliable handle for finding wrappers, including ones started before
+// pidfiles existed. Each wrapper is its own process-group leader (detached),
+// so killing -pid takes the bash loop and the node child down together.
+function wrapperPids(workspace)
+{
+    const logFile = path.join(stateDirOf(workspace), "chat-server.log");
+    try
+    {
+        const out = execFileSync("pgrep", ["-f", logFile], { encoding: "utf8" });
+        return out.split("\n").filter(Boolean).map(Number);
+    }
+    catch { return []; }
+}
+
+function killChat(workspace, port)
+{
+    const stateDir = stateDirOf(workspace);
+    const pidFile = path.join(stateDir, "chat-server.pid");
+    const targets = new Set(wrapperPids(workspace));
+    if (existsSync(pidFile))
+    {
+        targets.add(Number(readFileSync(pidFile, "utf8").trim()));
+        unlinkSync(pidFile);
+    }
+    for (const pid of targets)
+        try { process.kill(-pid); } catch { }
+    const pid = listenerPid(port);
+    if (pid)
+        try { process.kill(Number(pid)); } catch { }
+    return targets.size > 0 || pid !== null;
+}
+
 function cmdChat(action, workspace, flags)
 {
     if (!workspace)
@@ -346,17 +379,25 @@ function cmdChat(action, workspace, flags)
     }
     if (action === "stop" || action === "restart")
     {
-        const pid = listenerPid(port);
-        if (pid)
-        {
-            try { process.kill(Number(pid)); } catch { }
-            console.log(`killed pid ${pid} on :${port}`);
-        }
+        if (!killChat(workspace, port))
+            console.log(`chat: nothing running for '${project}' on :${port}`);
+        else
+            console.log(`chat stopped for '${project}' on :${port}`);
         if (action === "stop")
             return;
     }
     if (action === "start" || action === "restart")
     {
+        // A live wrapper alone means running — the node child may still be
+        // binding the port, so listenerPid is not a reliable dedupe signal
+        // this early. `chat restart` is the escape for a wrapper whose child
+        // is crash-looping.
+        const existing = wrapperPids(workspace);
+        if (existing.length > 0)
+        {
+            console.log(`chat already running for '${project}' on :${port} (wrapper pid ${existing[0]})`);
+            return;
+        }
         const env = {
             ...process.env,
             DEVIN_PROJECT_DIR: workspace,
@@ -369,6 +410,7 @@ function cmdChat(action, workspace, flags)
             `while true; do node "${path.join(CORE_CHAT, "server.mjs")}" >> "${logFile}" 2>&1; echo "[respawn] exited $(date -Iseconds)" >> "${logFile}"; sleep 1; done`],
             { detached: true, stdio: "ignore", env });
         child.unref();
+        writeFileSync(path.join(stateDirOf(workspace), "chat-server.pid"), `${child.pid}\n`, "utf8");
         console.log(`chat started for '${project}' on http://127.0.0.1:${port} (log ${logFile})`);
     }
 }
