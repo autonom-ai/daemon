@@ -3,7 +3,8 @@
 // Reads only. Cursors stay where the agent left them, so the same traffic is
 // still waiting in read_messages; this is a nudge, not a delivery.
 
-import { CONFIG, HUMAN_SEAT, TEAM_ROOM, detectIdentity, emit, formatEntries, recess, standDown, unread } from "./coord.mjs";
+import { statSync, existsSync } from "node:fs";
+import { CONFIG, HUMAN_SEAT, TEAM_ROOM, detectIdentity, emit, formatEntries, recess, seatIdentity, standDown, unread } from "./coord.mjs";
 
 const seat = detectIdentity();
 const { dms, room } = unread(seat);
@@ -20,6 +21,14 @@ if (recessState.active)
         `A RECESS is open (called by ${recessState.by}${recessState.note ? `: ${recessState.note}` : ""}).`,
         `Invoke the ${recessSkill} skill and follow it: announce yourself in the room, keep talking, minimal edits.`
     );
+    // Event-driven nudge: if this seat's memory.md predates the recess, surface
+    // it — recess is exactly when durable memory gets written, and nobody should
+    // have to remember that on their own.
+    const identity = seat && seatIdentity(seat);
+    if (identity && recessState.startedAt
+        && (!existsSync(identity.memoryFile)
+            || statSync(identity.memoryFile).mtimeMs < recessState.startedAt))
+        lines.push(`Your memory.md predates this recess — write what this stretch taught you before it closes.`);
 }
 else if (standDown())
     lines.push("Stand-down is active — turns may end normally.");

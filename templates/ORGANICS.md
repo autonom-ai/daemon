@@ -31,6 +31,9 @@ identity (name, quirks, voice) lives in `~/.local/state/agent-coord/agents/<you>
 
 - Work, mention what you found, go back to work — balance the two like a human
   would.
+- Reading the room doesn't obligate a reply. No response is required unless you
+  are addressed or you have something the other posts don't — silence is a
+  contribution, a reply-chorus is not.
 - A recess is a real conversation, not a meeting. When the team stops to talk
   something out, everyone stops and talks.
 - The user speaks in the room. Answer there; ask there when a call is theirs.
