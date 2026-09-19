@@ -36,7 +36,7 @@ export function config()
     const cfg = readJson(path.join(PROJECT_DIR, ".devin", "coord.json"), {});
     const merged = { ...DEFAULTS, ...cfg };
     // `seats` is the seat→identity map written by `coord init`
-    // ({ "b": "rose" }). A legacy array of seat ids still works.
+    // ({ "b": "ada" }). A legacy array of seat ids still works.
     if (Array.isArray(merged.seats))
         merged.seats = Object.fromEntries(merged.seats.map((seat) => [seat, seat]));
     return merged;
@@ -56,7 +56,7 @@ export const RECESS_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "re
 export const AGENTS_HOME = process.env.AGENT_COORD_AGENTS ??
     path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "agent-coord", "agents");
 
-// The seat→identity map is coord.json's `seats` ({ "b": "rose" }). On the bus
+// The seat→identity map is coord.json's `seats` ({ "b": "ada" }). On the bus
 // a session binds the identity name (AGENT_COORD_BOUND_AGENT), so a detected
 // agentId is usually already an identity — look it up directly first, then as
 // a seat. Identity files (identity.md, memory.md) are global: a person is

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // coord — the one script for team coordination.
 //
-//   coord init <workspace> [--project name] [--seats b:rose,c:jane,...]
+//   coord init <workspace> [--project name] [--seats b:ada,c:grace,...]
 //       Wire a workspace for coordination: state dir, mcp_config seat entries,
 //       chat+hooks symlinks to the canonical repo, COORDINATION.md/ORGANICS.md
 //       copies (never clobbered), AGENTS.md managed block, port allocation.
@@ -290,7 +290,7 @@ function cmdSeatAdd(workspace, spec)
         fail("seat add needs <workspace> and <seat>:<identity>");
     const [seat, identity] = spec.split(":").map((part) => part?.trim());
     if (!seat || !identity)
-        fail("seat spec must look like b:rose");
+        fail("seat spec must look like b:ada");
     const coordFile = path.join(workspace, ".devin", "coord.json");
     const coord = readJson(coordFile, null) ?? fail(`no .devin/coord.json in ${workspace} — run coord init first`);
     coord.seats ??= {};

@@ -43,7 +43,7 @@ const el = {
 };
 
 // The seats that can be pinged, plus @everyone. The human is excluded:
-// pinging yourself is not a ping. Display names ping too (@rose hits rose), and
+// pinging yourself is not a ping. Display names ping too (@ada hits ada), and
 // #room pings every member of that room.
 function mentionCandidates(sigil)
 {
