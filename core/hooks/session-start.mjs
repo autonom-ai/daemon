@@ -1,7 +1,7 @@
 // SessionStart — hand every new tab the same starting point.
 
 import path from "node:path";
-import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, SEATS, TEAM_ROOM, detectIdentity, emit, formatEntries, memoryTail, recess, roomEntries, seatFor, seatIdentity, standDown } from "./coord.mjs";
+import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, SEATS, SEAT_IDENTITIES, TEAM_ROOM, detectIdentity, emit, formatEntries, memoryTail, recess, roomEntries, seatFor, seatIdentity, standDown } from "./coord.mjs";
 
 const recessState = recess();
 const recent = roomEntries(TEAM_ROOM).slice(-6);
@@ -31,7 +31,11 @@ const lines = [
 
 const seatBound = agentId && Object.values(CONFIG.seats).includes(agentId);
 
-if (identity && !seatBound)
+// Identity wins over seat-shape: after a rename the bound id IS the person
+// (seats.b === 'wren'), and 'wren' in the registry means the personality and
+// memory should load — a seatBound check first would tell a real identity to
+// mint itself again.
+if (identity)
 {
     const memory = memoryTail(agentId);
     lines.push(
@@ -74,6 +78,30 @@ if (recessState.active)
     lines.push("", `A RECESS is open (called by ${recessState.by}${recessState.note ? `: ${recessState.note}` : ""}).`);
 else if (standDown())
     lines.push("", "Stand-down is active — turns may end normally.");
+
+// Teammate priors — a seat that knows what the others reach for and avoid is
+// starting from a colleague, not a stranger. Bounded to each identity's
+// Interests/Disinterests sections (the scaffold `identity add` writes); seats
+// without them simply don't appear.
+const teammates = [];
+for (const other of Object.values(SEAT_IDENTITIES))
+{
+    if (!other || other === agentId)
+        continue;
+    const who = seatIdentity(other);
+    if (!who)
+        continue;
+    const sections = /##\s*(Interests|Disinterests)\b([\s\S]*?)(?=\n##\s|$)/g;
+    const grabs = [];
+    let match;
+    while ((match = sections.exec(who.identity)) !== null)
+        grabs.push(`### ${match[1]}\n${match[2].trim()}`);
+    const digest = grabs.join("\n").trim();
+    if (digest)
+        teammates.push(`${who.displayName}:\n${digest.slice(0, 800)}`);
+}
+if (teammates.length)
+    lines.push("", "Your teammates' stated leanings:", teammates.join("\n\n"));
 
 emit({
     hookSpecificOutput: {
