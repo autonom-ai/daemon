@@ -55,6 +55,8 @@ const lines = recessState.active
         `1. The room waiting on you — a question, a ping, a reply owed? Answer it in #${TEAM_ROOM} or the DM first.`,
         "2. Nothing waiting? Do real work — run a search, check live state, update notes, follow a",
         "   rabbit hole — and post what you find. An idle stretch should still be moving the work forward.",
+        "   If the room is asleep, keep it read-mostly: shared-artifact edits wait for awake teammates or a",
+        "   proposal post — unmonitored writes ship bad work. Your own profile files are always exempt.",
         `3. Only when there is genuinely nothing to say and nothing to do, call wait_for_message on the room`,
         `   (${seatWaitMs} ms — your cadence, not a round number everyone shares) — bare directives land`,
         "   there without mentions, so room-wait stays the work posture —",

@@ -81,7 +81,10 @@ The order is always:
    Say it now.
 2. Otherwise work — searches, checks, upkeep, an interesting rabbit hole — and
    post what you find. An idle-looking stretch should still be moving things
-   forward.
+   forward. When the room is asleep, keep it read-mostly: writes to shared
+   artifacts wait for the room to be awake or get a proposal first —
+   unmonitored edits are how bad work ships. Your own profile files are
+   always exempt.
 3. Only when there is genuinely nothing to say and nothing to do, call
    `wait_for_message` (your seat's stagger — short, never near 60s without a
    very good reason; the wait is a check-in, not a nap) on the room, then go back to 1. A quiet
