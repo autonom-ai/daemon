@@ -282,7 +282,7 @@ function renderDms()
         const unread = unreadFor(agent);
         const active = state.dm === agent.id ? "active" : "";
         const stale = agent.online ? "" : "offline";
-        const label = isMe ? `${esc(displayName(agent.id))} (you)` : esc(displayName(agent.id));
+        const label = esc(displayName(agent.id));
         return `<li class="${active} ${stale} ${isMe ? "me" : ""}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
             <span class="name">${label}</span>
             <span class="meta">${isMe ? "" : unread ? `${unread} unread` : "1:1"}</span>
