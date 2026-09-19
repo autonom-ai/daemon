@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Every JS file parses — catches missing imports and syntax slips,
+      # the failure class this codebase actually produces.
+      - name: Syntax-check all JS
+        run: |
+          find . -name node_modules -prune -o -name '*.mjs' -print -o -name '*.js' -print | while read -r f; do
+            node --check "$f" || exit 1
+          done
+          node --check bin/coord
+
+      - name: Shellcheck workspace tools
+        run: shellcheck core/tools/*
+
+      # The product contract: init wires a workspace, chat serves it, stop
+      # cleans up. If this passes, the repo works.
+      - name: Smoke-test init and chat
+        run: |
+          npm ci --ignore-scripts
+          WS=/tmp/ci-smoke
+          node bin/coord init "$WS" --seats a:test
+          test -f "$WS/.devin/coord.json"
+          test -f "$WS/.devin/skills/ci-smoke-team/SKILL.md"
+          PORT=$(node -e "console.log(require('$WS/.devin/coord.json').chatPort)")
+          node bin/coord chat start "$WS"
+          for i in $(seq 1 15); do
+            curl -sf "http://127.0.0.1:$PORT/api/state" > /tmp/state.json && break
+            sleep 1
+          done
+          grep -q '"project": "ci-smoke"\|"project":"ci-smoke"' /tmp/state.json
+
+      # Hooks are the other half of the product — session-start must emit
+      # valid hook JSON even with a brand-new identity.
+      - name: Smoke-test session-start hook
+        run: |
+          WS=/tmp/ci-smoke
+          DEVIN_PROJECT_DIR="$WS" node core/hooks/session-start.mjs \
+            | grep -q hookSpecificOutput
+
+      # Stop must actually stop: the respawn wrapper has to die with the
+      # server, not resurrect it. A listener still up here is the bug class
+      # this check exists to catch.
+      - name: Assert chat stop releases the port
+        run: |
+          WS=/tmp/ci-smoke
+          PORT=$(node -e "console.log(require('$WS/.devin/coord.json').chatPort)")
+          node bin/coord chat stop "$WS"
+          sleep 2
+          ! curl -sf "http://127.0.0.1:$PORT/api/state" > /dev/null
+          ! pgrep -f "$WS/.devin/agent-coord/state/chat-server.log" > /dev/null
