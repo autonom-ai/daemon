@@ -320,15 +320,7 @@ async function fanoutMentions(room, text, from = human)
         return [];
     }
     const seats = Object.keys(registry).filter((id) => id !== human);
-    // @ works on the seat id and on the display name — @ada pings ada.
-    const aliases = new Map();
-    for (const id of seats)
-    {
-        const role = registry[id].role;
-        const display = typeof role === "object" && role ? role.displayName : (typeof role === "string" ? role : null);
-        if (display)
-            aliases.set(String(display).toLowerCase(), id);
-    }
+    // @ works on the agent id only — there are no display names.
     const mentioned = new Set();
     if (/@(everyone|all)\b/i.test(text))
         for (const id of seats)
@@ -338,8 +330,6 @@ async function fanoutMentions(room, text, from = human)
         const name = match[1];
         if (seats.includes(name))
             mentioned.add(name);
-        else if (aliases.has(name.toLowerCase()))
-            mentioned.add(aliases.get(name.toLowerCase()));
     }
     // #room pings every member of that room — the bus equivalent of walking
     // the message over to where the people are.

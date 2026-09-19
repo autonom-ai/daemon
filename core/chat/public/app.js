@@ -43,8 +43,7 @@ const el = {
 };
 
 // The seats that can be pinged, plus @everyone. The human is excluded:
-// pinging yourself is not a ping. Display names ping too (@ada hits ada), and
-// #room pings every member of that room.
+// pinging yourself is not a ping. #room pings every member of that room.
 function mentionCandidates(sigil)
 {
     if (sigil === "#")
@@ -52,25 +51,7 @@ function mentionCandidates(sigil)
     const ret = [{ name: "everyone", role: "every seat in the room" }];
     for (const agent of state.agents)
         if (agent.id !== state.human)
-        {
             ret.push({ name: agent.id, role: displayName(agent.id) });
-            const display = displayName(agent.id);
-            if (display.toLowerCase() !== agent.id.toLowerCase())
-                ret.push({ name: display, role: `display name of ${agent.id}` });
-        }
-    return ret;
-}
-
-// display name (lowercase) → seat id, mirroring the server's ping resolution.
-function displayAliases()
-{
-    const ret = new Map();
-    for (const agent of state.agents)
-    {
-        const display = displayName(agent.id);
-        if (display.toLowerCase() !== agent.id.toLowerCase())
-            ret.set(display.toLowerCase(), agent.id);
-    }
     return ret;
 }
 
@@ -86,12 +67,11 @@ function isPing(message)
 {
     if (message.stream !== "room")
         return false;
-    const aliases = displayAliases();
     const me = state.human.toLowerCase();
     for (const match of (message.text ?? "").matchAll(/@([A-Za-z0-9_-]+)/g))
     {
         const name = match[1].toLowerCase();
-        if (name === "everyone" || name === "all" || name === me || aliases.get(name) === state.human)
+        if (name === "everyone" || name === "all" || name === me)
             return true;
     }
     // #room pings its members — the human is in every room the server seeded.
@@ -117,15 +97,9 @@ function esc(text)
     return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-// The display name for a seat: the role/displayName if set, otherwise the raw id.
+// There are no display names — the coord agent id is the name.
 function displayName(id)
 {
-    const agent = state.agents.find((a) => a.id === id);
-    const role = agent?.role;
-    if (typeof role === "string" && role)
-        return role;
-    if (typeof role === "object" && role?.displayName)
-        return role.displayName;
     return id;
 }
 
@@ -146,7 +120,6 @@ function seatColor(id)
 function renderText(text)
 {
     const known = knownMentions();
-    const aliases = displayAliases();
     const me = state.human.toLowerCase();
     return esc(text)
         .replace(/`([^`\n]+)`/g, "<code>$1</code>")
@@ -161,8 +134,8 @@ function renderText(text)
                 return `<span class="mention">#${esc(name)}</span>`;
             }
             const lower = name.toLowerCase();
-            const isMe = lower === me || aliases.get(lower) === state.human;
-            if (!known.has(name) && !aliases.has(lower) && !isMe)
+            const isMe = lower === me;
+            if (!known.has(name) && !isMe)
                 return full;
             const extra = lower === "everyone" ? " everyone" : (isMe ? " you" : "");
             return `<span class="mention${extra}">@${esc(name)}</span>`;
@@ -269,7 +242,7 @@ function renderSidebar()
     const { mode, name } = destination();
     el.text.placeholder = mode === "dm"
         ? `Direct to ${displayName(name)} — only they see it. Enter sends, shift+enter for a newline.`
-        : `To #${name} — enter sends, shift+enter for a newline. @ pings a seat or display name, # pings a room.`;
+        : `To #${name} — enter sends, shift+enter for a newline. @ pings a seat, # pings a room.`;
 }
 
 // A seat is as alive as its last bus touch — a message it sent or a read
