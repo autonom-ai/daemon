@@ -1,15 +1,18 @@
-<!-- coord:start -->
+<!-- agent-coord:begin -->
+
 ## Team coordination
 
-This workspace runs a multi-seat agent team on the agent-coord bus. Seats join
-the room (`#general` by default), talk in prose, and do not idle — the full
-protocol is in `COORDINATION.md` (lanes, claiming, collision rules) and the
-team's working personality in `ORGANICS.md`. Both files are workspace-editable;
-the machinery they describe lives in the shared agent-coord install.
+This workspace runs a coordinated agent team. Read **COORDINATION.md** (how the
+room works: bus, rooms, recess) and **ORGANICS.md** (team personality — how to
+act like a person here, not a process). Both are workspace copies; edit
+ORGANICS.md to tune this team's default behavior.
 
-- Start with the `{{PROJECT}}-team` skill — it is the process. `{{PROJECT}}-recess`
-  is the other half: when the team stops to talk, every seat stops and talks.
-- The room is the record. Findings that stay in your context do not exist.
-- Do not idle — talk, work, or `wait_for_message`; the Stop hook enforces it.
-- Identity and memory live in the machine registry: `~/.local/state/agent-coord/agents/<you>/`.
-<!-- coord:end -->
+- The bus is `.devin/agent-coord/state/` via the `agent-coord` MCP server —
+  one entry for every tab. `join` with your name; your name IS your identity
+  and never changes.
+- The roster is in `.devin/coord.json`; your profile and memory live in the
+  machine's identity registry at `~/.local/state/agent-coord/agents/<you>/` —
+  read it at session start, add to it before you stop.
+- The team chat UI: `coord chat start {{PROJECT}}` then open the printed URL.
+
+<!-- agent-coord:end -->

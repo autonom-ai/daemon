@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Team chat — the human's seat on the same file-backed bus the seats use.
+// Team chat — the human's seat on the same file-backed bus the agents use.
 //
 // The bus is JSONL on disk, so this is not a client of an API: it appends to the
 // same files the coord servers read and tails the same files they write. It
@@ -66,7 +66,7 @@ const startedAt = Date.now();
 const offsets = new Map();
 const pending = new Map();
 const clients = new Set();
-// Presence is derived, not requested: a seat is as old as the newest bus line
+// Presence is derived, not requested: an agent is as old as the newest bus line
 // it authored (seeded once below, kept current by pump) or the mtime of its
 // read cursor, which the coord server touches on every wait/read call.
 const activity = new Map();
@@ -242,7 +242,7 @@ async function heartbeat()
     });
 }
 
-// One pass over the bus at boot so a restart does not blank every seat's
+// One pass over the bus at boot so a restart does not blank every agent's
 // presence until their next message — after this, pump() keeps it current.
 function seedActivity()
 {
@@ -299,15 +299,15 @@ async function dm(to, text, inReplyTo, from = human)
     // reads only the human's inbox, so without this a sent DM would never
     // render in the sender's view — it existed only in the recipient's file.
     // Agent-authored DMs skip the mirror — their coord server tracks the
-    // send itself, and the human's inbox is not a copy of every seat's.
+    // send itself, and the human's inbox is not a copy of every agent's.
     if (from === human)
         await store.appendJsonl(store.inboxFile(human), entry);
     return entry;
 }
 
-// An @-mention in a room message also lands in the mentioned seat's inbox:
-// a room line only surfaces on a seat's next poll, an inbox DM is the
-// interrupt. @everyone (or @all) pings every registered seat.
+// An @-mention in a room message also lands in the mentioned agent's inbox:
+// a room line only surfaces on an agent's next poll, an inbox DM is the
+// interrupt. @everyone (or @all) pings every registered agent.
 async function fanoutMentions(room, text, from = human)
 {
     let registry = {};
@@ -319,16 +319,16 @@ async function fanoutMentions(room, text, from = human)
     {
         return [];
     }
-    const seats = Object.keys(registry).filter((id) => id !== human);
+    const agents = Object.keys(registry).filter((id) => id !== human);
     // @ works on the agent id only — there are no display names.
     const mentioned = new Set();
     if (/@(everyone|all)\b/i.test(text))
-        for (const id of seats)
+        for (const id of agents)
             mentioned.add(id);
     for (const match of text.matchAll(/@([A-Za-z0-9_-]+)/g))
     {
         const name = match[1];
-        if (seats.includes(name))
+        if (agents.includes(name))
             mentioned.add(name);
     }
     // #room pings every member of that room — the bus equivalent of walking
@@ -507,7 +507,7 @@ const server = createServer(async (req, res) =>
                 return json(res, 400, { ok: false, error: "empty message" });
             // The pump is the only thing that emits messages: writing to the file
             // and broadcasting here too would double every line the user sends.
-            // say() fans mentions out to the seats' inboxes itself and reports
+            // say() fans mentions out to the agents' inboxes itself and reports
             // who it pinged; doing it here as well would deliver every ping twice.
             const { entry, pinged } = await say(body.room ?? teamRoom, text, body.kind, body.inReplyTo);
             return json(res, 200, { ok: true, entry, pinged });
@@ -598,7 +598,7 @@ setInterval(() => broadcast({ type: "ping", ts: Date.now() }), 15_000).unref();
 server.listen(port, host, () =>
 {
     console.log(`${project} team chat — http://${host}:${port}`);
-    console.log(`  seat:    ${human}`);
+    console.log(`  human:   ${human}`);
     console.log(`  bus:     ${coordDir}`);
     console.log(`  room:    #${teamRoom}`);
     console.log(`  recess:  ${recessState(projectDir).active ? "open" : "closed"} (tools/coord-recess)`);

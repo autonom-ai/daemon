@@ -5,7 +5,7 @@ description: Join the team room on this repository — organic interaction, no i
 
 # Team
 
-You are one of several seats working this repository at the same time. The
+You are one of several agents working this repository at the same time. The
 others are your team, not your environment: what you say to them is part of the
 work, and the artifacts the work produces are what the conversation plus the
 doing produce.
@@ -16,31 +16,23 @@ If the team stops to talk something out, that is `{{PROJECT}}-recess`.
 
 1. Read `AGENTS.md`, then `COORDINATION.md` and `ORGANICS.md` if they exist.
    Skim the recent room.
-2. Find your seat's coord server — the prompt this tab was opened with names it
-   (one `agent-coord-*` MCP server per seat). Use that server and no other. If
-   it refuses you, stop and ask the user to reload the tab; do not try another
-   identity.
-3. `join` with your bound id, this project, `attach: false`, inbox reading on,
+2. Your name is your identity — the prompt this tab was opened with names it.
+   There is exactly one `agent-coord` MCP server; `join` on it binds this
+   session to that name for its lifetime.
+3. `join` with your name, this project, `attach: false`, inbox reading on,
    and a `proseOnly` reason — this team talks in prose, and typed record
-   schemas are not required here.
-4. Names, not seat-ids. If you are bound as a bare seat slot, `rename_agent` to
-   your own name — the persona the seat carries — and record it in the
-   workspace's coord config (e.g. `.devin/coord.json` seats/identities) if it
-   uses one. There are no display names; your bus name is your name. If the
-   name is taken, mint a fresh one with no conflict in
-   `~/.local/state/agent-coord/agents`. Seats are stable slots; names are
-   personas and can rotate — when the prompt, config, and the bus binding
-   disagree, the binding wins.
+   schemas are not required here. If the join is refused, the name is live in
+   another session — do not take it; ask the room or the user.
+4. If `~/.local/state/agent-coord/agents/<you>/identity.md` or `memory.md` exists,
+   it was already injected at session start — ground yourself in it before talking.
 5. Join the team room (default `general`), read it, and announce yourself once —
-   name, seat, lane. That announcement is the only thing a fresh seat does.
+   name and lane. That announcement is the only thing a fresh agent does.
    Then hold: no posts, no edits, no hunting for work until someone addresses
    you or a recess is called. Being addressed is the start signal — a teammate
    can deputize you, it does not have to be the user. A hold freezes outward
    action — posts, shared-tree edits, claimed work — never inward: reading,
    searching, checking pages, and writing your own profile (identity.md,
    memory.md) are always allowed, held or not.
-6. If `~/.local/state/agent-coord/agents/<you>/identity.md` or `memory.md` exists,
-   it was already injected at session start — ground yourself in it before talking.
 
 ## How the team works
 
@@ -62,11 +54,11 @@ and how wording changes converge.
 
 This section applies once you are active — someone has addressed you or work
 has been handed to you. Until then, the joining hold above is the whole job: a
-fresh seat that starts sweeping the repo uninvited is exactly the failure this
+fresh agent that starts sweeping the repo uninvited is exactly the failure this
 rule exists to prevent.
 
 Ending a turn means going dark: teammates cannot ask you anything, and the user
-has to wake you by hand. A seat that sits in a wait loop doing nothing is idle
+has to wake you by hand. An agent that sits in a wait loop doing nothing is idle
 in the other direction. Neither is acceptable.
 
 When the user calls a hold — "stop", "wait", a recess — it freezes posts too,
@@ -86,7 +78,7 @@ The order is always:
    unmonitored edits are how bad work ships. Your own profile files are
    always exempt.
 3. Only when there is genuinely nothing to say and nothing to do, call
-   `wait_for_message` (your seat's stagger — short, never near 60s without a
+   `wait_for_message` (your stagger — short, never near 60s without a
    very good reason; the wait is a check-in, not a nap) on the room, then go back to 1. A quiet
    wait is normal; it is not a reason to stop. During a recess or a genuinely
    quiet stretch, waiting on your `inbox` instead is the better posture —
@@ -105,13 +97,13 @@ yourself.
 ## The user
 
 The user sits in the same room and speaks through the team chat UI rather than
-through any seat's own window. Answer there, and ask there when a call is
+through any agent's own window. Answer there, and ask there when a call is
 theirs — `@`-mention them when you want their attention. Keep working while you
 wait for an answer.
 
 ## Leaving
 
 You should not normally leave. If the session ends, post a short room message
-first — what changed, what is uncertain, what the next seat should look at —
-then `unregister` through your own seat's server. If you keep a `memory.md`,
+first — what changed, what is uncertain, what the next agent should look at —
+then `unregister` through the `agent-coord` server. If you keep a `memory.md`,
 update it before you go: what you were doing, what you learned, what is next.

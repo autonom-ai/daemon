@@ -1,27 +1,37 @@
 // SessionStart — hand every new tab the same starting point.
 
 import path from "node:path";
-import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, SEATS, SEAT_IDENTITIES, TEAM_ROOM, detectIdentity, emit, formatEntries, memoryTail, recess, roomEntries, seatFor, seatIdentity, standDown } from "./coord.mjs";
+import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, ROSTER, TEAM_ROOM, claimFor, detectIdentity, emit, formatEntries, hookInput, identityOf, memoryTail, recess, recordClaim, registry, roomEntries, standDown } from "./coord.mjs";
+
+// Identity resolution, in order of freshness: the live session marker (the
+// bound server process says who this tab IS right now), then the claim file
+// (who this tab WAS before a reset wiped the marker). A live marker also
+// refreshes the claim so the disk copy tracks renames.
+const input = await hookInput();
+const sessionId = input.session_id;
+const detected = detectIdentity();
+if (sessionId && detected)
+    recordClaim(sessionId, detected);
+const agentId = detected ?? claimFor(sessionId);
+const identity = agentId ? identityOf(agentId) : null;
 
 const recessState = recess();
 const recent = roomEntries(TEAM_ROOM).slice(-6);
-const agentId = detectIdentity();
-const seat = agentId ? seatFor(agentId) : null;
-const identity = agentId ? seatIdentity(agentId) : null;
 const teamSkill = CONFIG.teamSkill ?? `${CONFIG.project ?? "team"}-team`;
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
+const onBus = Object.keys(registry()).filter((name) => name !== HUMAN_SEAT);
 
 const lines = [
-    `This repository is worked by a ${SEATS.length || "multi"}-seat team${SEATS.length ? `: ${SEATS.join(", ")}` : ""}.`,
-    "Your seat is the one named in the prompt this tab was opened with; use only that seat's agent-coord server.",
-    "",
-    `Start with the ${teamSkill} skill, join #${TEAM_ROOM}, and talk to the other seats — the room is where the`,
-    `team actually is. If the team has stopped to talk something out, that is the ${recessSkill} skill.`,
+    `This repository is worked by an agent team${ROSTER.length ? ` — the roster: ${ROSTER.join(", ")}` : ""}.`,
+    "The room is where the team actually is: talk there, coordinate there, post what you find.",
+    `Start with the ${teamSkill} skill, join #${TEAM_ROOM}, and talk to the others — if the team has`,
+    `stopped to talk something out, that is the ${recessSkill} skill.`,
     "",
     `The user (${HUMAN_SEAT}) sits in the same room and speaks through the team chat UI`,
-    "(tools/coord-web). Treat the room, not your own window, as where you are reachable and where decisions are visible.",
+    "(tools/coord-web). Treat the room, not your own window, as where you are reachable and where",
+    "decisions are visible.",
     "",
-    "Announce yourself once in the room — name, seat, lane — then hold: no posts, no edits, no hunting for",
+    "Announce yourself once in the room — name and lane — then hold: no posts, no edits, no hunting for",
     "work until someone addresses you or a recess is called. Being addressed is your start signal.",
     "",
     "Once active, do not idle. If the room is waiting on you, talk; if it is not, do real work — searches,",
@@ -29,43 +39,39 @@ const lines = [
     "wait_for_message if there is truly nothing to say or do.",
 ];
 
-const seatBound = agentId && Object.values(CONFIG.seats).includes(agentId);
-
-// Identity wins over seat-shape: after a rename the bound id IS the person
-// (seats.b === 'some-name'), and that id in the registry means the personality
-// and memory should load — a seatBound check first would tell a real identity
-// to mint itself again.
 if (identity)
 {
     const memory = memoryTail(agentId);
     lines.push(
         "",
-        `You are ${identity.displayName}${seat ? ` (seat ${seat})` : ` (${agentId})`}.`,
+        `You are ${identity.displayName}.`,
         ...(identity.personality ? [identity.personality] : []),
         ...(memory ? ["", "Your memory:", memory] : []),
     );
+    if (!detected)
+        lines.push("", "Your session marker is gone — rejoin: call `join` on the agent-coord server with this same name.");
 }
-else if (seatBound)
+else if (agentId)
 {
     lines.push(
         "",
-        `You are ${agentId}${seat ? ` (seat ${seat})` : ""} — a seat slot, not a person. Mint your own identity`,
-        "before talking: pick a name that has no conflicts in the identity registry",
-        `(${AGENTS_HOME}), scaffold it with \`${path.join(CANONICAL_ROOT, "bin", "coord")} identity add <name>\`,`,
-        "join through your seat's agent-coord server, then rename_agent from your bound id to the new name and",
-        "record it in .devin/coord.json's identities map. If the prompt this tab was opened with already named a",
-        "person for you, use that name instead of inventing one.",
+        `You are ${agentId} — no profile exists in the registry yet. Scaffold one with`,
+        `\`${path.join(CANONICAL_ROOT, "bin", "coord")} identity add ${agentId}\`, then fill in identity.md.`,
     );
+    if (!detected)
+        lines.push("", "Your session marker is gone — rejoin: call `join` on the agent-coord server with this same name.");
 }
 else
 {
     lines.push(
         "",
-        "No seat could be attributed to this tab. Use only the agent-coord server your opening prompt names,",
-        "mint a fresh identity there (pick a name with no conflicts in",
-        `${AGENTS_HOME}, scaffold it with \`${path.join(CANONICAL_ROOT, "bin", "coord")} identity add <name>\`,`,
-        "then rename_agent from your bound id to it and record it in .devin/coord.json's identities map),",
-        "and ask the room if the seat is ambiguous.",
+        "Join the bus through the `agent-coord` MCP server: `join({ agentId: <your name>, attach: false,",
+        "proseOnly: true })`. Your name is your identity — it never changes, and it is the only thing",
+        "that binds you. The opening prompt for this tab names you; if it did not, pick an unclaimed",
+        `name (the registry is ${AGENTS_HOME}) and scaffold it with`,
+        `\`${path.join(CANONICAL_ROOT, "bin", "coord")} identity add <name>\`. If the name is refused,`,
+        "it is live in another session — do not take it; ask the room or the user.",
+        onBus.length ? `On the bus now: ${onBus.join(", ")}.` : "Nobody is on the bus yet.",
     );
 }
 
@@ -79,16 +85,16 @@ if (recessState.active)
 else if (standDown())
     lines.push("", "Stand-down is active — turns may end normally.");
 
-// Teammate priors — a seat that knows what the others reach for and avoid is
+// Teammate priors — an agent that knows what the others reach for and avoid is
 // starting from a colleague, not a stranger. Bounded to each identity's
-// Interests/Disinterests sections (the scaffold `identity add` writes); seats
+// Interests/Disinterests sections (the scaffold `identity add` writes); agents
 // without them simply don't appear.
 const teammates = [];
-for (const other of Object.values(SEAT_IDENTITIES))
+for (const other of ROSTER)
 {
     if (!other || other === agentId)
         continue;
-    const who = seatIdentity(other);
+    const who = identityOf(other);
     if (!who)
         continue;
     const sections = /##\s*(Interests|Disinterests)\b([\s\S]*?)(?=\n##\s|$)/g;

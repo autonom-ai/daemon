@@ -11,7 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = process.env.DEVIN_PROJECT_DIR ?? path.resolve(here, "..", "..");
 const [action = "status", ...rest] = process.argv.slice(2);
 const note = rest.join(" ").trim();
-const by = process.env.COORD_SEAT ?? process.env.USER ?? "unknown";
+const by = process.env.COORD_AGENT ?? process.env.COORD_SEAT ?? process.env.USER ?? "unknown";
 const room = process.env.COORD_ROOM ?? "general";
 
 const state = recessState(projectDir);
@@ -46,7 +46,7 @@ console.log(action === "start"
     ? `recess open — announced in #${room} as ${by}`
     : `recess closed — announced in #${room} as ${by}`);
 
-// A seat calling this is a seat that should now be talking, not building.
+// An agent calling this is an agent that should now be talking, not building.
 const notes = path.join(projectDir, ".devin", "collaboration", "recess-notes.md");
 if (action === "end" && existsSync(notes) && note)
     console.log(`remember: put the useful part of the discussion in ${path.relative(projectDir, notes)} if it is not there yet`);

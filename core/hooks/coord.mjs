@@ -6,12 +6,12 @@
 // read_messages, which is the failure this project cannot afford.
 //
 // Nothing here is workspace-specific. The workspace's .devin/coord.json carries
-// the project name, seat list, human seat, and team room; this file reads it
+// the project name, roster, human handle, and team room; this file reads it
 // and falls back to sane defaults when it is absent or partial.
 
 import { execFileSync } from "node:child_process";
 import os from "node:os";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,7 +26,7 @@ export const PROJECT_DIR = process.env.DEVIN_PROJECT_DIR ?? process.cwd();
 const DEFAULTS = {
     human: process.env.USER ?? "user",
     teamRoom: "general",
-    seats: {},
+    roster: [],
     teamSkill: null,
     recessSkill: null,
 };
@@ -35,35 +35,47 @@ export function config()
 {
     const cfg = readJson(path.join(PROJECT_DIR, ".devin", "coord.json"), {});
     const merged = { ...DEFAULTS, ...cfg };
-    // `seats` is the seat→identity map written by `coord init`
-    // ({ "b": "ada" }). A legacy array of seat ids still works.
-    if (Array.isArray(merged.seats))
-        merged.seats = Object.fromEntries(merged.seats.map((seat) => [seat, seat]));
+    // `roster` is the expected team — a flat list of identity names
+    // (["marlow", "wren"]). Legacy shapes still count toward it: `seats` as a
+    // letter→name map or bare array, and `identities` ({ retired bound id:
+    // name }), which also stays behind as the translation table for sessions
+    // bound before the seat layer was dropped.
+    const names = new Set(Array.isArray(merged.roster) ? merged.roster : []);
+    const seats = merged.seats ?? {};
+    for (const name of Array.isArray(seats) ? seats : Object.values(seats))
+        if (name)
+            names.add(name);
+    for (const name of Object.values(merged.identities ?? {}))
+        if (name)
+            names.add(name);
+    merged.roster = [...names];
+    merged.legacyIds = merged.identities ?? {};
     return merged;
 }
 
 export const CONFIG = config();
 export const COORD_DIR = path.join(PROJECT_DIR, ".devin", "agent-coord", "state");
 export const TEAM_ROOM = CONFIG.teamRoom;
-export const SEATS = Object.keys(CONFIG.seats);
-export const SEAT_IDENTITIES = CONFIG.seats;
+export const ROSTER = CONFIG.roster;
 export const HUMAN_SEAT = CONFIG.human;
 export const STAND_DOWN_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "stand-down");
 export const RECESS_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "recess");
 // The identity registry is machine-local state, not repo content — an
 // identity follows the person, and the person is not something a public repo
-// should ship. Override with AGENT_COORD_AGENTS.
-export const AGENTS_HOME = process.env.AGENT_COORD_AGENTS ??
-    path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "agent-coord", "agents");
+// should ship. AGENT_COORD_AGENTS overrides it directly; AGENT_COORD_HOME
+// overrides the whole state root, matching the CLI.
+const STATE_HOME = process.env.AGENT_COORD_HOME ??
+    path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "agent-coord");
+export const AGENTS_HOME = process.env.AGENT_COORD_AGENTS ?? path.join(STATE_HOME, "agents");
 
-// The seat→identity map is coord.json's `seats` ({ "b": "ada" }). On the bus
-// a session binds the identity name (AGENT_COORD_BOUND_AGENT), so a detected
-// agentId is usually already an identity — look it up directly first, then as
-// a seat. Identity files (identity.md, memory.md) are global: a person is
-// portable across workspaces.
-export function seatIdentity(seatOrIdentity)
+// A session binds its identity directly at join — the agentId on the bus IS
+// the person's name; there is no seat layer to translate through. Retired
+// bound ids (`jobs-a` style, from before the change) still resolve through
+// coord.json's `identities` map. Identity files (identity.md, memory.md) are
+// global: a person is portable across workspaces.
+export function identityOf(agentId)
 {
-    const name = SEAT_IDENTITIES[seatOrIdentity] ?? seatOrIdentity;
+    const name = CONFIG.legacyIds[agentId] ?? agentId;
     const dir = path.join(AGENTS_HOME, name);
     if (!existsSync(dir))
         return null;
@@ -81,19 +93,70 @@ export function seatIdentity(seatOrIdentity)
     };
 }
 
-// The seat label for a detected agentId — reverse of the seats map. Returns
-// null when the agentId is an identity with no configured seat (roaming agent).
-export function seatFor(agentId)
+// Deterministic wait stagger — identical cadences make a convoy, so each name
+// gets a stable slot in the 10–25s range by hash. cet's rule: nobody waits
+// anywhere near 60s without a very good reason.
+export function staggerMs(agentId)
 {
-    for (const [seat, name] of Object.entries(SEAT_IDENTITIES))
-        if (name === agentId)
-            return seat;
-    return SEATS.includes(agentId) ? agentId : null;
+    const hash = [...(agentId ?? "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0) >>> 0;
+    return 10_000 + (hash % 4) * 5_000;
 }
 
-export function memoryTail(seatId, maxChars = 4000)
+// Claims pin a Devin session to the identity it joined as — the only place the
+// tab→name binding survives a full context reset (the session marker dies with
+// the server process; the claim file does not). Written once a join is
+// observed, read at session start to reassert identity. Advisory only — the
+// bus's live-claim guard is still the correctness boundary. Lives beside the
+// bus dir, not in it: `state/` belongs to agent-coord-mcp's store.
+const CLAIMS_DIR = path.join(PROJECT_DIR, ".devin", "agent-coord", "claims");
+
+export function claimFor(sessionId)
 {
-    const identity = seatIdentity(seatId);
+    if (!sessionId)
+        return null;
+    return readJson(path.join(CLAIMS_DIR, `${sessionId}.json`), null)?.agentId ?? null;
+}
+
+export function recordClaim(sessionId, agentId)
+{
+    if (!sessionId || !agentId)
+        return;
+    const file = path.join(CLAIMS_DIR, `${sessionId}.json`);
+    if (readJson(file, null)?.agentId === agentId)
+        return;
+    mkdirSync(CLAIMS_DIR, { recursive: true });
+    writeFileSync(file, `${JSON.stringify({ agentId, claimedAt: Date.now() }, null, 2)}\n`, "utf8");
+}
+
+// Hook stdin carries the event payload — `session_id` is the stable per-tab id
+// the claims above key on. Never block for it: in real use the payload is
+// piped and closed immediately, but a hook run by hand has an open stdin, so
+// reads race a short deadline and stop listening when it lapses.
+export async function hookInput(timeoutMs = 800)
+{
+    if (process.stdin.isTTY)
+        return {};
+    let raw = "";
+    process.stdin.setEncoding("utf8");
+    const done = new Promise((resolve) =>
+    {
+        process.stdin.on("data", (chunk) => { raw += chunk; });
+        process.stdin.on("end", resolve);
+        process.stdin.on("error", resolve);
+    });
+    const lapse = new Promise((resolve) => setTimeout(() =>
+    {
+        process.stdin.pause();
+        resolve();
+    }, timeoutMs));
+    await Promise.race([done, lapse]);
+    try { return JSON.parse(raw); }
+    catch { return {}; }
+}
+
+export function memoryTail(agentId, maxChars = 4000)
+{
+    const identity = identityOf(agentId);
     if (!identity || !existsSync(identity.memoryFile))
         return "";
     const raw = readFileSync(identity.memoryFile, "utf8").trim();
@@ -186,15 +249,14 @@ export function unread(agentId)
     return { dms, room: entries.slice(seen) };
 }
 
-// Which seat is this process? The bus records one marker per bound stdio
+// Which agent is this process? The bus records one marker per bound stdio
 // session (`sessions/<agentId>.<pid>.<nonce>.json`), keyed by the MCP server's
 // pid. A hook is a sibling of that server under the same client process, so the
 // marker whose server pid shares an ancestor with us is ours.
 //
 // Identity is a convenience, not a requirement: every caller must still work
-// when this returns null (a seat that has not joined yet, a hook fired from a
-// process we cannot trace, a bus that was wiped). When no seat list is
-// configured, any marker is a candidate.
+// when this returns null (an agent that has not joined yet, a hook fired from
+// a process we cannot trace, a bus that was wiped).
 export function detectIdentity()
 {
     const dir = path.join(COORD_DIR, "sessions");

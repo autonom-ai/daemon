@@ -1,8 +1,9 @@
 // Recess state — shared by the chat UI, the `tools/coord-recess` CLI, and the hooks.
 //
 // A recess is a marker file plus a room announcement. The file is what the
-// lifecycle hooks can see (so a seat that tries to end its turn during a recess
-// is told to stay in the conversation); the announcement is what the seats read.
+// lifecycle hooks can see (so an agent that tries to end its turn during a
+// recess is told to stay in the conversation); the announcement is what the
+// agents read.
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -45,7 +46,7 @@ export async function startRecess(store, { projectDir, room, by, note })
         text: [
             "RECESS",
             "",
-            "Everything stops. Every seat: announce yourself here — who you are, what you are holding, and what is",
+            "Everything stops. Everyone: announce yourself here — who you are, what you are holding, and what is",
             "on your mind — then talk to each other. This period is for thinking out loud together, and it is the",
             "most valuable thing this team does.",
             "",

@@ -8,7 +8,7 @@ argument-hint: "Start a recess | Join the recess already open | Close the recess
 
 A recess is the team stopping on purpose: tools down, everyone in the room,
 talking. Not a meeting with a form to fill in — the period where the team
-thinks out loud together instead of each seat working alone.
+thinks out loud together instead of each agent working alone.
 
 **Everything else stops.** Whatever you were mid-way through can wait; if it
 genuinely cannot, say so in the room and let the others decide. Stops means
@@ -18,7 +18,7 @@ note gets written.
 
 ## Opening one
 
-Any seat can call a recess, and so can the user (the button in the chat UI does
+Anyone can call a recess, and so can the user (the button in the chat UI does
 the same thing):
 
 ```sh
@@ -32,13 +32,13 @@ agrees it is time.
 ## What you do
 
 - Announce yourself in the room — who you are, what you were holding, what is
-  on your mind. If you arrived after the recess opened, announce anyway; a seat
+  on your mind. If you arrived after the recess opened, announce anyway; an agent
   that is present but silent is not present.
 - Then talk. What happened lately, what surprised you, what is bothering you,
   what the project should do next. Disagreement is the useful part — the good
   recess is the one where someone's assumption does not survive contact with
   the others.
-- Keep the turn alive with `wait_for_message` (your seat's stagger — short,
+- Keep the turn alive with `wait_for_message` (your stagger — short,
   never near 60s) between replies. A
   quiet wait is normal and is not a reason to stop. You do not owe a reply to
   every message — if a teammate already said your piece, let it stand; talk

@@ -4,16 +4,20 @@
 // still waiting in read_messages; this is a nudge, not a delivery.
 
 import { statSync, existsSync } from "node:fs";
-import { CONFIG, HUMAN_SEAT, TEAM_ROOM, detectIdentity, emit, formatEntries, recess, seatIdentity, standDown, unread } from "./coord.mjs";
+import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, detectIdentity, emit, formatEntries, hookInput, identityOf, recess, recordClaim, standDown, unread } from "./coord.mjs";
 
-const seat = detectIdentity();
-const { dms, room } = unread(seat);
+const input = await hookInput();
+const detected = detectIdentity();
+if (input.session_id && detected)
+    recordClaim(input.session_id, detected);
+const agent = detected ?? claimFor(input.session_id);
+const { dms, room } = unread(agent);
 const recessState = recess();
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
 const lines = [];
 
-if (seat)
-    lines.push(`You are ${seat}. Team room: #${TEAM_ROOM}.`);
+if (agent)
+    lines.push(`You are ${agent}. Team room: #${TEAM_ROOM}.`);
 
 if (recessState.active)
 {
@@ -21,10 +25,10 @@ if (recessState.active)
         `A RECESS is open (called by ${recessState.by}${recessState.note ? `: ${recessState.note}` : ""}).`,
         `Invoke the ${recessSkill} skill and follow it: announce yourself in the room, keep talking, minimal edits.`
     );
-    // Event-driven nudge: if this seat's memory.md predates the recess, surface
-    // it — recess is exactly when durable memory gets written, and nobody should
-    // have to remember that on their own.
-    const identity = seat && seatIdentity(seat);
+    // Event-driven nudge: if this agent's memory.md predates the recess,
+    // surface it — recess is exactly when durable memory gets written, and
+    // nobody should have to remember that on their own.
+    const identity = agent && identityOf(agent);
     if (identity && recessState.startedAt
         && (!existsSync(identity.memoryFile)
             || statSync(identity.memoryFile).mtimeMs < recessState.startedAt))
@@ -42,10 +46,10 @@ if (dms.length)
 if (room.length)
 {
     lines.push(`New #${TEAM_ROOM} traffic since your last read (${room.length}):`);
-    lines.push(formatEntries(room, 8, seat ?? agentId));
+    lines.push(formatEntries(room, 8, agent));
 }
 
-if (lines.length === (seat ? 1 : 0))
+if (lines.length === (agent ? 1 : 0))
     lines.push(`Nothing new on the bus. ${HUMAN_SEAT} still decides scope — if this prompt changes it, put it in the room.`);
 
 emit({
