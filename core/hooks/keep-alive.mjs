@@ -20,6 +20,11 @@ const { dms, room } = unread(seat);
 const recessState = recess();
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
 
+// Identical cadences make a convoy: three seats on the same 60s wait wake and
+// reply in lockstep. A stable per-seat offset (45–105s, hashed from the
+// identity) staggers the wakes so backlog arrives already-batched.
+const seatWaitMs = 45_000 + ([...(seat ?? "x")].reduce((a, c) => a + c.charCodeAt(0), 0) % 5) * 15_000;
+
 const lines = recessState.active
     ? [
         "You are in a recess. Do not stop.",
@@ -43,8 +48,9 @@ const lines = recessState.active
         `1. The room waiting on you — a question, a ping, a reply owed? Answer it in #${TEAM_ROOM} or the DM first.`,
         "2. Nothing waiting? Do real work — run a search, check live state, update notes, follow a",
         "   rabbit hole — and post what you find. An idle stretch should still be moving the work forward.",
-        "3. Only when there is genuinely nothing to say and nothing to do, call wait_for_message on the room",
-        "   (60000 ms) — bare directives land there without mentions, so room-wait stays the work posture —",
+        `3. Only when there is genuinely nothing to say and nothing to do, call wait_for_message on the room`,
+        `   (${seatWaitMs} ms — your cadence, not a round number everyone shares) — bare directives land`,
+        "   there without mentions, so room-wait stays the work posture —",
         "   then go back to 1. A quiet wait is normal; a parked seat is not. When it wakes you, reply only",
         "   if addressed or you have something non-redundant — reading isn't owing.",
         "",
