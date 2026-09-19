@@ -37,7 +37,7 @@ rendered from this repo, so every workspace upgrades together.
 ## Quick start
 
 ```sh
-bin/coord init /path/to/workspace --seats a:rose,b:jane
+bin/coord init /path/to/workspace --seats a:ada,b:grace
 bin/coord chat start /path/to/workspace
 ```
 
@@ -49,7 +49,7 @@ coordination block to `AGENTS.md`. `chat start` brings the UI up on the
 allocated port.
 
 ```sh
-bin/coord seat add /path/to/workspace c:patrick   # wire another seat to an identity
+bin/coord seat add /path/to/workspace c:linus   # wire another seat to an identity
 bin/coord identity add ada                        # register a new global identity
 bin/coord update /path/to/workspace               # verify links + rendered skills
 ```
