@@ -66,6 +66,12 @@ const startedAt = Date.now();
 const offsets = new Map();
 const pending = new Map();
 const clients = new Set();
+// Presence is derived, not requested: a seat is as old as the newest bus line
+// it authored (seeded once below, kept current by pump) or the mtime of its
+// read cursor, which the coord server touches on every wait/read call.
+const activity = new Map();
+const cursorsDir = path.join(coordDir, "cursors");
+const ACTIVE_MS = 30 * 60_000;
 
 // ---------- bus ----------
 
@@ -149,6 +155,8 @@ function pump()
             {
                 continue;
             }
+            if (entry.from && entry.ts > (activity.get(entry.from) ?? 0))
+                activity.set(entry.from, entry.ts);
             broadcast({ type: "message", entry: decorate(entry, file) });
             // A RECESS / RECESS CLOSED decision may arrive from the CLI
             // (tools/coord-recess), which changes the marker file without
@@ -214,12 +222,43 @@ async function registerHuman()
 
 async function heartbeat()
 {
+    activity.set(human, Date.now());
     await store.updateJson(store.AGENTS_FILE, {}, (registry) =>
     {
         if (registry[human])
             registry[human].lastHeartbeat = Date.now();
         return registry;
     });
+}
+
+// One pass over the bus at boot so a restart does not blank every seat's
+// presence until their next message — after this, pump() keeps it current.
+function seedActivity()
+{
+    for (const file of watchedFiles())
+    {
+        let text;
+        try
+        {
+            text = readFileSync(file, "utf8");
+        }
+        catch
+        {
+            continue;
+        }
+        for (const line of text.split("\n"))
+        {
+            if (!line.trim())
+                continue;
+            try
+            {
+                const entry = JSON.parse(line);
+                if (entry.from && entry.ts > (activity.get(entry.from) ?? 0))
+                    activity.set(entry.from, entry.ts);
+            }
+            catch { }
+        }
+    }
 }
 
 async function say(room, text, kind, inReplyTo)
@@ -360,13 +399,23 @@ function registryView()
     }
     const now = Date.now();
     return Object.values(raw)
-        .map((agent) => ({
-            id: agent.agentId,
-            role: agent.role ?? "",
-            project: agent.project ?? "",
-            lastHeartbeat: agent.lastHeartbeat ?? 0,
-            online: now - (agent.lastHeartbeat ?? 0) < 5 * 60_000,
-        }))
+        .map((agent) =>
+        {
+            let cursorTs = 0;
+            try
+            {
+                cursorTs = statSync(path.join(cursorsDir, `${agent.agentId}.json`)).mtimeMs;
+            }
+            catch { }
+            const lastActive = Math.max(activity.get(agent.agentId) ?? 0, cursorTs);
+            return {
+                id: agent.agentId,
+                role: agent.role ?? "",
+                project: agent.project ?? "",
+                lastActive,
+                online: now - lastActive < ACTIVE_MS,
+            };
+        })
         .sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -533,6 +582,7 @@ function parseArgs(argv)
 }
 
 await registerHuman();
+seedActivity();
 setInterval(() => heartbeat().catch(() => { }), 30_000).unref();
 setInterval(pump, 400);
 // A data-frame heartbeat: half-open SSE connections only die on a failed

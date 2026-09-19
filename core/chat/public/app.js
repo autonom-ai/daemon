@@ -256,10 +256,12 @@ function renderSidebar()
     renderComposeMode();
 }
 
-// A seat silent for a day is gone, not inactive — it sinks out of the list
-// entirely unless it left unread pings. Offline seats dim and drop to the
-// bottom; the green/gray dot is heartbeat-fresh (under 5 minutes) or not.
-const DM_INACTIVE_MS = 24 * 60 * 60_000;
+// A seat is as alive as its last bus touch — a message it sent or a read
+// cursor its coord server moved. Thirty silent minutes means gone: it sinks
+// out of the list entirely unless it left unread pings (those dim instead).
+// The list doubles as the DM target picker, so a hidden seat cannot be
+// written to at all — hiding is a reachability claim, not just decluttering.
+const DM_INACTIVE_MS = 30 * 60_000;
 
 function renderDms()
 {
@@ -268,21 +270,20 @@ function renderDms()
         && message.ts > (state.seen[`dm:${agent.id}`] ?? 0)).length;
 
     const shown = state.agents
-        .filter((agent) => agent.id === state.human || agent.online
-            || Date.now() - (agent.lastHeartbeat ?? 0) < DM_INACTIVE_MS
+        .filter((agent) => agent.id === state.human
+            || Date.now() - (agent.lastActive ?? 0) < DM_INACTIVE_MS
             || unreadFor(agent) > 0)
-        .sort((a, b) => Number(b.online) - Number(a.online)
-            || (a.id === state.human ? -1 : b.id === state.human ? 1 : a.id.localeCompare(b.id)));
+        .sort((a, b) => (a.id === state.human ? -1 : b.id === state.human ? 1 : 0)
+            || (b.lastActive ?? 0) - (a.lastActive ?? 0));
 
     el.dms.innerHTML = shown.map((agent) =>
     {
         const isMe = agent.id === state.human;
         const unread = unreadFor(agent);
         const active = state.dm === agent.id ? "active" : "";
-        const dot = agent.online ? "online" : "offline";
+        const stale = agent.online ? "" : "offline";
         const label = isMe ? `${esc(displayName(agent.id))} (you)` : esc(displayName(agent.id));
-        return `<li class="${active} ${dot} ${isMe ? "me" : ""}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
-            <span class="presence ${dot}"></span>
+        return `<li class="${active} ${stale} ${isMe ? "me" : ""}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
             <span class="name">${label}</span>
             <span class="meta">${isMe ? "" : unread ? `${unread} unread` : "1:1"}</span>
         </li>`;
