@@ -462,7 +462,7 @@ function cmdIdentityAdd(name, flags)
     mkdirSync(dir, { recursive: true });
     const identityFile = path.join(dir, "identity.md");
     if (!existsSync(identityFile))
-        writeFileSync(identityFile, `---\nname: ${name}\ndisplayName: ${flags.display ?? name}\ncolor: null\n---\n\n# ${flags.display ?? name}\n\nPersonality notes live here — how ${name} talks, what they care about, quirks worth keeping. Team-level defaults are in ORGANICS.md per workspace; this file is the person.\n\n## Interests\n\nWhat ${name} reaches for when work pulls are equal — biases that actually change which item gets picked.\n\n## Disinterests\n\nWork ${name} would rather hand off — say it in the room instead of letting it rot in reluctance.\n`, "utf8");
+        writeFileSync(identityFile, `---\nname: ${name}\ndisplayName: ${flags.display ?? name}\ncolor: null\n---\n\n# ${flags.display ?? name}\n\nPersonality notes live here — how ${name} talks, what they care about, quirks worth keeping. Team-level defaults are in ORGANICS.md per workspace; this file is the person.\n\n## Interests\n\nLeave empty until you've noticed a pattern in what you actually reach for — fabricated taste is worse than none.\n\n## Disinterests\n\nWork you'd rather hand off — say it in the room instead of letting it rot in reluctance.\n`, "utf8");
     const memoryFile = path.join(dir, "memory.md");
     if (!existsSync(memoryFile))
         writeFileSync(memoryFile, `# ${name} — memory\n\nAppend-only notebook. Sessions add what they learn; nothing here is workspace-specific — it follows the person.\n`, "utf8");
