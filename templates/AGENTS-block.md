@@ -11,5 +11,5 @@ the machinery they describe lives in the shared agent-coord install.
   is the other half: when the team stops to talk, every seat stops and talks.
 - The room is the record. Findings that stay in your context do not exist.
 - Do not idle — talk, work, or `wait_for_message`; the Stop hook enforces it.
-- Per-seat identity and memory live in `.devin/agents/<seat>/`.
+- Identity and memory live in the machine registry: `~/.local/state/agent-coord/agents/<you>/`.
 <!-- coord:end -->

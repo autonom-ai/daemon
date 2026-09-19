@@ -9,8 +9,9 @@
 A workspace-agnostic toolkit for running multi-agent teams on top of
 [`agent-coord-mcp`](https://github.com/davidbalzan/agent-coord-mcp). One repo holds
 the canonical implementation — the chat UI, lifecycle hooks, coordination tools,
-skill templates, and the global identity registry — and `bin/coord` wires any
-workspace into it with a single command.
+and skill templates — and `bin/coord` wires any workspace into it with a single
+command. Identities, memories, and port allocations live in machine-local state,
+never in this repo.
 
 ## What it gives a workspace
 
@@ -19,7 +20,7 @@ workspace into it with a single command.
 | Chat UI | A browser team room for the human: rooms, DMs, `@seat`/`@display`/`#room` pings, merged message runs, recess and stand-down controls, live-reconnecting SSE feed. Served per workspace on its own port. |
 | Lifecycle hooks | Session-start identity + personality + memory injection, prompt context, and a keep-alive Stop hook so seats stay reachable. |
 | `bin/coord` | The CLI: `init`, `seat add`, `chat start/stop/status/restart`, `update`, `identity add`. |
-| Identity registry | `agents/<name>/` holds `identity.md` + `memory.md` — global and portable, so an identity carries its self across workspaces. |
+| Identity registry | `~/.local/state/agent-coord/agents/<name>/` holds `identity.md` + `memory.md` — global and portable, so an identity carries its self across workspaces. |
 | Rendered skills | Per-project `<project>-team` and `<project>-recess` skills generated at init. |
 | Docs | `COORDINATION.md` and `ORGANICS.md` planted at the workspace root on first init. |
 
@@ -40,8 +41,9 @@ bin/coord init /path/to/workspace --seats a:rose,b:jane
 bin/coord chat start /path/to/workspace
 ```
 
-`init` allocates a chat port from `ports.json`, writes `.devin/coord.json` and
-the per-seat `mcp_config.json` entries, symlinks `chat`/`hooks`/`tools`, renders
+`init` allocates a chat port (tracked in
+`~/.local/state/agent-coord/ports.json`), writes `.devin/coord.json` and the
+per-seat `mcp_config.json` entries, symlinks `chat`/`hooks`/`tools`, renders
 the two skills, plants `COORDINATION.md` + `ORGANICS.md`, and appends the
 coordination block to `AGENTS.md`. `chat start` brings the UI up on the
 allocated port.
@@ -61,9 +63,14 @@ bin/coord update /path/to/workspace               # verify links + rendered skil
 | `core/hooks/` | `session-start`, `prompt-context`, `keep-alive`, `coord` helper. |
 | `core/tools/` | `coord-web`, `coord-chat`, `coord-recess` workspace scripts. |
 | `core/skills/` | `team` and `recess` skill templates (rendered per project). |
-| `agents/` | Global identity registry — one dir per named agent. |
 | `templates/` | `coord.json`, `mcp_config.json`, `hooks.v1.json`, `AGENTS-block`, the two workspace docs. |
-| `ports.json` | Chat-port allocations per workspace. |
+
+Machine-local state (never committed, override with `AGENT_COORD_HOME`):
+
+| Path | Contents |
+| --- | --- |
+| `~/.local/state/agent-coord/agents/` | Global identity registry — one dir per named agent (`identity.md` + `memory.md`). |
+| `~/.local/state/agent-coord/ports.json` | Chat-port allocations per workspace. |
 
 ## How it fits together
 
