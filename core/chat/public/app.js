@@ -281,7 +281,7 @@ function renderDms()
         const active = state.dm === agent.id ? "active" : "";
         const stale = agent.online ? "" : "offline";
         return `<li class="${active} ${stale}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
-            <span class="name">${esc(displayName(agent.id))}</span>
+            <span class="name" style="color:${seatColor(agent.id)}">${esc(displayName(agent.id))}</span>
             <span class="meta">${unread ? `${unread} unread` : "1:1"}</span>
         </li>`;
     }).join("");
