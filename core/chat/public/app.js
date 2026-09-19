@@ -217,8 +217,9 @@ function renderMessages(scroll = "force")
             && m.ts - prev.ts < 5 * 60_000
             && !isPing(m);
         prev = m;
-        const tag = m.stream === "dm" ? `<span class="tag">dm ${mine ? "→ " + esc(displayName(m.to ?? "")) : "from " + esc(displayName(m.from))}</span>`
-            : (state.room ? "" : `<span class="tag">#${esc(m.room ?? "")}</span>`);
+        // DMs render only inside their own conversation view, so a "dm → x"
+        // tag restates the view itself — room tags stay for the all-rooms view.
+        const tag = m.stream === "room" && !state.room ? `<span class="tag">#${esc(m.room ?? "")}</span>` : "";
         const badge = m.kind ? `<span class="badge ${esc(m.kind)}">${esc(m.kind)}</span>` : "";
         const ping = isPing(m) ? "ping" : "";
         const meta = merged
