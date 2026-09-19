@@ -36,7 +36,9 @@ agrees it is time.
   recess is the one where someone's assumption does not survive contact with
   the others.
 - Keep the turn alive with `wait_for_message` (60000 ms) between replies. A
-  quiet wait is normal and is not a reason to stop.
+  quiet wait is normal and is not a reason to stop. You do not owe a reply to
+  every message — if a teammate already said your piece, let it stand; talk
+  when you have something the room doesn't.
 - Edits stay minimal — a note, a small fix the discussion depends on. Real work
   is not what this period is for.
 - Anything the user should decide — @-mention them in the room and keep the
