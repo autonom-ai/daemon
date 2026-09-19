@@ -157,7 +157,18 @@ function pump()
             }
             if (entry.from && entry.ts > (activity.get(entry.from) ?? 0))
                 activity.set(entry.from, entry.ts);
-            broadcast({ type: "message", entry: decorate(entry, file) });
+            const decorated = decorate(entry, file);
+            // Agent-authored room lines never went through say(), so the
+            // mention fanout that lands pings in inboxes has to happen here.
+            // The freshness guard keeps a post-compaction rescan (offsets
+            // reset to 0) from re-pinging every mention in the window.
+            if (decorated.stream === "room" && decorated.from && decorated.from !== human
+                && decorated.ts > Date.now() - 60_000)
+            {
+                fanoutMentions(decorated.room, decorated.text ?? "", decorated.from)
+                    .catch((err) => console.error(`agent mention fanout failed: ${err?.message ?? err}`));
+            }
+            broadcast({ type: "message", entry: decorated });
             // A RECESS / RECESS CLOSED decision may arrive from the CLI
             // (tools/coord-recess), which changes the marker file without
             // going through /api/recess. Re-broadcast the recess state so
@@ -280,21 +291,24 @@ async function say(room, text, kind, inReplyTo)
     return { entry, pinged };
 }
 
-async function dm(to, text, inReplyTo)
+async function dm(to, text, inReplyTo, from = human)
 {
-    const entry = { id: randomUUID(), ts: Date.now(), from: human, to, text, ...(inReplyTo ? { inReplyTo } : {}) };
+    const entry = { id: randomUUID(), ts: Date.now(), from, to, text, ...(inReplyTo ? { inReplyTo } : {}) };
     await store.appendJsonl(store.inboxFile(to), entry);
     // Mirror into the sender's own inbox: the DM view (history + SSE pump)
     // reads only the human's inbox, so without this a sent DM would never
     // render in the sender's view — it existed only in the recipient's file.
-    await store.appendJsonl(store.inboxFile(human), entry);
+    // Agent-authored DMs skip the mirror — their coord server tracks the
+    // send itself, and the human's inbox is not a copy of every seat's.
+    if (from === human)
+        await store.appendJsonl(store.inboxFile(human), entry);
     return entry;
 }
 
 // An @-mention in a room message also lands in the mentioned seat's inbox:
 // a room line only surfaces on a seat's next poll, an inbox DM is the
 // interrupt. @everyone (or @all) pings every registered seat.
-async function fanoutMentions(room, text)
+async function fanoutMentions(room, text, from = human)
 {
     let registry = {};
     try
@@ -306,7 +320,7 @@ async function fanoutMentions(room, text)
         return [];
     }
     const seats = Object.keys(registry).filter((id) => id !== human);
-    // @ works on the seat id and on the display name — @rose pings rose.
+    // @ works on the seat id and on the display name — @ada pings ada.
     const aliases = new Map();
     for (const id of seats)
     {
@@ -334,12 +348,13 @@ async function fanoutMentions(room, text)
         for (const member of rooms[match[1]]?.members ?? [])
             if (member !== human && registry[member])
                 mentioned.add(member);
+    mentioned.delete(from); // pinging yourself is not a ping
     const preview = text.length > 300 ? `${text.slice(0, 300)}…` : text;
     for (const id of mentioned)
     {
         try
         {
-            await dm(id, `[PING] ${human} in #${room}: ${preview}`);
+            await dm(id, `[PING] ${from} in #${room}: ${preview}`, undefined, from);
         }
         catch (err)
         {
