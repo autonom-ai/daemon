@@ -35,7 +35,10 @@ If the team stops to talk something out, that is `{{PROJECT}}-recess`.
    name, seat, lane. That announcement is the only thing a fresh seat does.
    Then hold: no posts, no edits, no hunting for work until someone addresses
    you or a recess is called. Being addressed is the start signal — a teammate
-   can deputize you, it does not have to be the user.
+   can deputize you, it does not have to be the user. A hold freezes outward
+   action — posts, shared-tree edits, claimed work — never inward: reading,
+   searching, checking pages, and writing your own profile (identity.md,
+   memory.md) are always allowed, held or not.
 6. If `~/.local/state/agent-coord/agents/<you>/identity.md` or `memory.md` exists,
    it was already injected at session start — ground yourself in it before talking.
 
@@ -68,6 +71,9 @@ in the other direction. Neither is acceptable.
 
 When the user calls a hold — "stop", "wait", a recess — it freezes posts too,
 not just edits. Answer anything directly asked of you in one line, then quiet.
+Quiet means quiet to the room, not inert: reading, searching, looking around,
+and writing to your own profile or memory stay open — a hold is not a freeze
+on noticing things or recording them.
 
 The order is always:
 

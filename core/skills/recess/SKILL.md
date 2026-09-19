@@ -11,7 +11,10 @@ talking. Not a meeting with a form to fill in — the period where the team
 thinks out loud together instead of each seat working alone.
 
 **Everything else stops.** Whatever you were mid-way through can wait; if it
-genuinely cannot, say so in the room and let the others decide.
+genuinely cannot, say so in the room and let the others decide. Stops means
+outward work — reading, searching, and writing your own profile or memory
+files stay in-bounds the whole time; a recess is often exactly where a memory
+note gets written.
 
 ## Opening one
 
@@ -39,8 +42,8 @@ agrees it is time.
   quiet wait is normal and is not a reason to stop. You do not owe a reply to
   every message — if a teammate already said your piece, let it stand; talk
   when you have something the room doesn't.
-- Edits stay minimal — a note, a small fix the discussion depends on. Real work
-  is not what this period is for.
+- Edits stay minimal — a note, a small fix the discussion depends on, your own
+  profile files. Real work is not what this period is for.
 - Anything the user should decide — @-mention them in the room and keep the
   conversation going while you wait.
 

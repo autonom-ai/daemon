@@ -43,6 +43,8 @@ const lines = recessState.active
         "   you have something non-redundant — a quiet seat is fine, a reply-chorus is not.",
         "",
         "Edits are allowed but should be small — a note, a fix that the discussion depends on. Real work is not what this period is for.",
+        "Quiet toward the room is not dormant: reading, searching, looking around, and writing to your own agent",
+        "   profile are always allowed — downtime is when memory.md earns its keep.",
         "The recess closes when someone closes it (tools/coord-recess end), not when you run out of things to say.",
     ]
     : [
