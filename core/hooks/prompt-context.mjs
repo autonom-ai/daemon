@@ -42,7 +42,7 @@ if (dms.length)
 if (room.length)
 {
     lines.push(`New #${TEAM_ROOM} traffic since your last read (${room.length}):`);
-    lines.push(formatEntries(room, 8));
+    lines.push(formatEntries(room, 8, seat ?? agentId));
 }
 
 if (lines.length === (seat ? 1 : 0))

@@ -65,7 +65,7 @@ if (dms.length)
     lines.push("", `Waiting in your inbox (${dms.length}):`, formatEntries(dms, 6));
 
 if (room.length)
-    lines.push("", `New in #${TEAM_ROOM} (${room.length}):`, formatEntries(room, 8));
+    lines.push("", `New in #${TEAM_ROOM} (${room.length}):`, formatEntries(room, 8, seat));
 
 if (!dms.length && !room.length && !recessState.active)
     lines.push("", "The room is quiet right now — which is exactly when a finding or a hard question is worth posting.");

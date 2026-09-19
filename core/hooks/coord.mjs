@@ -275,11 +275,16 @@ export function clip(text, max)
     return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
 }
 
-export function formatEntries(entries, limit)
+export function formatEntries(entries, limit, highlight)
 {
     return entries
         .slice(-limit)
-        .map((e) => `[${new Date(e.ts).toISOString().slice(11, 19)}] ${e.from}${e.kind ? ` (${e.kind})` : ""}: ${clip(e.text, 400)}`)
+        .map((e) =>
+        {
+            const addressed = highlight
+                && new RegExp(`@${highlight}\\b|\\b${highlight}\\b`, "i").test(e.text ?? "");
+            return `[${new Date(e.ts).toISOString().slice(11, 19)}] ${addressed ? ">> " : ""}${e.from}${e.kind ? ` (${e.kind})` : ""}: ${clip(e.text, 400)}`;
+        })
         .join("\n");
 }
 

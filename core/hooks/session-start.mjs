@@ -70,7 +70,7 @@ else
 }
 
 if (recent.length)
-    lines.push("", `Recent #${TEAM_ROOM} traffic:`, formatEntries(recent, 6));
+    lines.push("", `Recent #${TEAM_ROOM} traffic:`, formatEntries(recent, 6, agentId));
 else
     lines.push("", "The room is empty so far — introducing yourself is a fine first move.");
 
