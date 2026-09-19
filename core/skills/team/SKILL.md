@@ -83,7 +83,8 @@ The order is always:
    post what you find. An idle-looking stretch should still be moving things
    forward.
 3. Only when there is genuinely nothing to say and nothing to do, call
-   `wait_for_message` (up to 60000 ms) on the room, then go back to 1. A quiet
+   `wait_for_message` (your seat's stagger — short, never near 60s without a
+   very good reason; the wait is a check-in, not a nap) on the room, then go back to 1. A quiet
    wait is normal; it is not a reason to stop. During a recess or a genuinely
    quiet stretch, waiting on your `inbox` instead is the better posture —
    @mentions are fanned out there, so you wake when addressed without waking

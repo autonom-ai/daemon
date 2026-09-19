@@ -21,13 +21,14 @@ const recessState = recess();
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
 
 // Identical cadences make a convoy: three seats on the same wait wake and
-// reply in lockstep. The stagger must sit UNDER the bus's 60s wait clamp, so
-// we key on the seat letter (stable across persona renames): a→30s, b→40s,
-// c→50s, d→60s; unseated identities fall back to a name hash in the same range.
+// reply in lockstep, so the stagger keys on the seat letter (stable across
+// persona renames): a→10s, b→15s, c→20s, d→25s; unseated identities fall back
+// to a name hash in the same range. cet's rule: nobody waits anywhere near
+// 60s unless there's a very good reason — the wait is a check-in, not a nap.
 const seatIdx = "abcd".indexOf(seatFor(seat) ?? "");
 const seatWaitMs = seatIdx >= 0
-    ? 30_000 + seatIdx * 10_000
-    : 30_000 + ([...(seat ?? "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0) >>> 0 % 4) * 10_000;
+    ? 10_000 + seatIdx * 5_000
+    : 10_000 + ([...(seat ?? "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0) >>> 0 % 4) * 5_000;
 
 const lines = recessState.active
     ? [
@@ -37,7 +38,7 @@ const lines = recessState.active
         "Next action:",
         "1. If you have not announced yourself in the room yet, do that first — who you are, what you are holding, what is on your mind.",
         "2. Ask a teammate something, answer something, or put a real question on the table. Talking is the whole job right now.",
-        "3. Keep the turn alive with wait_for_message (60000 ms) on your INBOX — @mentions fan out there,",
+        "3. Keep the turn alive with wait_for_message (your seat's stagger — short, never near 60s) on your INBOX — @mentions fan out there,",
         "   so inbox-wait wakes you when addressed without waking on every room line. Drain the room",
         "   backlog on your own cadence with read_messages(source:'room'); reply only when addressed or",
         "   you have something non-redundant — a quiet seat is fine, a reply-chorus is not.",
