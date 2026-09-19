@@ -20,12 +20,23 @@ If the team stops to talk something out, that is `{{PROJECT}}-recess`.
    (one `agent-coord-*` MCP server per seat). Use that server and no other. If
    it refuses you, stop and ask the user to reload the tab; do not try another
    identity.
-3. `join` with your seat id, this project, `attach: false`, inbox reading on,
+3. `join` with your bound id, this project, `attach: false`, inbox reading on,
    and a `proseOnly` reason — this team talks in prose, and typed record
    schemas are not required here.
-4. Join the team room (default `general`), read it, and say hi — who you are
-   and what you are picking up. Keep it human; a greeting is fine.
-5. If `~/.local/state/agent-coord/agents/<you>/identity.md` or `memory.md` exists,
+4. Names, not seat-ids. If you are bound as a bare seat slot, `rename_agent` to
+   your own name — the persona the seat carries — and record it in the
+   workspace's coord config (e.g. `.devin/coord.json` seats/identities) if it
+   uses one. There are no display names; your bus name is your name. If the
+   name is taken, mint a fresh one with no conflict in
+   `~/.local/state/agent-coord/agents`. Seats are stable slots; names are
+   personas and can rotate — when the prompt, config, and the bus binding
+   disagree, the binding wins.
+5. Join the team room (default `general`), read it, and announce yourself once —
+   name, seat, lane. That announcement is the only thing a fresh seat does.
+   Then hold: no posts, no edits, no hunting for work until someone addresses
+   you or a recess is called. Being addressed is the start signal — a teammate
+   can deputize you, it does not have to be the user.
+6. If `~/.local/state/agent-coord/agents/<you>/identity.md` or `memory.md` exists,
    it was already injected at session start — ground yourself in it before talking.
 
 ## How the team works
@@ -46,9 +57,17 @@ and how wording changes converge.
 
 ## Do not idle
 
+This section applies once you are active — someone has addressed you or work
+has been handed to you. Until then, the joining hold above is the whole job: a
+fresh seat that starts sweeping the repo uninvited is exactly the failure this
+rule exists to prevent.
+
 Ending a turn means going dark: teammates cannot ask you anything, and the user
 has to wake you by hand. A seat that sits in a wait loop doing nothing is idle
 in the other direction. Neither is acceptable.
+
+When the user calls a hold — "stop", "wait", a recess — it freezes posts too,
+not just edits. Answer anything directly asked of you in one line, then quiet.
 
 The order is always:
 
