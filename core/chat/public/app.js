@@ -101,6 +101,16 @@ function isPing(message)
     return false;
 }
 
+// A [PING] DM is the mention fanout's delivery mechanism — it exists to wake
+// a seat's inbox, and the room message it points at is the readable artifact.
+// Hidden from the DM view and from its unread count: it is a notification,
+// not conversation. Deliberately distinct from isPing(), which marks room
+// messages that mention the human.
+function isPingMirror(message)
+{
+    return message.stream === "dm" && (message.text ?? "").startsWith("[PING]");
+}
+
 function esc(text)
 {
     return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -175,6 +185,8 @@ function clock(ts)
 
 function visible(message)
 {
+    if (isPingMirror(message))
+        return false;
     if (state.dm)
     {
         // A 1:1 shows both directions of that conversation and nothing else.
@@ -271,6 +283,7 @@ function renderDms()
 {
     const unreadFor = (agent) => state.messages.filter((message) =>
         message.stream === "dm" && message.from === agent.id && message.to === state.human
+        && !isPingMirror(message)
         && message.ts > (state.seen[`dm:${agent.id}`] ?? 0)).length;
 
     const shown = state.agents
