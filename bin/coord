@@ -33,10 +33,13 @@ const CORE_CHAT = path.join(ROOT, "core", "chat");
 const CORE_HOOKS = path.join(ROOT, "core", "hooks");
 const CORE_TOOLS = path.join(ROOT, "core", "tools");
 // Machine-local state — the identity registry and port allocations belong to
-// this machine's user, not the repository. Override with AGENT_COORD_HOME.
+// this machine's user, not the repository. Override with AGENT_COORD_HOME for
+// the whole state dir, or AGENT_COORD_AGENTS for just the identity registry —
+// the same override the hooks honor (core/hooks/coord.mjs), so a test run
+// cannot write into the real registry by accident.
 const STATE_HOME = process.env.AGENT_COORD_HOME ??
     path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "agent-coord");
-const AGENTS_DIR = path.join(STATE_HOME, "agents");
+const AGENTS_DIR = process.env.AGENT_COORD_AGENTS ?? path.join(STATE_HOME, "agents");
 const TEMPLATES = path.join(ROOT, "templates");
 const PORTS_FILE = path.join(STATE_HOME, "ports.json");
 const SERVER_JS = path.join(ROOT, "node_modules", "agent-coord-mcp", "dist", "server.js");
