@@ -273,7 +273,6 @@ input[type="checkbox"]:checked::after { transform: translateX(13px); background:
 .msg .when { color: var(--faint); font-size: 11px; padding-top: 3px; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
 .msg .body { min-width: 0; max-width: 72%; }
 .msg .who { font-weight: 600; font-size: 12.5px; }
-.msg .who.cet { color: var(--human); }
 
 .msg .badge
 {
@@ -424,7 +423,6 @@ textarea::placeholder { color: var(--faint); }
 .mentions li .meta { color: var(--faint); font-size: 12px; }
 .mentions li.active { background: var(--accent-soft); }
 .mentions li .who { font-weight: 600; }
-.mentions li .who.cet { color: var(--human); }
 .mentions li .who.everyone { color: var(--decision); }
 
 .msg .text .mention { color: var(--accent); font-weight: 600; }

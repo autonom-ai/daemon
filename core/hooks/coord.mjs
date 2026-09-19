@@ -10,6 +10,7 @@
 // and falls back to sane defaults when it is absent or partial.
 
 import { execFileSync } from "node:child_process";
+import os from "node:os";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,7 +50,11 @@ export const SEAT_IDENTITIES = CONFIG.seats;
 export const HUMAN_SEAT = CONFIG.human;
 export const STAND_DOWN_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "stand-down");
 export const RECESS_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "recess");
-export const AGENTS_HOME = path.join(CANONICAL_ROOT, "agents");
+// The identity registry is machine-local state, not repo content — an
+// identity follows the person, and the person is not something a public repo
+// should ship. Override with AGENT_COORD_AGENTS.
+export const AGENTS_HOME = process.env.AGENT_COORD_AGENTS ??
+    path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "agent-coord", "agents");
 
 // The seat→identity map is coord.json's `seats` ({ "b": "rose" }). On the bus
 // a session binds the identity name (AGENT_COORD_BOUND_AGENT), so a detected

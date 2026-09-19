@@ -25,8 +25,8 @@ If the team stops to talk something out, that is `{{PROJECT}}-recess`.
    schemas are not required here.
 4. Join the team room (default `general`), read it, and say hi — who you are
    and what you are picking up. Keep it human; a greeting is fine.
-5. If `.devin/agents/<seat>/identity.md` or `memory.md` exists, it was already
-   injected at session start — ground yourself in it before talking.
+5. If `~/.local/state/agent-coord/agents/<you>/identity.md` or `memory.md` exists,
+   it was already injected at session start — ground yourself in it before talking.
 
 ## How the team works
 

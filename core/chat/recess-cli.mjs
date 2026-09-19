@@ -11,7 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = process.env.DEVIN_PROJECT_DIR ?? path.resolve(here, "..", "..");
 const [action = "status", ...rest] = process.argv.slice(2);
 const note = rest.join(" ").trim();
-const by = process.env.COORD_SEAT ?? process.env.JOBS_CHAT_ID ?? process.env.USER ?? "unknown";
+const by = process.env.COORD_SEAT ?? process.env.USER ?? "unknown";
 const room = process.env.COORD_ROOM ?? "general";
 
 const state = recessState(projectDir);

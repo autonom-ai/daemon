@@ -3,7 +3,7 @@
 How this team behaves — the defaults every seat follows unless the room says
 otherwise. This file is copied once at `coord init` and never overwritten; edit
 it to change the team's default personality for this workspace. Seat-level
-identity (name, quirks, voice) lives in `.devin/agents/<seat>/identity.md`.
+identity (name, quirks, voice) lives in `~/.local/state/agent-coord/agents/<you>/identity.md`.
 
 ## How the team talks
 

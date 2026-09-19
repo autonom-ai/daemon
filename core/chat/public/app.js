@@ -7,7 +7,7 @@ const state = {
     seen: JSON.parse(localStorage.getItem("coord-chat-seen") ?? "{}"),
     room: null,
     dm: null,
-    human: "cet",
+    human: "user",
     project: "team",
     teamRoom: "general",
     standDown: false,
@@ -45,8 +45,8 @@ const el = {
     recessCancel: document.getElementById("recess-cancel"),
 };
 
-// The seats that can be pinged, plus @everyone. `cet` is excluded: pinging
-// yourself is not a ping. Display names ping too (@rose hits rose), and
+// The seats that can be pinged, plus @everyone. The human is excluded:
+// pinging yourself is not a ping. Display names ping too (@rose hits rose), and
 // #room pings every member of that room.
 function mentionCandidates(sigil)
 {
@@ -82,7 +82,7 @@ function knownMentions()
     return new Set(["everyone", ...state.agents.map((agent) => agent.id)]);
 }
 
-// A ping is a room message that names cet or everyone. This is the "priority #1"
+// A ping is a room message that names the human or everyone. This is the "priority #1"
 // rule made visible: such a message is marked in the log rather than left to look
 // like ordinary chatter.
 function isPing(message)
@@ -309,7 +309,7 @@ function renderDocs(payload)
     el.standDown.className = payload.standDown ? "" : "danger";
     el.standDownBanner.hidden = !payload.standDown;
 
-    // Which build is live is a fact cet can glance at, not something inferred
+    // Which build is live is a fact the user can glance at, not something inferred
     // from a PID. Stale code shows up as a build hash that never changes.
     if (payload.build)
     {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Team chat — cet's seat on the same file-backed bus the seats use.
+// Team chat — the human's seat on the same file-backed bus the seats use.
 //
 // The bus is JSONL on disk, so this is not a client of an API: it appends to the
 // same files the coord servers read and tails the same files they write. It
@@ -38,8 +38,8 @@ const store = await import(pathToFileURL(storePath).href);
 
 const args = parseArgs(process.argv.slice(2));
 const host = args.host ?? "127.0.0.1";
-const port = Number(args.port ?? process.env.COORD_CHAT_PORT ?? process.env.JOBS_CHAT_PORT ?? 7778);
-const human = args.id ?? process.env.COORD_CHAT_ID ?? process.env.JOBS_CHAT_ID ?? process.env.USER ?? "cet";
+const port = Number(args.port ?? process.env.COORD_CHAT_PORT ?? 7778);
+const human = args.id ?? process.env.COORD_CHAT_ID ?? process.env.USER ?? "user";
 const project = args.project ?? process.env.COORD_PROJECT ?? path.basename(projectDir);
 const teamRoom = args.room ?? "general";
 const standDownFile = path.join(projectDir, ".devin", "collaboration", "stand-down");
