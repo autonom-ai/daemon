@@ -256,14 +256,28 @@ function renderSidebar()
     renderComposeMode();
 }
 
+// A seat silent for a day is gone, not inactive — it sinks out of the list
+// entirely unless it left unread pings. Offline seats dim and drop to the
+// bottom; the green/gray dot is heartbeat-fresh (under 5 minutes) or not.
+const DM_INACTIVE_MS = 24 * 60 * 60_000;
+
 function renderDms()
 {
-    el.dms.innerHTML = state.agents.map((agent) =>
+    const unreadFor = (agent) => state.messages.filter((message) =>
+        message.stream === "dm" && message.from === agent.id && message.to === state.human
+        && message.ts > (state.seen[`dm:${agent.id}`] ?? 0)).length;
+
+    const shown = state.agents
+        .filter((agent) => agent.id === state.human || agent.online
+            || Date.now() - (agent.lastHeartbeat ?? 0) < DM_INACTIVE_MS
+            || unreadFor(agent) > 0)
+        .sort((a, b) => Number(b.online) - Number(a.online)
+            || (a.id === state.human ? -1 : b.id === state.human ? 1 : a.id.localeCompare(b.id)));
+
+    el.dms.innerHTML = shown.map((agent) =>
     {
         const isMe = agent.id === state.human;
-        const unread = state.messages.filter((message) =>
-            message.stream === "dm" && message.from === agent.id && message.to === state.human
-            && message.ts > (state.seen[`dm:${agent.id}`] ?? 0)).length;
+        const unread = unreadFor(agent);
         const active = state.dm === agent.id ? "active" : "";
         const dot = agent.online ? "online" : "offline";
         const label = isMe ? `${esc(displayName(agent.id))} (you)` : esc(displayName(agent.id));

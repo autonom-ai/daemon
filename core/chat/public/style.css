@@ -160,6 +160,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .rooms li.unread .name { color: var(--decision); font-weight: 600; }
 .dms li.unread .name { color: var(--human); font-weight: 600; }
 .dms li.active { box-shadow: inset 2px 0 0 var(--accent); }
+.dms li.offline { opacity: 0.5; }
 
 .dms li .presence
 {
