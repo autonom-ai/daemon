@@ -17,13 +17,10 @@ const state = {
 const el = {
     rooms: document.getElementById("rooms"),
     dms: document.getElementById("dms"),
-    composeMode: document.getElementById("compose-mode"),
     messages: document.getElementById("messages"),
     count: document.getElementById("count"),
     conn: document.getElementById("conn"),
     build: document.getElementById("build"),
-    search: document.getElementById("search"),
-    autoscroll: document.getElementById("autoscroll"),
     menu: document.getElementById("menu"),
     kind: document.getElementById("kind"),
     text: document.getElementById("text"),
@@ -192,14 +189,16 @@ function visible(message)
         if (state.room && message.stream === "room" && message.room !== state.room)
             return false;
     }
-    const query = el.search.value.trim().toLowerCase();
-    if (query && !`${message.from} ${message.text}`.toLowerCase().includes(query))
-        return false;
     return true;
 }
 
-function renderMessages(shouldScroll = true)
+// Scroll modes: "force" lands at the newest line (view switch, first load,
+// your own send); "auto" follows only when the view is already at the
+// bottom, so reading backscroll never gets yanked; anything else leaves
+// the scroll position alone.
+function renderMessages(scroll = "force")
 {
+    const nearBottom = el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight < 80;
     const shown = state.messages.filter(visible);
     let prev = null;
     el.messages.innerHTML = shown.map((m) =>
@@ -234,7 +233,7 @@ function renderMessages(shouldScroll = true)
         </li>`;
     }).join("");
     el.count.textContent = `${shown.length} / ${state.messages.length}`;
-    if (shouldScroll && el.autoscroll.checked)
+    if (scroll === "force" || (scroll === "auto" && nearBottom))
         el.messages.scrollTop = el.messages.scrollHeight;
 }
 
@@ -253,7 +252,10 @@ function renderSidebar()
 
     renderDms();
 
-    renderComposeMode();
+    const { mode, name } = destination();
+    el.text.placeholder = mode === "dm"
+        ? `Direct to ${displayName(name)} — only they see it. Enter sends, shift+enter for a newline.`
+        : `To #${name} — enter sends, shift+enter for a newline. @ pings a seat or display name, # pings a room.`;
 }
 
 // A seat is as alive as its last bus touch — a message it sent or a read
@@ -288,8 +290,8 @@ function renderDms()
 }
 
 // Where the next message goes. There is no destination control: the view you are
-// looking at IS the destination, which is why the sidebar and the mode strip have
-// to agree at all times.
+// looking at IS the destination, which is why the sidebar and the composer
+// placeholder have to agree at all times.
 function destination()
 {
     if (state.dm)
@@ -297,17 +299,6 @@ function destination()
     return { mode: "room", name: state.room ?? state.teamRoom };
 }
 
-function renderComposeMode()
-{
-    const { mode, name } = destination();
-    el.composeMode.className = mode === "dm" ? "compose-mode dm" : "compose-mode";
-    el.composeMode.innerHTML = mode === "dm"
-        ? `direct to <strong>${esc(displayName(name))}</strong> — only ${esc(displayName(name))} sees this.<button type="button" id="compose-mode-exit">send to #general instead</button>`
-        : `to <strong>#${esc(name)}</strong> — everyone in the room sees this`;
-    el.text.placeholder = mode === "dm"
-        ? `Direct to ${displayName(name)} — only they see it. Enter sends, shift+enter for a newline.`
-        : `To #${name} — enter sends, shift+enter for a newline. @ pings a seat or display name, # pings a room.`;
-}
 
 function openDm(seat)
 {
@@ -422,7 +413,11 @@ function connect()
                 state.messages.sort((a, b) => a.ts - b.ts);
                 // Only scroll for a message the current view actually shows —
                 // traffic in another room shouldn't yank the scroll position.
-                renderMessages(visible(payload.entry));
+                // Your own sends snap to bottom unconditionally; anything
+                // else follows only when you're already there.
+                renderMessages(visible(payload.entry)
+                    ? (payload.entry.from === state.human ? "force" : "auto")
+                    : "none");
                 markSeen();
                 renderSidebar();
                 if (payload.entry.from !== state.human && payload.entry.stream === "room")
@@ -648,18 +643,6 @@ el.dms.addEventListener("click", (event) =>
 
 // Clicking a seat in the Direct list opens the 1:1; the old Seats sidebar list
 // was removed as a third copy of the same information (Direct + header chips).
-
-el.composeMode.addEventListener("click", (event) =>
-{
-    if (!event.target.closest("#compose-mode-exit"))
-        return;
-    state.dm = null;
-    state.room = state.rooms.some((room) => room.name === state.teamRoom) ? state.teamRoom : (state.rooms[0]?.name ?? null);
-    renderSidebar();
-    renderMessages();
-});
-
-el.search.addEventListener("input", renderMessages);
 
 async function recess(action, note)
 {

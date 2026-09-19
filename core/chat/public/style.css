@@ -190,23 +190,6 @@ ul { list-style: none; margin: 0; padding: 0; }
     background: var(--panel);
 }
 
-.toolbar input[type="search"]
-{
-    background: var(--input-bg);
-    border: 1px solid var(--line-2);
-    border-radius: var(--radius);
-    color: var(--text);
-    padding: 5px 10px;
-    font: inherit;
-    width: 240px;
-    outline: none;
-    transition: border-color 0.12s, box-shadow 0.12s;
-}
-
-.toolbar input[type="search"]::placeholder { color: var(--faint); }
-.toolbar input[type="search"]:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-
-.toolbar label { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
 .count { margin-left: auto; color: var(--faint); }
 #menu { display: none; font-size: 15px; padding: 4px 10px; }
 
@@ -370,27 +353,6 @@ textarea::placeholder { color: var(--faint); }
 
 /* Where the next message goes. The DM state is deliberately loud: a seat list is
    one click away and a quiet select is how you send a private line to the room. */
-.compose-mode
-{
-    font-size: 12px;
-    color: var(--dim);
-    padding: 6px 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--panel-2);
-}
-
-.compose-mode strong { color: var(--text); font-weight: 600; }
-.compose-mode.dm { border-color: rgba(212, 175, 55, 0.35); color: #eedd9b; background: rgba(212, 175, 55, 0.08); }
-.compose-mode.dm strong { color: #e5b93d; }
-.compose-mode button
-{
-    margin-left: 10px;
-    padding: 2px 8px;
-    font-size: 11px;
-    background: transparent;
-}
-
 .mentions
 {
     position: absolute;
@@ -496,5 +458,4 @@ textarea::placeholder { color: var(--faint); }
 
     .msg .body { max-width: 88%; }
     .toolbar { flex-wrap: wrap; gap: 10px; }
-    .toolbar input[type="search"] { order: 6; width: 100%; }
 }
