@@ -203,17 +203,27 @@ export function detectIdentity()
     const markers = readdirSync(dir)
         .filter((name) => name.endsWith(".json"))
         .map((name) => readJson(path.join(dir, name), null))
-        .filter((m) => m && (!SEATS.length ||
-            SEATS.includes(m.agentId) || Object.values(SEAT_IDENTITIES).includes(m.agentId)));
+        .filter((m) => m && isAlive(m.pid));
     if (!markers.length)
         return null;
     const ancestry = ancestorChain(process.pid, 6);
-    const mine = markers.filter((m) => ancestry.includes(parentOf(m.pid)));
+    const mine = markers.filter((m) => ancestry.includes(m.pid) || ancestry.includes(parentOf(m.pid)));
     if (mine.length === 1)
         return mine[0].agentId;
-    if (markers.length === 1)
-        return markers[0].agentId;
     return null;
+}
+
+function isAlive(pid)
+{
+    try
+    {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch
+    {
+        return false;
+    }
 }
 
 function parentOf(pid)
