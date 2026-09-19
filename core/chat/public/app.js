@@ -206,13 +206,16 @@ function renderMessages(shouldScroll = true)
     {
         const mine = m.from === state.human;
         // A run of consecutive messages from one sender shows the name once —
-        // on the first. A ping still earns its full meta row, and a stream or
-        // room change ends the run even from the same sender. A kind badge on a
-        // merged message keeps a slim meta row so the badge is not hidden.
+        // on the first. A ping still earns its full meta row, and a stream,
+        // room, or long time gap ends the run even from the same sender — a
+        // message an hour later is a new thought, not a continuation, and
+        // hiding the name on it just reads as a blank author. A kind badge on
+        // a merged message keeps a slim meta row so the badge is not hidden.
         const merged = prev !== null
             && prev.from === m.from
             && prev.stream === m.stream
             && (prev.room ?? null) === (m.room ?? null)
+            && m.ts - prev.ts < 5 * 60_000
             && !isPing(m);
         prev = m;
         const tag = m.stream === "dm" ? `<span class="tag">dm ${mine ? "→ " + esc(displayName(m.to ?? "")) : "from " + esc(displayName(m.from))}</span>`
