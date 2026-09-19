@@ -101,14 +101,15 @@ function isPing(message)
     return false;
 }
 
-// A [PING] DM is the mention fanout's delivery mechanism — it exists to wake
-// a seat's inbox, and the room message it points at is the readable artifact.
-// Hidden from the DM view and from its unread count: it is a notification,
-// not conversation. Deliberately distinct from isPing(), which marks room
-// messages that mention the human.
+// A ping DM is notification machinery, not conversation — "[PING]" fanout
+// mirrors exist to wake a seat's inbox (the room message is the readable
+// artifact), and "PING:" is the echo form from the ping tool. Both hide from
+// the DM view and its unread count. Deliberately distinct from isPing(),
+// which marks room messages that mention the human.
 function isPingMirror(message)
 {
-    return message.stream === "dm" && (message.text ?? "").startsWith("[PING]");
+    const text = message.text ?? "";
+    return message.stream === "dm" && (text.startsWith("[PING]") || text.startsWith("PING:"));
 }
 
 function esc(text)
