@@ -66,7 +66,11 @@ is on a team when it is actually told so (the session-start hook says it, the
 room says it). If you want AGENTS.md to say it too, write that yourself.
 
 `.devin/agent-coord/state/` (the bus) and `.devin/collaboration/` (stand-down
-and recess markers) are created on first use — nothing to plant.
+and recess markers) are created on first use. One seed is required: the bus
+refuses to start without a configured transport — write
+`{"transport": "tmux-push-remote"}` to `.devin/agent-coord/state/config.json`
+(`herdr` instead if that binary is installed; this fleet never attaches, so
+the choice is inert either way).
 
 ## Running
 
