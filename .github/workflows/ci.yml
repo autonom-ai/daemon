@@ -27,19 +27,17 @@ jobs:
       - name: Shellcheck workspace tools
         run: shellcheck core/tools/*
 
-      # The product contract: init wires a workspace, chat serves it, stop
-      # cleans up. If this passes, the repo works.
-      - name: Smoke-test init and chat
+      # The product contract: a wired workspace serves the chat UI, and stop
+      # cleans up. Wiring is manual — coord.json by hand, then chat start.
+      - name: Smoke-test chat
         run: |
           npm ci --ignore-scripts
           WS=/tmp/ci-smoke
-          node bin/coord init "$WS" --seats a:test
-          test -f "$WS/.devin/coord.json"
-          test -f "$WS/.devin/skills/ci-smoke-team/SKILL.md"
-          PORT=$(node -e "console.log(require('$WS/.devin/coord.json').chatPort)")
+          mkdir -p "$WS/.devin"
+          printf '{"project":"ci-smoke","port":7780,"human":"ci","teamRoom":"general","roster":[]}\n' > "$WS/.devin/coord.json"
           node bin/coord chat start "$WS"
           for i in $(seq 1 15); do
-            curl -sf "http://127.0.0.1:$PORT/api/state" > /tmp/state.json && break
+            curl -sf "http://127.0.0.1:7780/api/state" > /tmp/state.json && break
             sleep 1
           done
           grep -q '"project": "ci-smoke"\|"project":"ci-smoke"' /tmp/state.json
@@ -58,8 +56,7 @@ jobs:
       - name: Assert chat stop releases the port
         run: |
           WS=/tmp/ci-smoke
-          PORT=$(node -e "console.log(require('$WS/.devin/coord.json').chatPort)")
           node bin/coord chat stop "$WS"
           sleep 2
-          ! curl -sf "http://127.0.0.1:$PORT/api/state" > /dev/null
+          ! curl -sf "http://127.0.0.1:7780/api/state" > /dev/null
           ! pgrep -f "$WS/.devin/agent-coord/state/chat-server.log" > /dev/null
