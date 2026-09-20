@@ -68,6 +68,10 @@ for arg in "$@"; do
     prev="$arg"
 done
 port="${port:-7777}"
+# server.mjs reads COORD_CHAT_PORT; an explicit --port in "$@" still wins inside
+# it (args.port ?? env). Without this the computed port was dead code and every
+# launch landed on the server default.
+export COORD_CHAT_PORT="$port"
 
 if [ "$restart" -eq 1 ]; then
     pid="$(ss -tlnpH 2>/dev/null | awk -v port=":$port" '$4 ~ port"$"' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
