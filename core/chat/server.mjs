@@ -18,12 +18,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const coordRoot = path.resolve(here, "..", "..");
 const projectDir = process.env.DEVIN_PROJECT_DIR ?? path.resolve(here, "..", "..");
 const coordDir = process.env.AGENT_COORD_DIR ?? path.join(projectDir, ".devin", "agent-coord", "state");
-// The pinned canonical install is preferred; a workspace-local install is the
-// fallback for layouts that predate the canonical repo.
+// The clone's pinned install is the store — there is no vendored fallback;
+// AGENT_COORD_STORE exists for tests.
 const storeCandidates = [
     process.env.AGENT_COORD_STORE,
     path.join(coordRoot, "node_modules", "agent-coord-mcp", "dist", "store.js"),
-    path.join(projectDir, ".devin", "agent-coord", "node_modules", "agent-coord-mcp", "dist", "store.js"),
 ].filter(Boolean);
 const storePath = storeCandidates.find((file) => existsSync(file));
 

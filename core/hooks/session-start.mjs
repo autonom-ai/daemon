@@ -49,7 +49,7 @@ if (identity)
         ...(memory ? ["", "Your memory:", memory] : []),
     );
     if (!detected)
-        lines.push("", "Your session marker is gone — rejoin: call `join` on the agent-coord server with this same name.");
+        lines.push("", `Your session marker is gone — rejoin: call \`join\` on the agent-coord-${agentId} MCP entry with this same name.`);
 }
 else if (agentId)
 {
@@ -59,18 +59,21 @@ else if (agentId)
         `\`${path.join(CANONICAL_ROOT, "bin", "coord")} identity add ${agentId}\`, then fill in identity.md.`,
     );
     if (!detected)
-        lines.push("", "Your session marker is gone — rejoin: call `join` on the agent-coord server with this same name.");
+        lines.push("", `Your session marker is gone — rejoin: call \`join\` on the agent-coord-${agentId} MCP entry with this same name.`);
 }
 else
 {
     lines.push(
         "",
-        "Join the bus through the `agent-coord` MCP server: `join({ agentId: <your name>, attach: false,",
-        "proseOnly: true })`. Your name is your identity — it never changes, and it is the only thing",
-        "that binds you. The opening prompt for this tab names you; if it did not, pick an unclaimed",
-        `name (the registry is ${AGENTS_HOME}) and scaffold it with`,
+        "Join the bus through your own MCP entry — `agent-coord-<your name>`: `join({ agentId: <your",
+        "name>, attach: false, proseOnly: true })` on it. Each `agent-coord-*` entry is pre-bound to one",
+        "name and refuses any other — your name is your identity, it never changes, and it is the only",
+        "thing that binds you. The opening prompt for this tab names you; if it did not, pick an",
+        "`agent-coord-*` entry whose name is not live on the bus and join as that name (the registry is",
+        `${AGENTS_HOME}) — then scaffold its profile with`,
         `\`${path.join(CANONICAL_ROOT, "bin", "coord")} identity add <name>\`. If the name is refused,`,
         "it is live in another session — do not take it; ask the room or the user.",
+        "No `agent-coord-*` entry here at all means this tab is not wired into the team — say so.",
         onBus.length ? `On the bus now: ${onBus.join(", ")}.` : "Nobody is on the bus yet.",
     );
 }

@@ -5,7 +5,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"${DEVIN_PROJECT_DIR:-.}/.devin/hooks/session-start.mjs\"",
+          "command": "node \"{{COORD_ROOT}}/core/hooks/session-start.mjs\"",
           "timeout": 10
         }
       ]
@@ -17,7 +17,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"${DEVIN_PROJECT_DIR:-.}/.devin/hooks/prompt-context.mjs\"",
+          "command": "node \"{{COORD_ROOT}}/core/hooks/prompt-context.mjs\"",
           "timeout": 10
         }
       ]
@@ -29,7 +29,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"${DEVIN_PROJECT_DIR:-.}/.devin/hooks/keep-alive.mjs\"",
+          "command": "node \"{{COORD_ROOT}}/core/hooks/keep-alive.mjs\"",
           "timeout": 10
         }
       ]

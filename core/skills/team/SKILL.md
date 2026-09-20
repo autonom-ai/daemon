@@ -17,14 +17,15 @@ If the team stops to talk something out, that is `{{PROJECT}}-recess`.
 1. Read `AGENTS.md`, then `COORDINATION.md` and `ORGANICS.md` if they exist.
    Skim the recent room.
 2. Your name is your identity — the prompt this tab was opened with names it.
-   There is exactly one `agent-coord` MCP server; `join` on it binds this
-   session to that name for its lifetime.
-3. `join` with your name, this project, `attach: false`, inbox reading on,
-   and a `proseOnly` reason — this team talks in prose, and typed record
-   schemas are not required here. If the join is refused, the name is live in
-   another session — do not take it; ask the room or the user.
-4. If `~/.local/state/agent-coord/agents/<you>/identity.md` or `memory.md` exists,
-   it was already injected at session start — ground yourself in it before talking.
+   Your MCP entry is `agent-coord-<your name>`, pre-bound to that name; the
+   other `agent-coord-*` entries are your teammates' and will refuse you.
+3. `join` on your entry with your name, this project, `attach: false`, inbox
+   reading on, and a `proseOnly` reason — this team talks in prose, and typed
+   record schemas are not required here. If the join is refused, the name is
+   live in another session — do not take it; ask the room or the user.
+4. If `agents/<you>/identity.md` or `memory.md` exists in the agent-coord clone
+   (session-start prints the path), it was already injected — ground yourself
+   in it before talking.
 5. Join the team room (default `general`), read it, and announce yourself once —
    name and lane. That announcement is the only thing a fresh agent does.
    Then hold: no posts, no edits, no hunting for work until someone addresses

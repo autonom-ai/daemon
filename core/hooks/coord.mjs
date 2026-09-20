@@ -10,15 +10,14 @@
 // and falls back to sane defaults when it is absent or partial.
 
 import { execFileSync } from "node:child_process";
-import os from "node:os";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Hooks are usually reached through a workspace symlink (.devin/hooks ->
-// <canonical>/core/hooks), so the script's own path is useless for locating the
-// workspace: use the env var, then the cwd. Canonical root is the other
-// direction — the real path of this file, two levels up.
+// Hooks run by absolute path in the clone (or through a symlink into it), so
+// the script's own path is useless for locating the workspace: use the env
+// var, then the cwd. The clone root is the other direction — the real path of
+// this file, two levels up.
 const HERE = path.dirname(realpathSync(fileURLToPath(import.meta.url)));
 export const CANONICAL_ROOT = path.resolve(HERE, "..", "..");
 export const PROJECT_DIR = process.env.DEVIN_PROJECT_DIR ?? process.cwd();
@@ -60,13 +59,11 @@ export const ROSTER = CONFIG.roster;
 export const HUMAN_SEAT = CONFIG.human;
 export const STAND_DOWN_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "stand-down");
 export const RECESS_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "recess");
-// The identity registry is machine-local state, not repo content — an
-// identity follows the person, and the person is not something a public repo
-// should ship. AGENT_COORD_AGENTS overrides it directly; AGENT_COORD_HOME
-// overrides the whole state root, matching the CLI.
-const STATE_HOME = process.env.AGENT_COORD_HOME ??
-    path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "agent-coord");
-export const AGENTS_HOME = process.env.AGENT_COORD_AGENTS ?? path.join(STATE_HOME, "agents");
+// The identity registry is clone content: agents/<name>/identity.md +
+// memory.md in this checkout (gitignored — the people are local material, not
+// upstream). It follows the person across workspaces because every wired
+// workspace points back at the same clone.
+export const AGENTS_HOME = path.join(CANONICAL_ROOT, "agents");
 
 // A session binds its identity directly at join — the agentId on the bus IS
 // the person's name; there is no seat layer to translate through. Retired

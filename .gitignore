@@ -2,3 +2,7 @@ node_modules/
 agents/
 ports.json
 local/
+AGENTS.md
+.devin
+COORDINATION.md
+ORGANICS.md

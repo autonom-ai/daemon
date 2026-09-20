@@ -1,54 +1,29 @@
 #!/usr/bin/env node
-// coord — the one script for team coordination.
-//
-//   coord init <workspace> [--project name] [--agents ada,grace,...]
-//       Wire a workspace for coordination: state dir, the single `agent-coord`
-//       MCP entry in mcp_config.local.json, chat+hooks symlinks to the
-//       canonical repo, COORDINATION.md/ORGANICS.md copies (never clobbered),
-//       AGENTS.md managed block, port allocation.
-//
-//   coord agent add <workspace> <name>
-//       Add one more agent to the roster + scaffold its identity.
+// coord — chat server management and identity scaffolding for an agent-coord clone.
 //
 //   coord chat start|stop|status|restart <workspace> [--port N]
-//       Run the canonical chat server against the workspace's bus.
-//
-//   coord update <workspace>
-//       Re-verify symlinks, MCP wiring, and templates; warn on drift.
+//       Run the chat server against the workspace's bus.
 //
 //   coord identity add <name> [--display "Display Name"]
-//       Scaffold a global identity under the machine state dir
-//       (~/.local/state/agent-coord/agents/<name>/identity.md + memory.md).
+//       Scaffold agents/<name>/identity.md + memory.md in this clone.
 //
-// There are no seats: an agent's name IS its identity. Every tab gets the same
-// `agent-coord` MCP entry; `join` binds the process to the name it claims, and
-// the bus refuses a second live claim on a name that is already running.
+// There is no init. A workspace is wired by hand — three files under its
+// .devin/ (templates/ shows each one) plus optional tools/coord-* symlinks.
+// The clone is the install and the state home: the bus package, the identity
+// registry (agents/), and the chat-port table (ports.json) all live in this
+// tree — nothing reads or writes an XDG state dir.
 
 import { execFileSync, spawn } from "node:child_process";
-import os from "node:os";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync, readdirSync, lstatSync, readlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CORE_CHAT = path.join(ROOT, "core", "chat");
-const CORE_HOOKS = path.join(ROOT, "core", "hooks");
-const CORE_TOOLS = path.join(ROOT, "core", "tools");
-// Machine-local state — the identity registry and port allocations belong to
-// this machine's user, not the repository. Override with AGENT_COORD_HOME for
-// the whole state dir, or AGENT_COORD_AGENTS for just the identity registry —
-// the same override the hooks honor (core/hooks/coord.mjs), so a test run
-// cannot write into the real registry by accident.
-const STATE_HOME = process.env.AGENT_COORD_HOME ??
-    path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "agent-coord");
-const AGENTS_DIR = process.env.AGENT_COORD_AGENTS ?? path.join(STATE_HOME, "agents");
-const TEMPLATES = path.join(ROOT, "templates");
-const PORTS_FILE = path.join(STATE_HOME, "ports.json");
-const SERVER_JS = path.join(ROOT, "node_modules", "agent-coord-mcp", "dist", "server.js");
-const AGENTS_BLOCK_BEGIN = "<!-- agent-coord:begin -->";
-const AGENTS_BLOCK_END = "<!-- agent-coord:end -->";
-const LEGACY_BLOCK_BEGIN = "<!-- devin-coord:begin -->";
-const LEGACY_BLOCK_END = "<!-- devin-coord:end -->";
+// The clone doubles as the machine-local home — the identity registry and the
+// port table are local content of the checkout (gitignored), not shared state.
+const AGENTS_DIR = path.join(ROOT, "agents");
+const PORTS_FILE = path.join(ROOT, "ports.json");
 
 function fail(msg)
 {
@@ -110,21 +85,6 @@ function allocPort(project)
     return port;
 }
 
-function ensureLink(target, link)
-{
-    if (lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink())
-    {
-        if (readlinkSync(link) === target)
-            return "ok";
-        unlinkSync(link);
-    }
-    else if (existsSync(link))
-        return "exists";
-    mkdirSync(path.dirname(link), { recursive: true });
-    symlinkSync(target, link);
-    return "linked";
-}
-
 function stateDirOf(workspace)
 {
     return path.join(workspace, ".devin", "agent-coord", "state");
@@ -133,204 +93,6 @@ function stateDirOf(workspace)
 function coordJsonOf(workspace)
 {
     return readJson(path.join(workspace, ".devin", "coord.json"), null);
-}
-
-// One server entry per workspace — no bound agent. The stdio process is
-// per-tab, so each session claims its own name at `join` (TOFU-bound for the
-// process lifetime; the bus refuses a second live claim). Machine-local wiring
-// goes in mcp_config.local.json — auto-gitignored, never committed.
-function serverEntry(workspace)
-{
-    return {
-        command: "node",
-        args: [SERVER_JS],
-        env: { AGENT_COORD_DIR: stateDirOf(workspace) },
-    };
-}
-
-function writeMcpServer(workspace)
-{
-    const file = path.join(workspace, ".devin", "mcp_config.local.json");
-    const config = readJson(file, { mcpServers: {} });
-    config.mcpServers ??= {};
-    config.mcpServers["agent-coord"] = serverEntry(workspace);
-    writeJson(file, config);
-}
-
-// Seat-era wiring left `agent-coord-<letter>` entries behind in whichever
-// mcp_config file held them — drop them from both layers. The bare
-// `agent-coord` name goes too, but only in the project layer: the local file
-// is where init just wrote the canonical entry.
-function cleanSeatEntries(workspace)
-{
-    const removed = [];
-    for (const name of ["mcp_config.json", "mcp_config.local.json"])
-    {
-        const file = path.join(workspace, ".devin", name);
-        const config = readJson(file, null);
-        const servers = config?.mcpServers;
-        if (!servers)
-            continue;
-        let dirty = false;
-        for (const key of Object.keys(servers))
-            if (key.startsWith("agent-coord-") || (name === "mcp_config.json" && key === "agent-coord"))
-            {
-                delete servers[key];
-                removed.push(`${name}:${key}`);
-                dirty = true;
-            }
-        if (dirty)
-            writeJson(file, config);
-    }
-    return removed;
-}
-
-function appendAgentsBlock(workspace, project)
-{
-    const file = path.join(workspace, "AGENTS.md");
-    const block = readFileSync(path.join(TEMPLATES, "AGENTS-block.md"), "utf8").replaceAll("{{PROJECT}}", project);
-    let current = existsSync(file) ? readFileSync(file, "utf8") : "";
-    // Workspaces wired before the rename still carry the devin-coord markers;
-    // translate them in place rather than appending a second block.
-    if (current.includes(LEGACY_BLOCK_BEGIN))
-        current = current.replace(LEGACY_BLOCK_BEGIN, AGENTS_BLOCK_BEGIN).replace(LEGACY_BLOCK_END, AGENTS_BLOCK_END);
-    if (current.includes(AGENTS_BLOCK_BEGIN))
-    {
-        const re = new RegExp(`${AGENTS_BLOCK_BEGIN}[\\s\\S]*?${AGENTS_BLOCK_END}`);
-        current = current.replace(re, block.trim());
-    }
-    else
-    {
-        const rest = current.trimEnd();
-        current = rest ? `${rest}\n\n${block.trim()}\n` : `${block.trim()}\n`;
-    }
-    writeFileSync(file, current, "utf8");
-}
-
-function copyTemplate(name, workspace)
-{
-    const src = path.join(TEMPLATES, name);
-    const dest = path.join(workspace, name);
-    if (!existsSync(src))
-        return "missing-template";
-    if (existsSync(dest))
-        return "kept-local";
-    writeFileSync(dest, readFileSync(src, "utf8"), "utf8");
-    return "copied";
-}
-
-// Skills render {{PROJECT}} into their frontmatter name, so they cannot be
-// symlinks — copy each file with the substitution applied.
-function installSkill(skill, project, devin)
-{
-    const srcDir = path.join(ROOT, "core", "skills", skill);
-    const destDir = path.join(devin, "skills", `${project}-${skill}`);
-    if (!existsSync(srcDir))
-        return "missing-skill";
-    if (existsSync(destDir))
-        return "kept-local";
-    mkdirSync(destDir, { recursive: true });
-    for (const name of readdirSync(srcDir))
-    {
-        const raw = readFileSync(path.join(srcDir, name), "utf8");
-        writeFileSync(path.join(destDir, name), raw.replaceAll("{{PROJECT}}", project), "utf8");
-    }
-    return "rendered";
-}
-
-function cmdInit(workspace, flags)
-{
-    if (!workspace)
-        fail("init needs a workspace dir");
-    mkdirSync(workspace, { recursive: true });
-    const devin = path.join(workspace, ".devin");
-    for (const dir of ["agent-coord/state", "agent-coord/claims", "collaboration"])
-        mkdirSync(path.join(devin, dir), { recursive: true });
-
-    const agents = String(flags.agents ?? "")
-        .split(",")
-        .map((name) => name.trim())
-        .filter(Boolean);
-    if (!agents.length && !existsSync(path.join(devin, "coord.json")))
-        console.error("note: no --agents given; add later with `coord agent add <ws> <name>`");
-
-    // Re-init is the migration path for existing workspaces — merge over what
-    // is there rather than clobbering it: roster additions union in, custom
-    // skill names and the legacy identities/seats maps survive untouched.
-    const existing = readJson(path.join(devin, "coord.json"), {});
-    const project = existing.project ?? flags.project ?? path.basename(workspace);
-    const port = existing.port ?? existing.chatPort ?? allocPort(project);
-    const roster = [...new Set([...(existing.roster ?? []), ...agents])];
-    const coord = {
-        ...existing,
-        project,
-        port,
-        human: existing.human ?? flags.human ?? process.env.USER ?? "user",
-        teamRoom: existing.teamRoom ?? "general",
-        roster,
-        teamSkill: existing.teamSkill ?? `${project}-team`,
-        recessSkill: existing.recessSkill ?? `${project}-recess`,
-        coordRoot: ROOT,
-    };
-    writeJson(path.join(devin, "coord.json"), coord);
-    for (const name of agents)
-        if (!existsSync(path.join(AGENTS_DIR, name)))
-            cmdIdentityAdd(name, {});
-
-    writeMcpServer(workspace);
-    const dropped = cleanSeatEntries(workspace);
-
-    const chatLink = ensureLink(CORE_CHAT, path.join(devin, "chat"));
-    const hooksLink = ensureLink(CORE_HOOKS, path.join(devin, "hooks"));
-    const toolsLink = ensureLink(CORE_TOOLS, path.join(workspace, "tools", "coord"));
-    const skillResults = ["team", "recess"].map((skill) => `${skill}: ${installSkill(skill, project, devin)}`);
-
-    const coordMd = copyTemplate("COORDINATION.md", workspace);
-    const organics = copyTemplate("ORGANICS.md", workspace);
-    appendAgentsBlock(workspace, project);
-
-    // hooks.v1.json is generated pointing at the canonical hooks — it is the
-    // wiring, the hook code itself comes through the symlink.
-    const hooksConfig = path.join(devin, "hooks.v1.json");
-    if (!existsSync(hooksConfig) && existsSync(path.join(TEMPLATES, "hooks.v1.json")))
-        writeFileSync(hooksConfig, readFileSync(path.join(TEMPLATES, "hooks.v1.json"), "utf8"), "utf8");
-
-    console.log(`coord: wired '${project}' (${workspace})`);
-    console.log(`  port:        ${port}`);
-    console.log(`  roster:      ${JSON.stringify(roster)}`);
-    if (dropped.length)
-        console.log(`  removed legacy seat entries: ${dropped.join(", ")}`);
-    console.log(`  chat link:   ${chatLink}`);
-    console.log(`  hooks link:  ${hooksLink}`);
-    console.log(`  tools link:  ${toolsLink}`);
-    console.log(`  skills:      ${skillResults.join("  ")}`);
-    console.log(`  COORDINATION.md: ${coordMd}   ORGANICS.md: ${organics}`);
-    console.log(`  next: coord chat start ${workspace}`);
-}
-
-function cmdAgentAdd(workspace, name)
-{
-    if (!workspace || !name)
-        fail("agent add needs <workspace> and <name>");
-    const coordFile = path.join(workspace, ".devin", "coord.json");
-    const coord = readJson(coordFile, null) ?? fail(`no .devin/coord.json in ${workspace} — run coord init first`);
-    coord.roster ??= [];
-    if (!coord.roster.includes(name))
-        coord.roster.push(name);
-    writeJson(coordFile, coord);
-    writeMcpServer(workspace);
-    cleanSeatEntries(workspace);
-    if (!existsSync(path.join(AGENTS_DIR, name)))
-        cmdIdentityAdd(name, {});
-    console.log(`coord: ${name} joined the roster in ${coord.project}`);
-}
-
-function portOf(workspace)
-{
-    const coord = coordJsonOf(workspace);
-    if (coord?.chatPort ?? coord?.port)
-        return coord.chatPort ?? coord.port;
-    return allocPort(coord?.project ?? path.basename(workspace));
 }
 
 function listenerPid(port)
@@ -438,64 +200,10 @@ function cmdChat(action, workspace, flags)
     }
 }
 
-function cmdUpdate(workspace)
-{
-    const devin = path.join(workspace, ".devin");
-    const report = [];
-    for (const name of ["mcp_config.local.json", "mcp_config.json"])
-    {
-        const file = path.join(devin, name);
-        const servers = readJson(file, null)?.mcpServers ?? {};
-        const stale = Object.keys(servers).filter((key) => key.startsWith("agent-coord-"));
-        if (name === "mcp_config.local.json")
-        {
-            const entry = servers["agent-coord"];
-            if (!entry)
-                report.push("agent-coord server: MISSING (run coord init)");
-            else if (entry.args?.[0] !== SERVER_JS)
-                report.push(`agent-coord server: present but points at ${entry.args?.[0]} — STALE`);
-            else if (entry.env?.AGENT_COORD_DIR !== stateDirOf(workspace))
-                report.push(`agent-coord server: AGENT_COORD_DIR is ${entry.env?.AGENT_COORD_DIR} — STALE`);
-            else
-                report.push("agent-coord server: present (canonical)");
-        }
-        else if (servers["agent-coord"])
-            report.push("mcp_config.json: 'agent-coord' in the project layer — belongs in mcp_config.local.json (coord init moves it)");
-        for (const key of stale)
-            report.push(`${name}: stray seat entry '${key}' — remove it (or rerun coord init)`);
-    }
-    for (const [name, target] of [["chat", CORE_CHAT], ["hooks", CORE_HOOKS]])
-    {
-        const link = path.join(devin, name);
-        const stat = lstatSync(link, { throwIfNoEntry: false });
-        if (!stat)
-            report.push(`${name}: MISSING (run coord init)`);
-        else if (stat.isSymbolicLink())
-            report.push(`${name}: linked → ${readlinkSync(link)}${readlinkSync(link) === target ? " (ok)" : " (STALE)"}`);
-        else
-            report.push(`${name}: real dir present — DIVERGED copy, diff against ${target} before removing`);
-    }
-    const coord = coordJsonOf(workspace);
-    const project = coord?.project ?? path.basename(workspace);
-    for (const [label, configured] of [["team", coord?.teamSkill ?? `${project}-team`], ["recess", coord?.recessSkill ?? `${project}-recess`]])
-    {
-        const dir = path.join(devin, "skills", configured);
-        const skillFile = path.join(dir, "SKILL.md");
-        const stat = lstatSync(dir, { throwIfNoEntry: false });
-        if (!stat)
-            report.push(`${label} skill (${configured}): MISSING`);
-        else if (stat.isSymbolicLink())
-            report.push(`${label} skill (${configured}): linked → ${readlinkSync(dir)}`);
-        else if (existsSync(skillFile))
-            report.push(`${label} skill (${configured}): present`);
-        else
-            report.push(`${label} skill (${configured}): dir present but no SKILL.md — check ${skillFile}`);
-    }
-    for (const doc of ["COORDINATION.md", "ORGANICS.md"])
-        report.push(`${doc}: ${existsSync(path.join(workspace, doc)) ? "present" : "missing (run coord init)"}`);
-    console.log(report.join("\n"));
-}
-
+// The scaffold a fresh agent gets pointed at: frontmatter the hooks parse
+// (displayName), and the Interests/Disinterests sections session-start
+// digests for teammate priors. Personal, not wiring — it writes into the
+// clone's own agents/ registry.
 function cmdIdentityAdd(name, flags)
 {
     if (!name)
@@ -517,23 +225,16 @@ const positional = [sub, ...flags._];
 
 switch (cmd)
 {
-    case "init": cmdInit(positional[0] ? path.resolve(positional[0]) : null, flags); break;
-    case "agent":
-        if (positional[0] !== "add")
-            fail("agent supports: add");
-        cmdAgentAdd(positional[1] ? path.resolve(positional[1]) : null, positional[2]);
-        break;
     case "chat":
         if (!["start", "stop", "status", "restart"].includes(positional[0] ?? ""))
             fail("chat supports: start|stop|status|restart");
         cmdChat(positional[0], positional[1] ? path.resolve(positional[1]) : null, flags);
         break;
-    case "update": cmdUpdate(positional[0] ? path.resolve(positional[0]) : process.cwd()); break;
     case "identity":
         if (positional[0] !== "add")
             fail("identity supports: add");
         cmdIdentityAdd(positional[1], flags);
         break;
     default:
-        console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 24).join("\n"));
+        console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 14).join("\n"));
 }

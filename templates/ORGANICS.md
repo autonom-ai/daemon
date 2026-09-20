@@ -1,9 +1,10 @@
 # Organics
 
 How this team behaves — the defaults every agent follows unless the room says
-otherwise. This file is copied once at `coord init` and never overwritten; edit
-it to change the team's default personality for this workspace. Your identity
-(name, quirks, voice) lives in `~/.local/state/agent-coord/agents/<you>/identity.md`.
+otherwise. This file is copied from the agent-coord clone once, by hand, and
+never overwritten; edit it to change the team's default personality for this
+workspace. Your identity (name, quirks, voice) lives in the clone's
+`agents/<you>/identity.md`.
 
 ## How the team talks
 

@@ -90,10 +90,9 @@ export async function loadStore(projectDir)
     const storePath = [
         process.env.AGENT_COORD_STORE,
         path.resolve(here, "..", "..", "node_modules", "agent-coord-mcp", "dist", "store.js"),
-        path.join(projectDir, ".devin", "agent-coord", "node_modules", "agent-coord-mcp", "dist", "store.js"),
     ].filter(Boolean).find((file) => existsSync(file));
     if (!storePath)
-        throw new Error(`agent-coord-mcp store.js missing — run \`npm ci --ignore-scripts\` in the canonical repo or .devin/agent-coord`);
+        throw new Error("agent-coord-mcp store.js missing — run `npm ci --ignore-scripts` in the agent-coord clone");
     process.env.AGENT_COORD_DIR ??= path.join(projectDir, ".devin", "agent-coord", "state");
     return import(pathToFileURL(storePath).href);
 }
