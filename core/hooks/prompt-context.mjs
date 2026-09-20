@@ -7,10 +7,10 @@ import { statSync, existsSync } from "node:fs";
 import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, detectIdentity, emit, formatEntries, hookInput, identityOf, recess, recordClaim, standDown, unread } from "./coord.mjs";
 
 const input = await hookInput();
-const detected = detectIdentity();
-if (input.session_id && detected)
-    recordClaim(input.session_id, detected);
-const agent = detected ?? claimFor(input.session_id);
+const claimed = claimFor(input.session_id);
+const agent = claimed ?? detectIdentity();
+if (input.session_id && !claimed && agent)
+    recordClaim(input.session_id, agent);
 const { dms, room } = unread(agent);
 const recessState = recess();
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;

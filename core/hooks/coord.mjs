@@ -251,25 +251,32 @@ export function unread(agentId)
 // pid. A hook is a sibling of that server under the same client process, so the
 // marker whose server pid shares an ancestor with us is ours.
 //
+// Two hard limits learned 2026-09-20: the client root is shared across tabs,
+// so ancestry alone cannot tell our markers from another tab's, and a respawned
+// server writes a marker without ever joining. So a marker only counts when its
+// agent is registry-live with exactly this pid (corroboration), and when
+// several corroborated markers match, the newest wins — a fresh tab's own
+// servers are always the newest things in its ancestry.
+//
 // Identity is a convenience, not a requirement: every caller must still work
 // when this returns null (an agent that has not joined yet, a hook fired from
-// a process we cannot trace, a bus that was wiped).
+// a process we cannot trace, a bus that was wiped). Callers treat the claim
+// file as tab-exact and let detection only fill an absent claim.
 export function detectIdentity()
 {
     const dir = path.join(COORD_DIR, "sessions");
     if (!existsSync(dir))
         return null;
-    const markers = readdirSync(dir)
+    const registered = registry();
+    const ancestry = ancestorChain(process.pid, 6);
+    const mine = readdirSync(dir)
         .filter((name) => name.endsWith(".json"))
         .map((name) => readJson(path.join(dir, name), null))
-        .filter((m) => m && isAlive(m.pid));
-    if (!markers.length)
-        return null;
-    const ancestry = ancestorChain(process.pid, 6);
-    const mine = markers.filter((m) => ancestry.includes(m.pid) || ancestry.includes(parentOf(m.pid)));
-    if (mine.length === 1)
-        return mine[0].agentId;
-    return null;
+        .filter((m) => m && isAlive(m.pid)
+            && (ancestry.includes(m.pid) || ancestry.includes(parentOf(m.pid)))
+            && registered[m.agentId]?.serverPid === m.pid)
+        .sort((a, b) => b.boundAt - a.boundAt);
+    return mine[0]?.agentId ?? null;
 }
 
 function isAlive(pid)

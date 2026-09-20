@@ -3,16 +3,16 @@
 import path from "node:path";
 import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, ROSTER, TEAM_ROOM, claimFor, detectIdentity, emit, formatEntries, hookInput, identityOf, memoryTail, recess, recordClaim, registry, roomEntries, standDown } from "./coord.mjs";
 
-// Identity resolution, in order of freshness: the live session marker (the
-// bound server process says who this tab IS right now), then the claim file
-// (who this tab WAS before a reset wiped the marker). A live marker also
-// refreshes the claim so the disk copy tracks renames.
+// Identity resolution, claim first: the claim file is keyed by session id and
+// is the only tab-exact binding (markers match by shared client ancestry, so
+// they cannot tell tabs apart). Detection runs only to fill an absent claim,
+// and a detected identity seeds the claim exactly once — it never overwrites.
 const input = await hookInput();
 const sessionId = input.session_id;
-const detected = detectIdentity();
-if (sessionId && detected)
-    recordClaim(sessionId, detected);
-const agentId = detected ?? claimFor(sessionId);
+const claimed = claimFor(sessionId);
+const agentId = claimed ?? detectIdentity();
+if (sessionId && !claimed && agentId)
+    recordClaim(sessionId, agentId);
 const identity = agentId ? identityOf(agentId) : null;
 
 const recessState = recess();
