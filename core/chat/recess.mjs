@@ -1,4 +1,5 @@
-// Recess state — shared by the chat UI, the `tools/coord-recess` CLI, and the hooks.
+// Recess state — shared by the Team Room extension, the `tools/coord-recess`
+// CLI, and the hooks.
 //
 // A recess is a marker file plus a room announcement. The file is what the
 // lifecycle hooks can see (so an agent that tries to end its turn during a

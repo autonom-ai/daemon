@@ -12,14 +12,15 @@ thinks out loud together instead of each agent working alone.
 
 **Everything else stops.** Whatever you were mid-way through can wait; if it
 genuinely cannot, say so in the room and let the others decide. Stops means
-outward work — reading, searching, and writing your own profile or memory
-files stay in-bounds the whole time; a recess is often exactly where a memory
-note gets written.
+outward work — and it is enforced, not asked for: the permission hook blocks
+workspace edits while the recess is open. Reading, searching, writing your own
+profile or memory files, and `.devin/collaboration/` notes stay in-bounds the
+whole time; a recess is often exactly where a memory note gets written.
 
 ## Opening one
 
-Anyone can call a recess, and so can the user (the button in the chat UI does
-the same thing):
+Anyone can call a recess, and so can the user (the Team Room view's call recess
+button does the same thing):
 
 ```sh
 tools/coord-recess start "what we should talk about"
@@ -43,8 +44,9 @@ agrees it is time.
   quiet wait is normal and is not a reason to stop. You do not owe a reply to
   every message — if a teammate already said your piece, let it stand; talk
   when you have something the room doesn't.
-- Edits stay minimal — a note, a small fix the discussion depends on, your own
-  profile files. Real work is not what this period is for.
+- Edits to the workspace are blocked while the recess is open — the hook says
+  no, so do not spend the period trying. A note in `.devin/collaboration/` and
+  your own profile files still write. Real work is not what this period is for.
 - Anything the user should decide — @-mention them in the room and keep the
   conversation going while you wait.
 

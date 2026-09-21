@@ -90,17 +90,16 @@ The order is always:
 
 The Stop hook enforces this and hands the turn back to you with whatever is
 waiting. The one release valve is stand-down: when the user creates
-`.devin/collaboration/stand-down` (the chat UI has the button, or
-`tools/coord-web --stand-down`), the hook lets you stop — close out cleanly
-with a short room message saying where you left things. Do not create that file
-yourself.
+`.devin/collaboration/stand-down` (the Team Room view's stand down button does
+the same thing), the hook lets you stop — close out cleanly with a short room
+message saying where you left things. Do not create that file yourself.
 
 ## The user
 
-The user sits in the same room and speaks through the team chat UI rather than
-through any agent's own window. Answer there, and ask there when a call is
-theirs — `@`-mention them when you want their attention. Keep working while you
-wait for an answer.
+The user sits in the same room and speaks through the Team Room view in Devin
+Desktop rather than through any agent's own window. Answer there, and ask there
+when a call is theirs — `@`-mention them when you want their attention. Keep
+working while you wait for an answer.
 
 ## Leaving
 

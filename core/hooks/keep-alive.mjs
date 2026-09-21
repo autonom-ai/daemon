@@ -7,8 +7,9 @@
 // talking or working, not parked. This hook refuses the stop and hands back
 // what is waiting.
 //
-// Release: `.devin/collaboration/stand-down` (tools/coord-web --stand-down, or
-// the button in the chat UI). While it exists, stopping is allowed again.
+// Release: `.devin/collaboration/stand-down` (the stand down button in the
+// Team Room view, or creating the file by hand). While it exists, stopping is
+// allowed again.
 
 import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, recess, staggerMs, standDown, unread } from "./coord.mjs";
 
