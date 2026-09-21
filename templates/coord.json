@@ -1,7 +1,6 @@
 {
-  "comment": "Workspace coordination config — copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks read this; nothing else should need to. `roster` is the expected team — agent names, which ARE the identities; there are no seats. `port` of null auto-allocates into the clone's ports.json on first `chat start`.",
+  "comment": "Workspace coordination config — copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks and the Team Room extension read this; nothing else should need to. `roster` is the expected team — agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: the extension loads the bus store and the shared room actions from it.",
   "project": "{{PROJECT}}",
-  "port": null,
   "human": "{{HUMAN}}",
   "teamRoom": "general",
   "roster": [],
