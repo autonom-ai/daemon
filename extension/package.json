@@ -1,0 +1,91 @@
+{
+  "name": "coord-room",
+  "displayName": "Team Room",
+  "description": "The human's seat on the agent-coord bus — rooms, DMs, pings, recess, and stand-down, read straight from the workspace's own JSONL state.",
+  "publisher": "cet",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "workspaceContains:.devin/coord.json",
+    "onView:coordRoom.chat"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "coordRoom",
+          "title": "Team Room",
+          "icon": "media/room.svg"
+        }
+      ]
+    },
+    "views": {
+      "coordRoom": [
+        {
+          "type": "webview",
+          "id": "coordRoom.chat",
+          "name": "Team Room"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "coordRoom.focus",
+        "title": "Open the team room",
+        "category": "Team Room"
+      },
+      {
+        "command": "coordRoom.openPanel",
+        "title": "Open as editor panel",
+        "category": "Team Room"
+      },
+      {
+        "command": "coordRoom.refresh",
+        "title": "Refresh",
+        "category": "Team Room"
+      },
+      {
+        "command": "coordRoom.recess",
+        "title": "Call a recess",
+        "category": "Team Room"
+      },
+      {
+        "command": "coordRoom.recessEnd",
+        "title": "Close the recess",
+        "category": "Team Room"
+      },
+      {
+        "command": "coordRoom.standDown",
+        "title": "Stand down (let seats end their turns)",
+        "category": "Team Room"
+      },
+      {
+        "command": "coordRoom.resume",
+        "title": "Resume (seats back in the loop)",
+        "category": "Team Room"
+      }
+    ],
+    "configuration": {
+      "title": "Team Room",
+      "properties": {
+        "coordRoom.workspace": {
+          "type": "string",
+          "default": "",
+          "description": "Workspace directory whose .devin/coord.json wires it to a team. Empty means the open folder that has one."
+        },
+        "coordRoom.coordRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the agent-coord clone (store module, hooks, identities). Empty means coordRoot from the workspace's coord.json."
+        }
+      }
+    }
+  }
+}

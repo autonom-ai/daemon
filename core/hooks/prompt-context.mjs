@@ -4,13 +4,11 @@
 // still waiting in read_messages; this is a nudge, not a delivery.
 
 import { statSync, existsSync } from "node:fs";
-import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, detectIdentity, emit, formatEntries, hookInput, identityOf, recess, recordClaim, standDown, unread } from "./coord.mjs";
+import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, identityOf, recess, standDown, unread } from "./coord.mjs";
 
 const input = await hookInput();
-const claimed = claimFor(input.session_id);
-const agent = claimed ?? detectIdentity();
-if (input.session_id && !claimed && agent)
-    recordClaim(input.session_id, agent);
+// Claim-only, like every hook — record-join.mjs owns the write side.
+const agent = claimFor(input.session_id);
 const { dms, room } = unread(agent);
 const recessState = recess();
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;

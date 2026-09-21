@@ -33,9 +33,6 @@ body
     -webkit-font-smoothing: antialiased;
 }
 
-h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
-
-/* Thin, unobtrusive scrollbars in the Devin/VS Code spirit. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
@@ -161,19 +158,6 @@ ul { list-style: none; margin: 0; padding: 0; }
 .dms li.unread .name { color: var(--human); font-weight: 600; }
 .dms li.active { box-shadow: inset 2px 0 0 var(--accent); }
 .dms li.offline { opacity: 0.5; }
-
-.dms li .presence
-{
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-.dms li .presence.online { background: var(--status); }
-.dms li .presence.offline { background: #6b7280; }
-.dms li.offline .name { opacity: 0.6; }
-.dms li.me { cursor: default; opacity: 0.7; }
-.dms li.me:hover { background: transparent; }
 .rooms li.active { box-shadow: inset 2px 0 0 var(--accent); }
 
 .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
@@ -192,40 +176,6 @@ ul { list-style: none; margin: 0; padding: 0; }
 
 .count { margin-left: auto; color: var(--faint); }
 #menu { display: none; font-size: 15px; padding: 4px 10px; }
-
-/* Toggle-switch checkboxes, Devin-style. */
-input[type="checkbox"]
-{
-    appearance: none;
-    -webkit-appearance: none;
-    width: 30px;
-    height: 17px;
-    border-radius: 999px;
-    background: #2a2a2a;
-    border: 1px solid var(--line-2);
-    cursor: pointer;
-    position: relative;
-    flex-shrink: 0;
-    margin: 0;
-    transition: background 0.15s, border-color 0.15s;
-}
-
-input[type="checkbox"]::after
-{
-    content: "";
-    position: absolute;
-    top: 1px;
-    left: 1px;
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    background: #8f8f8f;
-    transition: transform 0.15s, background 0.15s;
-}
-
-input[type="checkbox"]:hover { border-color: #3a3a3a; }
-input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
-input[type="checkbox"]:checked::after { transform: translateX(13px); background: #fff; }
 
 .messages
 {
@@ -282,6 +232,7 @@ input[type="checkbox"]:checked::after { transform: translateX(13px); background:
     font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
     font-size: 12px;
 }
+.msg .text a { color: var(--accent); }
 .msg.dm .text { color: #c3cff5; }
 .msg.system { color: var(--dim); font-style: italic; }
 
@@ -351,8 +302,6 @@ textarea::placeholder { color: var(--faint); }
 
 .composer-input { position: relative; }
 
-/* Where the next message goes. The DM state is deliberately loud: a seat list is
-   one click away and a quiet select is how you send a private line to the room. */
 .mentions
 {
     position: absolute;
@@ -436,8 +385,9 @@ textarea::placeholder { color: var(--faint); }
 }
 .dialog-actions button:last-child:hover { background: #4480e8; border-color: #4480e8; }
 
-/* Narrow screens: the sidebar becomes a slide-over drawer (☰ button in the
-   toolbar) so the chat itself gets the full width. */
+/* Narrow screens — the activity-bar view is always narrow — the sidebar
+   becomes a slide-over drawer (☰ button in the toolbar) so the chat gets the
+   full width. */
 @media (max-width: 780px)
 {
     #menu { display: inline-block; }

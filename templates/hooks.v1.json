@@ -23,6 +23,30 @@
       ]
     }
   ],
+  "PreToolUse": [
+    {
+      "matcher": "^(edit|write|apply_patch|notebook_edit)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node \"{{COORD_ROOT}}/core/hooks/recess-guard.mjs\"",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "^mcp__agent-coord-.*__(join|register)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node \"{{COORD_ROOT}}/core/hooks/record-join.mjs\"",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
   "Stop": [
     {
       "matcher": "",

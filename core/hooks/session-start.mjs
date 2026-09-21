@@ -1,19 +1,22 @@
 // SessionStart — hand every new tab the same starting point.
 
 import path from "node:path";
-import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, ROSTER, TEAM_ROOM, claimFor, detectIdentity, emit, formatEntries, hookInput, identityOf, memoryTail, recess, recordClaim, registry, roomEntries, standDown } from "./coord.mjs";
+import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, ROSTER, TEAM_ROOM, claimFor, emit, formatEntries, hasLiveSession, hookInput, identityOf, memorySlice, recess, registry, roomEntries, standDown } from "./coord.mjs";
 
-// Identity resolution, claim first: the claim file is keyed by session id and
-// is the only tab-exact binding (markers match by shared client ancestry, so
-// they cannot tell tabs apart). Detection runs only to fill an absent claim,
-// and a detected identity seeds the claim exactly once — it never overwrites.
+// Identity is the claim file and nothing else: record-join.mjs writes it from
+// an observed, successful join through this tab's own `agent-coord-<name>`
+// entry, keyed by session id. No detection, no guessing — a tab that has not
+// joined is told to join, because a wrong identity is worse than an absent one.
 const input = await hookInput();
 const sessionId = input.session_id;
-const claimed = claimFor(sessionId);
-const agentId = claimed ?? detectIdentity();
-if (sessionId && !claimed && agentId)
-    recordClaim(sessionId, agentId);
+const agentId = claimFor(sessionId);
 const identity = agentId ? identityOf(agentId) : null;
+// Markers cannot tell tabs apart (one stdio process can serve several tabs),
+// so the hint fires only in the safe direction: no marker at all means this
+// tab cannot be bound, since its server would have written one.
+const rejoin = agentId && !hasLiveSession(agentId)
+    ? `No live bus session for ${agentId} — rejoin: call \`join\` on the agent-coord-${agentId} MCP entry with this same name.`
+    : null;
 
 const recessState = recess();
 const recent = roomEntries(TEAM_ROOM).slice(-6);
@@ -41,15 +44,14 @@ const lines = [
 
 if (identity)
 {
-    const memory = memoryTail(agentId);
+    const memory = memorySlice(agentId, CONFIG.project);
     lines.push(
         "",
         `You are ${identity.displayName}.`,
         ...(identity.personality ? [identity.personality] : []),
         ...(memory ? ["", "Your memory:", memory] : []),
+        ...(rejoin ? ["", rejoin] : []),
     );
-    if (!detected)
-        lines.push("", `Your session marker is gone — rejoin: call \`join\` on the agent-coord-${agentId} MCP entry with this same name.`);
 }
 else if (agentId)
 {
@@ -57,9 +59,8 @@ else if (agentId)
         "",
         `You are ${agentId} — no profile exists in the registry yet. Scaffold one with`,
         `\`${path.join(CANONICAL_ROOT, "bin", "coord")} identity add ${agentId}\`, then fill in identity.md.`,
+        ...(rejoin ? ["", rejoin] : []),
     );
-    if (!detected)
-        lines.push("", `Your session marker is gone — rejoin: call \`join\` on the agent-coord-${agentId} MCP entry with this same name.`);
 }
 else
 {
@@ -68,7 +69,9 @@ else
         "Join the bus through your own MCP entry — `agent-coord-<your name>`: `join({ agentId: <your",
         "name>, attach: false, proseOnly: true })` on it. Each `agent-coord-*` entry is pre-bound to one",
         "name and refuses any other — your name is your identity, it never changes, and it is the only",
-        "thing that binds you. The opening prompt for this tab names you; if it did not, pick an",
+        "thing that binds you. The join is also what tells the hooks who this tab is (they record it and",
+        "read it back after a reset), so a tab that has not joined is nobody until it does. The opening",
+        "prompt for this tab names you; if it did not, pick an",
         "`agent-coord-*` entry whose name is not live on the bus and join as that name (the registry is",
         `${AGENTS_HOME}) — then scaffold its profile with`,
         `\`${path.join(CANONICAL_ROOT, "bin", "coord")} identity add <name>\`. If the name is refused,`,

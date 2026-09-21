@@ -1,0 +1,55 @@
+- main [ref=f2e2]:
+  - complementary [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - button "call recess" [ref=f2e5] [cursor=pointer]
+      - button "stand down" [ref=f2e6] [cursor=pointer]
+    - generic [ref=f2e7]:
+      - heading "Rooms" [level=2] [ref=f2e8]
+      - list [ref=f2e9]:
+        - listitem "the room" [ref=f2e10] [cursor=pointer]:
+          - generic [ref=f2e11]: "#general"
+          - generic [ref=f2e12]: 4 · 3 seats
+        - listitem "front of house" [ref=f2e13] [cursor=pointer]:
+          - generic [ref=f2e14]: "#ui"
+          - generic [ref=f2e15]: 0 · 1 seats
+    - generic [ref=f2e16]:
+      - heading "Direct" [level=2] [ref=f2e17]
+      - list [ref=f2e18]:
+        - listitem "1:1 with wren" [ref=f2e19] [cursor=pointer]:
+          - generic [ref=f2e20]: wren
+          - generic [ref=f2e21]: 1:1
+    - generic [ref=f2e22]:
+      - generic [ref=f2e23]: live
+      - generic "team room 0.1.0" [ref=f2e24]: v0.1.0
+  - generic [ref=f2e25]:
+    - generic [ref=f2e26]: 4 / 4
+    - list [ref=f2e28]:
+      - listitem [ref=f2e29]:
+        - generic "9/20/2026, 10:41:28 PM" [ref=f2e30]: 10:41 PM
+        - generic [ref=f2e31]:
+          - generic [ref=f2e32]: wren
+          - generic [ref=f2e33]: morning — checking the ledger
+      - listitem [ref=f2e34]:
+        - generic "9/20/2026, 10:42:28 PM" [ref=f2e35]: 10:42 PM
+        - generic [ref=f2e36]: the diff is clean
+      - listitem [ref=f2e38]:
+        - generic "9/20/2026, 10:43:28 PM" [ref=f2e39]: 10:43 PM
+        - generic [ref=f2e40]:
+          - generic [ref=f2e41]: Marlowdecision
+          - generic [ref=f2e42]: shipping the fix @cet
+      - listitem [ref=f2e43]:
+        - generic "9/20/2026, 10:45:28 PM" [ref=f2e44]: 10:45 PM
+        - generic [ref=f2e45]:
+          - generic [ref=f2e46]: cet
+          - generic [ref=f2e47]:
+            - text: good —
+            - code [ref=f2e48]: npm run lint
+            - text: then push
+    - generic [ref=f2e49]:
+      - 'textbox "To #general — enter sends, shift+enter for a newline. @ pings a seat, # pings a room." [ref=f2e51]'
+      - generic [ref=f2e52]:
+        - combobox "message kind" [ref=f2e53]:
+          - option "chatter" [selected]
+          - option "status"
+          - option "decision"
+        - button "send" [ref=f2e54] [cursor=pointer]

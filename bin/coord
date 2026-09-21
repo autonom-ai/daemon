@@ -1,29 +1,27 @@
 #!/usr/bin/env node
-// coord — chat server management and identity scaffolding for an agent-coord clone.
+// coord — identity scaffolding for an agent-coord clone.
 //
-//   coord chat start|stop|status|restart <workspace> [--port N]
-//       Run the chat server against the workspace's bus.
-//
-//   coord identity add <name> [--display "Display Name"]
+//   coord identity add <name> [--display "Display Name"] [--color "#hex"]
 //       Scaffold agents/<name>/identity.md + memory.md in this clone.
 //
 // There is no init. A workspace is wired by hand — three files under its
 // .devin/ (templates/ shows each one) plus optional tools/coord-* symlinks.
 // The clone is the install and the state home: the bus package, the identity
-// registry (agents/), and the chat-port table (ports.json) all live in this
-// tree — nothing reads or writes an XDG state dir.
+// registry (agents/), and the hooks all live in this tree — nothing reads or
+// writes an XDG state dir.
+//
+// The team room is the Devin Desktop extension in extension/ — it reads the
+// workspace's bus directly, so there is no chat server, no port, and no
+// browser. tools/coord-chat remains the terminal seat.
 
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const CORE_CHAT = path.join(ROOT, "core", "chat");
-// The clone doubles as the machine-local home — the identity registry and the
-// port table are local content of the checkout (gitignored), not shared state.
+// The clone doubles as the machine-local home — the identity registry is local
+// content of the checkout (gitignored), not shared state.
 const AGENTS_DIR = path.join(ROOT, "agents");
-const PORTS_FILE = path.join(ROOT, "ports.json");
 
 function fail(msg)
 {
@@ -49,173 +47,23 @@ function parseFlags(argv)
     return ret;
 }
 
-function readJson(file, fallback)
-{
-    try { return JSON.parse(readFileSync(file, "utf8")); }
-    catch { return fallback; }
-}
-
-function writeJson(file, data)
-{
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-}
-
-function ports()
-{
-    return readJson(PORTS_FILE, { allocations: {} });
-}
-
-function allocPort(project)
-{
-    const table = ports();
-    table.allocations ??= {};
-    if (table.allocations)
-    {
-        for (const [port, owner] of Object.entries(table.allocations))
-            if (owner === project)
-                return Number(port);
-    }
-    const used = new Set(Object.keys(table.allocations).map(Number));
-    let port = 7777;
-    while (used.has(port))
-        port++;
-    table.allocations[String(port)] = project;
-    writeJson(PORTS_FILE, table);
-    return port;
-}
-
-function stateDirOf(workspace)
-{
-    return path.join(workspace, ".devin", "agent-coord", "state");
-}
-
-function coordJsonOf(workspace)
-{
-    return readJson(path.join(workspace, ".devin", "coord.json"), null);
-}
-
-function listenerPid(port)
-{
-    try
-    {
-        const out = execFileSync("ss", ["-tlnpH"], { encoding: "utf8" });
-        for (const line of out.split("\n"))
-        {
-            if (!line.includes(`:${port}`))
-                continue;
-            const match = /pid=(\d+)/.exec(line);
-            if (match)
-                return match[1];
-        }
-    }
-    catch { }
-    return null;
-}
-
-// The respawn wrapper's command line embeds this workspace's logFile path —
-// the reliable handle for finding wrappers, including ones started before
-// pidfiles existed. Each wrapper is its own process-group leader (detached),
-// so killing -pid takes the bash loop and the node child down together.
-function wrapperPids(workspace)
-{
-    const logFile = path.join(stateDirOf(workspace), "chat-server.log");
-    try
-    {
-        const out = execFileSync("pgrep", ["-f", logFile], { encoding: "utf8" });
-        return out.split("\n").filter(Boolean).map(Number);
-    }
-    catch { return []; }
-}
-
-function killChat(workspace, port)
-{
-    const stateDir = stateDirOf(workspace);
-    const pidFile = path.join(stateDir, "chat-server.pid");
-    const targets = new Set(wrapperPids(workspace));
-    if (existsSync(pidFile))
-    {
-        targets.add(Number(readFileSync(pidFile, "utf8").trim()));
-        unlinkSync(pidFile);
-    }
-    for (const pid of targets)
-        try { process.kill(-pid); } catch { }
-    const pid = listenerPid(port);
-    if (pid)
-        try { process.kill(Number(pid)); } catch { }
-    return targets.size > 0 || pid !== null;
-}
-
-function cmdChat(action, workspace, flags)
-{
-    if (!workspace)
-        fail(`chat ${action} needs a workspace dir`);
-    const coord = coordJsonOf(workspace) ?? {};
-    const project = coord.project ?? path.basename(workspace);
-    const port = Number(flags.port ?? coord.chatPort ?? coord.port ?? allocPort(project));
-    const logFile = path.join(stateDirOf(workspace), "chat-server.log");
-    mkdirSync(stateDirOf(workspace), { recursive: true });
-
-    if (action === "status")
-    {
-        const pid = listenerPid(port);
-        console.log(pid ? `chat UP on :${port} (pid ${pid})` : `chat DOWN on :${port}`);
-        return;
-    }
-    if (action === "stop" || action === "restart")
-    {
-        if (!killChat(workspace, port))
-            console.log(`chat: nothing running for '${project}' on :${port}`);
-        else
-            console.log(`chat stopped for '${project}' on :${port}`);
-        if (action === "stop")
-            return;
-    }
-    if (action === "start" || action === "restart")
-    {
-        // A live wrapper alone means running — the node child may still be
-        // binding the port, so listenerPid is not a reliable dedupe signal
-        // this early. `chat restart` is the escape for a wrapper whose child
-        // is crash-looping.
-        const existing = wrapperPids(workspace);
-        if (existing.length > 0)
-        {
-            console.log(`chat already running for '${project}' on :${port} (wrapper pid ${existing[0]})`);
-            return;
-        }
-        const env = {
-            ...process.env,
-            DEVIN_PROJECT_DIR: workspace,
-            AGENT_COORD_DIR: stateDirOf(workspace),
-            COORD_CHAT_PORT: String(port),
-            COORD_PROJECT: project,
-            COORD_CHAT_ID: coord.human ?? process.env.USER ?? "user",
-        };
-        const child = spawn("bash", ["-c",
-            `while true; do node "${path.join(CORE_CHAT, "server.mjs")}" >> "${logFile}" 2>&1; echo "[respawn] exited $(date -Iseconds)" >> "${logFile}"; sleep 1; done`],
-            { detached: true, stdio: "ignore", env });
-        child.unref();
-        writeFileSync(path.join(stateDirOf(workspace), "chat-server.pid"), `${child.pid}\n`, "utf8");
-        console.log(`chat started for '${project}' on http://127.0.0.1:${port} (log ${logFile})`);
-    }
-}
-
 // The scaffold a fresh agent gets pointed at: frontmatter the hooks parse
-// (displayName), and the Interests/Disinterests sections session-start
-// digests for teammate priors. Personal, not wiring — it writes into the
-// clone's own agents/ registry.
+// (displayName, color), and the sections session-start injects — Voice is the
+// person's sound, Interests/Disinterests are digested for teammates' priors.
+// Personal, not wiring — it writes into the clone's own agents/ registry.
 function cmdIdentityAdd(name, flags)
 {
     if (!name)
         fail("identity add needs a name");
+    const display = flags.display ?? name;
     const dir = path.join(AGENTS_DIR, name);
     mkdirSync(dir, { recursive: true });
     const identityFile = path.join(dir, "identity.md");
     if (!existsSync(identityFile))
-        writeFileSync(identityFile, `---\nname: ${name}\ndisplayName: ${flags.display ?? name}\ncolor: null\n---\n\n# ${flags.display ?? name}\n\nPersonality notes live here — how ${name} talks, what they care about, quirks worth keeping. Team-level defaults are in ORGANICS.md per workspace; this file is the person.\n\n## Interests\n\nLeave empty until you've noticed a pattern in what you actually reach for — fabricated taste is worse than none.\n\n## Disinterests\n\nWork you'd rather hand off — say it in the room instead of letting it rot in reluctance.\n`, "utf8");
+        writeFileSync(identityFile, `---\nname: ${name}\ndisplayName: ${display}\ncolor: ${flags.color ?? "null"}\n---\n\n# ${display}\n\nPersonality notes live here — how ${name} talks, what they care about, quirks worth keeping. Team-level defaults are in ORGANICS.md per workspace; this file is the person.\n\n## Voice\n\nHow you sound when you write — cadence, the words you reach for, what you never say. Fill it in from what you actually write, not from what you'd like to sound like.\n\n## Interests\n\nLeave empty until you've noticed a pattern in what you actually reach for — fabricated taste is worse than none.\n\n## Disinterests\n\nWork you'd rather hand off — say it in the room instead of letting it rot in reluctance.\n`, "utf8");
     const memoryFile = path.join(dir, "memory.md");
     if (!existsSync(memoryFile))
-        writeFileSync(memoryFile, `# ${name} — memory\n\nAppend-only notebook. Sessions add what they learn; nothing here is workspace-specific — it follows the person.\n`, "utf8");
+        writeFileSync(memoryFile, `# ${name} — memory\n\nAppend-only notebook. Sessions add what they learn; nothing here is workspace-specific — it follows the person.\n\nKeep it useful: dated entries (\`## YYYY-MM-DD — what happened\`), a \`## Now\` section at the top you rewrite when the picture changes, and \`[project:<name>]\` on entries that belong to one workspace. Session start reads the whole file while it is small, then a slice of it: Now, project-tagged entries, newest dated entries.\n`, "utf8");
     console.log(`identity '${name}' at ${dir}`);
 }
 
@@ -225,11 +73,6 @@ const positional = [sub, ...flags._];
 
 switch (cmd)
 {
-    case "chat":
-        if (!["start", "stop", "status", "restart"].includes(positional[0] ?? ""))
-            fail("chat supports: start|stop|status|restart");
-        cmdChat(positional[0], positional[1] ? path.resolve(positional[1]) : null, flags);
-        break;
     case "identity":
         if (positional[0] !== "add")
             fail("identity supports: add");

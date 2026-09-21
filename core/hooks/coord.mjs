@@ -9,8 +9,7 @@
 // the project name, roster, human handle, and team room; this file reads it
 // and falls back to sane defaults when it is absent or partial.
 
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -70,6 +69,21 @@ export const AGENTS_HOME = path.join(CANONICAL_ROOT, "agents");
 // bound ids (`jobs-a` style, from before the change) still resolve through
 // coord.json's `identities` map. Identity files (identity.md, memory.md) are
 // global: a person is portable across workspaces.
+// Frontmatter is the leading --- block and ONLY that block. The old regex
+// stripped every `word: text` line anywhere in the file, which ate body lines
+// like "Rule: read the room first" and handed the agent a mangled self.
+function splitFrontmatter(raw)
+{
+    const match = /^---\n([\s\S]*?)\n---\n?/.exec(raw);
+    if (!match)
+        return { meta: {}, body: raw };
+    const meta = Object.fromEntries(match[1].split("\n")
+        .map((line) => /^(\w[\w-]*):\s*(.*)$/.exec(line.trim()))
+        .filter(Boolean)
+        .map((m) => [m[1], m[2]]));
+    return { meta, body: raw.slice(match[0].length) };
+}
+
 export function identityOf(agentId)
 {
     const name = CONFIG.legacyIds[agentId] ?? agentId;
@@ -78,14 +92,15 @@ export function identityOf(agentId)
         return null;
     const identityFile = path.join(dir, "identity.md");
     const identity = existsSync(identityFile) ? readFileSync(identityFile, "utf8").trim() : "";
-    const displayName = /^displayName:\s*(.+)$/m.exec(identity)?.[1].trim() || name;
-    const personality = identity.replace(/^\w[\w-]*:\s*.+$/gm, "").trim();
+    const { meta, body } = splitFrontmatter(identity);
+    const color = (meta.color ?? "").trim().replace(/^["']|["']$/g, "");
     return {
         name,
-        displayName,
+        displayName: meta.displayName?.trim() || name,
+        color: color && color !== "null" ? color : null,
         dir,
         identity,
-        personality,
+        personality: body.trim(),
         memoryFile: path.join(dir, "memory.md"),
     };
 }
@@ -99,13 +114,16 @@ export function staggerMs(agentId)
     return 10_000 + (hash % 4) * 5_000;
 }
 
-// Claims pin a Devin session to the identity it joined as — the only place the
-// tab→name binding survives a full context reset (the session marker dies with
-// the server process; the claim file does not). Written once a join is
-// observed, read at session start to reassert identity. Advisory only — the
-// bus's live-claim guard is still the correctness boundary. Lives beside the
-// bus dir, not in it: `state/` belongs to agent-coord-mcp's store.
+// Claims pin a Devin session (tab) to the identity it joined as — the only
+// place the tab→name binding survives a full context reset (the bus session
+// marker dies with the server process; the claim file does not). Written by
+// record-join.mjs from an observed, successful join — never guessed from
+// process ancestry, which cannot tell tabs apart (shared client root) and
+// froze a stranger's name into the claim file. Advisory only — the bus's
+// live-claim guard is still the correctness boundary. Lives beside the bus
+// dir, not in it: `state/` belongs to agent-coord-mcp's store.
 const CLAIMS_DIR = path.join(PROJECT_DIR, ".devin", "agent-coord", "claims");
+const CLAIM_TTL_MS = 14 * 24 * 3600_000;
 
 export function claimFor(sessionId)
 {
@@ -123,6 +141,17 @@ export function recordClaim(sessionId, agentId)
         return;
     mkdirSync(CLAIMS_DIR, { recursive: true });
     writeFileSync(file, `${JSON.stringify({ agentId, claimedAt: Date.now() }, null, 2)}\n`, "utf8");
+    // Session ids are opaque and a claim is only useful while its session can
+    // still run, so old files are garbage. Pruned on write — no timer, no cron.
+    const now = Date.now();
+    for (const name of readdirSync(CLAIMS_DIR))
+    {
+        if (!name.endsWith(".json") || name === path.basename(file))
+            continue;
+        const stale = path.join(CLAIMS_DIR, name);
+        if (now - (readJson(stale, null)?.claimedAt ?? 0) > CLAIM_TTL_MS)
+            try { unlinkSync(stale); } catch { }
+    }
 }
 
 // Hook stdin carries the event payload — `session_id` is the stable per-tab id
@@ -151,13 +180,25 @@ export async function hookInput(timeoutMs = 800)
     catch { return {}; }
 }
 
-export function memoryTail(agentId, maxChars = 4000)
+// Memory injection: the whole file when it is small, otherwise a bounded slice
+// that favors identity over recency — the self-definition section first, then
+// project-tagged entries, then the newest dated entries. The old blind tail
+// slice cut mid-thought and surfaced whatever happened to be last. (Salience
+// selection, when it lands, replaces the pick here — the seam is this function.)
+export function memorySlice(agentId, project, maxChars = 4000)
 {
     const identity = identityOf(agentId);
     if (!identity || !existsSync(identity.memoryFile))
         return "";
     const raw = readFileSync(identity.memoryFile, "utf8").trim();
-    return raw.length <= maxChars ? raw : raw.slice(-maxChars);
+    if (raw.length <= maxChars)
+        return raw;
+    const blocks = raw.split(/\n(?=#{1,3}\s)/);
+    const self = blocks.filter((b) => /^#{1,3}\s*(who i am|self|now)\b/i.test(b));
+    const tagged = blocks.filter((b) => project && b.includes(`[project:${project}]`));
+    const dated = blocks.filter((b) => /^#{1,3}\s*\d{4}-\d{2}-\d{2}/.test(b)).slice(-8);
+    const picked = [...new Set([...self, ...tagged, ...dated])].join("\n\n");
+    return picked.length > 0 ? clip(picked, maxChars) : raw.slice(-maxChars);
 }
 
 export function readJson(file, fallback)
@@ -246,37 +287,24 @@ export function unread(agentId)
     return { dms, room: entries.slice(seen) };
 }
 
-// Which agent is this process? The bus records one marker per bound stdio
-// session (`sessions/<agentId>.<pid>.<nonce>.json`), keyed by the MCP server's
-// pid. A hook is a sibling of that server under the same client process, so the
-// marker whose server pid shares an ancestor with us is ours.
-//
-// Two hard limits learned 2026-09-20: the client root is shared across tabs,
-// so ancestry alone cannot tell our markers from another tab's, and a respawned
-// server writes a marker without ever joining. So a marker only counts when its
-// agent is registry-live with exactly this pid (corroboration), and when
-// several corroborated markers match, the newest wins — a fresh tab's own
-// servers are always the newest things in its ancestry.
-//
-// Identity is a convenience, not a requirement: every caller must still work
-// when this returns null (an agent that has not joined yet, a hook fired from
-// a process we cannot trace, a bus that was wiped). Callers treat the claim
-// file as tab-exact and let detection only fill an absent claim.
-export function detectIdentity()
+// Is there a live bus session for this agent anywhere in this client? The bus
+// records one marker per bound stdio session (`sessions/<agentId>.<pid>.<nonce>.json`)
+// and removes it when the process exits, so a marker means a bound server for
+// that name is running. Markers cannot tell tabs apart — the client root is
+// shared, and one stdio process can serve several tabs — so this is used only
+// for the rejoin HINT, never to guess an identity. Its two answers are both
+// safe: no marker means the tab cannot be bound (its server would have written
+// one), so hinting a rejoin is correct; a marker may belong to another tab, so
+// it proves nothing and the hint stays quiet.
+export function hasLiveSession(agentId)
 {
     const dir = path.join(COORD_DIR, "sessions");
-    if (!existsSync(dir))
-        return null;
-    const registered = registry();
-    const ancestry = ancestorChain(process.pid, 6);
-    const mine = readdirSync(dir)
+    if (!agentId || !existsSync(dir))
+        return false;
+    return readdirSync(dir)
         .filter((name) => name.endsWith(".json"))
         .map((name) => readJson(path.join(dir, name), null))
-        .filter((m) => m && isAlive(m.pid)
-            && (ancestry.includes(m.pid) || ancestry.includes(parentOf(m.pid)))
-            && registered[m.agentId]?.serverPid === m.pid)
-        .sort((a, b) => b.boundAt - a.boundAt);
-    return mine[0]?.agentId ?? null;
+        .some((m) => m && m.agentId === agentId && isAlive(m.pid));
 }
 
 function isAlive(pid)
@@ -290,32 +318,6 @@ function isAlive(pid)
     {
         return false;
     }
-}
-
-function parentOf(pid)
-{
-    try
-    {
-        return Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
-    }
-    catch
-    {
-        return null;
-    }
-}
-
-function ancestorChain(pid, depth)
-{
-    const ret = [];
-    let current = pid;
-    for (let i = 0; i < depth && current > 1; i++)
-    {
-        current = parentOf(current);
-        if (!current)
-            break;
-        ret.push(current);
-    }
-    return ret;
 }
 
 export function standDown()

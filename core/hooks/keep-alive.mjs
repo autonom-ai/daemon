@@ -10,16 +10,14 @@
 // Release: `.devin/collaboration/stand-down` (tools/coord-web --stand-down, or
 // the button in the chat UI). While it exists, stopping is allowed again.
 
-import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, detectIdentity, emit, formatEntries, hookInput, recess, recordClaim, staggerMs, standDown, unread } from "./coord.mjs";
+import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, recess, staggerMs, standDown, unread } from "./coord.mjs";
 
 if (standDown())
     process.exit(0);
 
 const input = await hookInput();
-const claimed = claimFor(input.session_id);
-const agent = claimed ?? detectIdentity();
-if (input.session_id && !claimed && agent)
-    recordClaim(input.session_id, agent);
+// Claim-only, like every hook — record-join.mjs owns the write side.
+const agent = claimFor(input.session_id);
 const { dms, room } = unread(agent);
 const recessState = recess();
 const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;

@@ -1,10 +1,15 @@
-// Team chat client. No framework: one stream, one list, one composer.
+// Team room client. No framework: one host connection, one list, one composer.
+// The extension host owns the bus; this file only renders what it posts and
+// sends back what the user does.
+
+const vscode = acquireVsCodeApi();
+const post = (message) => vscode.postMessage(message);
 
 const state = {
     messages: [],
     rooms: [],
     agents: [],
-    seen: JSON.parse(localStorage.getItem("coord-chat-seen") ?? "{}"),
+    seen: JSON.parse(localStorage.getItem("coord-room-seen") ?? "{}"),
     room: null,
     dm: null,
     human: "user",
@@ -12,6 +17,7 @@ const state = {
     teamRoom: "general",
     standDown: false,
     recess: { active: false },
+    connected: false,
 };
 
 const el = {
@@ -42,8 +48,45 @@ const el = {
     recessCancel: document.getElementById("recess-cancel"),
 };
 
-// The seats that can be pinged, plus @everyone. The human is excluded:
-// pinging yourself is not a ping. #room pings every member of that room.
+function esc(text)
+{
+    return String(text ?? "").replace(/[&<>"']/g, (ch) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
+function displayName(id)
+{
+    return state.agents.find((agent) => agent.id === id)?.display || id;
+}
+
+// A stable muted color per seat — the identity's own color when it has one,
+// otherwise a deterministic palette entry, so a seat keeps its color across
+// workspaces and no per-project name list is needed. The human gets the
+// accent-warm --human tone rather than a palette entry.
+const SEAT_COLORS = ["#6d9ce8", "#5ec9a0", "#b78fe0", "#d99a55", "#5fc4cb", "#d9899e", "#a3bb6a", "#8f9ede"];
+function seatColor(id)
+{
+    if (id === state.human)
+        return "var(--human)";
+    const own = state.agents.find((agent) => agent.id === id)?.color;
+    if (own)
+        return own;
+    let hash = 0;
+    for (const ch of String(id))
+        hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    return SEAT_COLORS[hash % SEAT_COLORS.length];
+}
+
+// Seat colors are applied through CSSOM, not `style=` attributes: the webview
+// CSP blocks inline style attributes, and this keeps style-src strict.
+function paintColors(root)
+{
+    for (const node of root.querySelectorAll("[data-color]"))
+        node.style.color = node.dataset.color;
+}
+
+// The seats that can be pinged, plus @everyone. The human is excluded: pinging
+// yourself is not a ping. #room pings every member of that room.
 function mentionCandidates(sigil)
 {
     if (sigil === "#")
@@ -60,9 +103,8 @@ function knownMentions()
     return new Set(["everyone", ...state.agents.map((agent) => agent.id)]);
 }
 
-// A ping is a room message that names the human or everyone. This is the "priority #1"
-// rule made visible: such a message is marked in the log rather than left to look
-// like ordinary chatter.
+// A ping is a room message that names the human or everyone. Such a message is
+// marked in the log rather than left to look like ordinary chatter.
 function isPing(message)
 {
     if (message.stream !== "room")
@@ -74,47 +116,17 @@ function isPing(message)
         if (name === "everyone" || name === "all" || name === me)
             return true;
     }
-    // #room pings its members — the human is in every room the server seeded.
     for (const match of (message.text ?? "").matchAll(/#([A-Za-z0-9_-]+)/g))
         if (state.rooms.some((room) => room.name === match[1] && room.members.includes(state.human)))
             return true;
     return false;
 }
 
-// A ping DM is notification machinery, not conversation — "[PING]" fanout
-// mirrors exist to wake a seat's inbox (the room message is the readable
-// artifact), and "PING:" is the echo form from the ping tool. Both hide from
-// the DM view and its unread count. Deliberately distinct from isPing(),
-// which marks room messages that mention the human.
+// Pings are fanned out to inboxes as `[PING] ...` DMs; the room view already
+// shows the original, so the mirror is noise there and only noise.
 function isPingMirror(message)
 {
-    const text = message.text ?? "";
-    return message.stream === "dm" && (text.startsWith("[PING]") || text.startsWith("PING:"));
-}
-
-function esc(text)
-{
-    return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-}
-
-// There are no display names — the coord agent id is the name.
-function displayName(id)
-{
-    return id;
-}
-
-// A stable muted color per seat — deterministic, so a seat keeps its color
-// across workspaces and no per-project name list is needed. The human gets
-// the accent-warm --human tone rather than a palette entry.
-const SEAT_COLORS = ["#6d9ce8", "#5ec9a0", "#b78fe0", "#d99a55", "#5fc4cb", "#d9899e", "#a3bb6a", "#8f9ede"];
-function seatColor(id)
-{
-    if (id === state.human)
-        return "var(--human)";
-    let hash = 0;
-    for (const ch of String(id))
-        hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-    return SEAT_COLORS[hash % SEAT_COLORS.length];
+    return message.stream === "dm" && typeof message.text === "string" && message.text.startsWith("[PING]");
 }
 
 function renderText(text)
@@ -124,7 +136,7 @@ function renderText(text)
     return esc(text)
         .replace(/`([^`\n]+)`/g, "<code>$1</code>")
         .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/(https?:\/\/[^\s<)&"'`]+[^\s<).,;:!?"'`])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+        .replace(/(https?:\/\/[^\s<)&"'`]+[^\s<).,;:!?"'`])/g, '<a href="$1">$1</a>')
         .replace(/([@#])([A-Za-z0-9_-]+)/g, (full, sigil, name) =>
         {
             if (sigil === "#")
@@ -179,9 +191,8 @@ function visible(message)
 }
 
 // Scroll modes: "force" lands at the newest line (view switch, first load,
-// your own send); "auto" follows only when the view is already at the
-// bottom, so reading backscroll never gets yanked; anything else leaves
-// the scroll position alone.
+// your own send); "auto" follows only when the view is already at the bottom,
+// so reading backscroll never gets yanked; anything else leaves it alone.
 function renderMessages(scroll = "force")
 {
     const nearBottom = el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight < 80;
@@ -192,10 +203,7 @@ function renderMessages(scroll = "force")
         const mine = m.from === state.human;
         // A run of consecutive messages from one sender shows the name once —
         // on the first. A ping still earns its full meta row, and a stream,
-        // room, or long time gap ends the run even from the same sender — a
-        // message an hour later is a new thought, not a continuation, and
-        // hiding the name on it just reads as a blank author. A kind badge on
-        // a merged message keeps a slim meta row so the badge is not hidden.
+        // room, or long time gap ends the run even from the same sender.
         const merged = prev !== null
             && prev.from === m.from
             && prev.stream === m.stream
@@ -203,14 +211,12 @@ function renderMessages(scroll = "force")
             && m.ts - prev.ts < 5 * 60_000
             && !isPing(m);
         prev = m;
-        // DMs render only inside their own conversation view, so a "dm → x"
-        // tag restates the view itself — room tags stay for the all-rooms view.
         const tag = m.stream === "room" && !state.room ? `<span class="tag">#${esc(m.room ?? "")}</span>` : "";
         const badge = m.kind ? `<span class="badge ${esc(m.kind)}">${esc(m.kind)}</span>` : "";
         const ping = isPing(m) ? "ping" : "";
         const meta = merged
             ? (badge || tag ? `<div class="meta">${badge}${tag}</div>` : "")
-            : `<div class="meta"><span class="who" style="color:${seatColor(m.from)}">${esc(displayName(m.from))}</span>${badge}${tag}</div>`;
+            : `<div class="meta"><span class="who" data-color="${esc(seatColor(m.from))}">${esc(displayName(m.from))}</span>${badge}${tag}</div>`;
         return `<li class="msg ${m.stream === "dm" ? "dm" : ""} ${ping} ${mine ? "me" : ""} ${merged ? "merged" : ""}" data-id="${esc(m.id ?? "")}">
             <span class="when" title="${new Date(m.ts).toLocaleString()}">${clock(m.ts)}</span>
             <div class="body">
@@ -219,6 +225,7 @@ function renderMessages(scroll = "force")
             </div>
         </li>`;
     }).join("");
+    paintColors(el.messages);
     el.count.textContent = `${shown.length} / ${state.messages.length}`;
     if (scroll === "force" || (scroll === "auto" && nearBottom))
         el.messages.scrollTop = el.messages.scrollHeight;
@@ -248,9 +255,8 @@ function renderSidebar()
 // A seat is as alive as its last bus touch — a message it sent or a read
 // cursor its coord server moved. Thirty silent minutes means gone: it sinks
 // out of the list entirely unless it left unread pings (those dim instead).
-// The list doubles as the DM target picker, so a hidden seat cannot be
-// written to at all — hiding is a reachability claim, not just decluttering.
-// Your own seat is excluded for the same reason: you cannot DM yourself.
+// The list doubles as the DM target picker, so a hidden seat cannot be written
+// to at all — hiding is a reachability claim, not just decluttering.
 const DM_INACTIVE_MS = 30 * 60_000;
 
 function renderDms()
@@ -271,14 +277,15 @@ function renderDms()
         const active = state.dm === agent.id ? "active" : "";
         const stale = agent.online ? "" : "offline";
         return `<li class="${active} ${stale}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
-            <span class="name" style="color:${seatColor(agent.id)}">${esc(displayName(agent.id))}</span>
+            <span class="name" data-color="${esc(seatColor(agent.id))}">${esc(displayName(agent.id))}</span>
             <span class="meta">${unread ? `${unread} unread` : "1:1"}</span>
         </li>`;
     }).join("");
+    paintColors(el.dms);
 }
 
-// Where the next message goes. There is no destination control: the view you are
-// looking at IS the destination, which is why the sidebar and the composer
+// Where the next message goes. There is no destination control: the view you
+// are looking at IS the destination, which is why the sidebar and the composer
 // placeholder have to agree at all times.
 function destination()
 {
@@ -286,7 +293,6 @@ function destination()
         return { mode: "dm", name: state.dm };
     return { mode: "room", name: state.room ?? state.teamRoom };
 }
-
 
 function openDm(seat)
 {
@@ -306,12 +312,12 @@ function renderDocs(payload)
     el.standDown.className = payload.standDown ? "" : "danger";
     el.standDownBanner.hidden = !payload.standDown;
 
-    // Which build is live is a fact the user can glance at, not something inferred
-    // from a PID. Stale code shows up as a build hash that never changes.
+    // Which build is live is a fact the user can glance at, not something
+    // inferred from a PID. Stale code shows up as a version that never changes.
     if (payload.build)
     {
-        el.build.textContent = `build ${payload.build}`;
-        el.build.title = `server build ${payload.build} · started ${payload.startedAt ? new Date(payload.startedAt).toLocaleTimeString() : "?"}`;
+        el.build.textContent = `v${payload.build}`;
+        el.build.title = `team room ${payload.build}`;
     }
 
     state.recess = payload.recess ?? { active: false };
@@ -330,24 +336,10 @@ function absorb(payload)
     state.teamRoom = payload.teamRoom;
     state.rooms = payload.rooms;
     state.agents = payload.agents;
-    document.title = `${state.project} team room`;
     if (!state.room && !state.dm)
         state.room = state.teamRoom;
     renderSidebar();
     renderDocs(payload);
-}
-
-async function refresh()
-{
-    const payload = await fetch("/api/state").then((r) => r.json());
-    absorb(payload);
-    const known = new Set(state.messages.map((m) => m.id));
-    for (const message of payload.messages)
-        if (!known.has(message.id))
-            state.messages.push(message);
-    state.messages.sort((a, b) => a.ts - b.ts);
-    renderMessages();
-    markSeen();
 }
 
 function markSeen()
@@ -359,92 +351,80 @@ function markSeen()
         else if (state.dm && message.from === state.dm)
             state.seen[`dm:${state.dm}`] = Math.max(state.seen[`dm:${state.dm}`] ?? 0, message.ts);
     }
-    localStorage.setItem("coord-chat-seen", JSON.stringify(state.seen));
+    localStorage.setItem("coord-room-seen", JSON.stringify(state.seen));
 }
 
-let sseUp = false;
-let source = null;
-// The server pings every 15s, so a stream that has shown no frame at all in
-// 45s is silently dead — the browser's EventSource never reports a half-open
-// connection as an error. The watchdog below forces a real reconnect.
-let lastFrame = 0;
-const FRAME_STALE_MS = 45_000;
-
-function connect()
+function addMessages(incoming)
 {
-    source?.close();
-    source = new EventSource("/api/stream");
-    source.onopen = () =>
+    const known = new Set(state.messages.map((m) => m.id));
+    let added = false;
+    for (const message of incoming)
+        if (!known.has(message.id))
+        {
+            state.messages.push(message);
+            added = true;
+        }
+    if (added)
+        state.messages.sort((a, b) => a.ts - b.ts);
+    return added;
+}
+
+window.addEventListener("message", (event) =>
+{
+    const payload = event.data ?? {};
+    if (payload.type === "state")
     {
-        sseUp = true;
-        lastFrame = Date.now();
+        absorb(payload);
+        const added = addMessages(payload.messages);
+        state.connected = true;
         el.conn.textContent = "live";
         el.conn.className = "conn live";
-        // Catch anything (rooms, docs, agents) that changed while we were down.
-        refresh().catch(() => { });
-    };
-    source.onerror = () =>
-    {
-        sseUp = false;
-        el.conn.textContent = "reconnecting…";
-        el.conn.className = "conn dead";
-    };
-    source.onmessage = (event) =>
-    {
-        lastFrame = Date.now();
-        const payload = JSON.parse(event.data);
-        if (payload.type === "message")
-        {
-            if (!state.messages.some((m) => m.id === payload.entry.id))
-            {
-                state.messages.push(payload.entry);
-                state.messages.sort((a, b) => a.ts - b.ts);
-                // Only scroll for a message the current view actually shows —
-                // traffic in another room shouldn't yank the scroll position.
-                // Your own sends snap to bottom unconditionally; anything
-                // else follows only when you're already there.
-                renderMessages(visible(payload.entry)
-                    ? (payload.entry.from === state.human ? "force" : "auto")
-                    : "none");
-                markSeen();
-                renderSidebar();
-                if (payload.entry.from !== state.human && payload.entry.stream === "room")
-                    flash();
-            }
-        }
-        else if (payload.type === "standdown" || payload.type === "recess")
-            refresh().catch(() => { });
-        // "ping" and "hello" only prove the stream is alive — lastFrame is
-        // already updated, nothing else to do.
-    };
-}
-
-setInterval(() =>
-{
-    if (sseUp && Date.now() - lastFrame > FRAME_STALE_MS)
-    {
-        sseUp = false;
-        connect();
+        if (added)
+            renderMessages();
+        markSeen();
+        renderSidebar();
     }
-}, 10_000);
-
-// Waking the tab is the other moment the view can be stale: whatever the
-// stream missed while the page was frozen is picked up here.
-document.addEventListener("visibilitychange", () =>
-{
-    if (document.visibilityState === "visible")
-        refresh().catch(() => { });
+    else if (payload.type === "message")
+    {
+        if (addMessages([payload.entry]))
+        {
+            // Only scroll for a message the current view actually shows —
+            // traffic in another room shouldn't yank the scroll position.
+            // Your own sends snap to bottom unconditionally; anything else
+            // follows only when you're already there.
+            renderMessages(visible(payload.entry)
+                ? (payload.entry.from === state.human ? "force" : "auto")
+                : "none");
+            markSeen();
+            renderSidebar();
+        }
+    }
+    else if (payload.type === "docs")
+        renderDocs(payload);
+    else if (payload.type === "conn")
+    {
+        state.connected = payload.up;
+        el.conn.textContent = payload.up ? "live" : "offline";
+        el.conn.className = `conn ${payload.up ? "live" : "dead"}`;
+    }
+    else if (payload.type === "sent")
+    {
+        if (payload.ok)
+        {
+            el.hint.textContent = "";
+            closeMentions();
+            if (payload.pinged?.length)
+                toast(`pinged ${payload.pinged.map((name) => `@${name}`).join(", ")} — delivered to their inbox`, "good");
+        }
+        else
+        {
+            el.hint.textContent = `not sent: ${payload.error}`;
+            toast(`not sent: ${payload.error}`, "bad");
+        }
+    }
+    else if (payload.type === "toast")
+        toast(payload.text, payload.tone);
 });
-
-let flashed = false;
-function flash()
-{
-    if (flashed)
-        return;
-    flashed = true;
-    document.title = `* ${state.project} team room`;
-    setTimeout(() => { flashed = false; document.title = `${state.project} team room`; }, 2000);
-}
 
 async function send()
 {
@@ -454,29 +434,10 @@ async function send()
     const { mode, name } = destination();
     el.text.value = "";
     el.hint.textContent = "sending…";
-    try
-    {
-        const response = mode === "dm"
-            ? await fetch("/api/dm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: name, text }) })
-            : await fetch("/api/say", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ room: name, text, kind: el.kind.value }),
-            });
-        const payload = await response.json();
-        if (!payload.ok)
-            throw new Error(payload.error ?? "send failed");
-        el.hint.textContent = "";
-        closeMentions();
-        if (payload.pinged?.length)
-            toast(`pinged ${payload.pinged.map((name) => `@${name}`).join(", ")} — delivered to their inbox`, "good");
-    }
-    catch (err)
-    {
-        el.hint.textContent = `not sent: ${err.message}`;
-        toast(`not sent: ${err.message}`, "bad");
-        el.text.value = text;
-    }
+    if (mode === "dm")
+        post({ type: "dm", to: name, text });
+    else
+        post({ type: "say", room: name, text, kind: el.kind.value });
 }
 
 el.composer.addEventListener("submit", (event) =>
@@ -501,9 +462,10 @@ function renderMentions()
     const sigil = mentionState.sigil ?? "@";
     el.mentions.innerHTML = mentionState.items.map((item, index) =>
         `<li data-name="${esc(item.name)}" class="${index === mentionState.active ? "active" : ""}">
-            <span class="who" style="color:${sigil === "#" ? "var(--accent)" : seatColor(item.name)}">${sigil}${esc(item.name)}</span>
+            <span class="who" data-color="${sigil === "#" ? "var(--accent)" : esc(seatColor(item.name))}">${sigil}${esc(item.name)}</span>
             <span class="meta">${esc(item.role)}</span>
         </li>`).join("");
+    paintColors(el.mentions);
 }
 
 // The @token the caret is sitting in, if any. The @ has to start a word, so
@@ -629,34 +591,21 @@ el.dms.addEventListener("click", (event) =>
     }
 });
 
-// Clicking a seat in the Direct list opens the 1:1; the old Seats sidebar list
-// was removed as a third copy of the same information (Direct + header chips).
+// External links open in the real browser, not inside the webview iframe.
+el.messages.addEventListener("click", (event) =>
+{
+    const link = event.target.closest("a[href]");
+    if (link)
+    {
+        event.preventDefault();
+        post({ type: "openLink", href: link.href });
+    }
+});
 
-async function recess(action, note)
+function recess(action, note)
 {
     el.hint.textContent = "";
-    try
-    {
-        const response = await fetch("/api/recess", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ action, note }),
-        });
-        const payload = await response.json();
-        if (!payload.ok)
-        {
-            toast(`recess: ${payload.error}`, "bad");
-            return;
-        }
-        toast(action === "end"
-            ? "recess closed — the outcome is in #general"
-            : "recess open — every seat has been asked to stop and talk", "good");
-        refresh().catch(() => { });
-    }
-    catch (err)
-    {
-        toast(`recess failed: ${err.message}`, "bad");
-    }
+    post({ type: "recess", action, note });
 }
 
 let recessEnding = false;
@@ -667,7 +616,7 @@ function openRecessDialog(ending)
     el.recessDialogTitle.textContent = ending ? "close the recess" : "call recess";
     el.recessDialogLede.textContent = ending
         ? "What did the recess decide? It is posted to #general, and it is what the seats read as the outcome."
-        : "Everything stops: every seat is asked to say who they are, what they are holding, and what they want to argue about. The note is posted to #general.";
+        : "Everything stops: every seat is asked to say who they are, what they are holding, and what they want to argue about. Workspace edits are blocked until the recess closes. The note is posted to #general.";
     el.recessNote.value = "";
     el.recessNote.placeholder = ending ? "the decision" : "why the team is stopping (optional)";
     el.recessConfirm.textContent = ending ? "close recess" : "call recess";
@@ -688,29 +637,9 @@ el.recessConfirm.addEventListener("click", () =>
     recess(recessEnding ? "end" : "start", note);
 });
 
-el.standDown.addEventListener("click", async () =>
-{
-    const response = await fetch("/api/standdown", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ active: !state.standDown }),
-    });
-    const payload = await response.json();
-    if (payload.ok)
-        refresh().catch(() => { });
-});
+el.standDown.addEventListener("click", () => post({ type: "standdown", active: !state.standDown }));
 
-refresh().catch((err) =>
-{
-    el.conn.textContent = `offline (${err.message})`;
-    el.conn.className = "conn dead";
-});
-connect();
-// The stream pushes messages while it is up; the poll is only a recovery path
-// for when it is down, so it does not double every refresh (or flood the console
-// with connection errors while the server is gone).
-setInterval(() =>
-{
-    if (!sseUp)
-        refresh().catch(() => { });
-}, 15_000);
+// The host pushes state on connect and after every structural change; the
+// interval is only a recovery path if a push was missed.
+setInterval(() => post({ type: "refresh" }), 30_000);
+post({ type: "ready" });

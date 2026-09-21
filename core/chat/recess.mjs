@@ -52,7 +52,9 @@ export async function startRecess(store, { projectDir, room, by, note })
             "",
             note ? `Called by ${by}: ${note}` : `Called by ${by}.`,
             "",
-            "Minimal edits until the recess closes. Keep the turn alive with wait_for_message between replies.",
+            "Edits to the workspace are BLOCKED until the recess closes (the permission hook enforces it) —",
+            "reads, searches, your own profile, and .devin/collaboration/ notes stay open. Keep the turn alive",
+            "with wait_for_message between replies.",
         ].join("\n"),
     };
     await store.appendJsonl(store.roomFile(entry.room), entry);
