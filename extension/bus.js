@@ -88,6 +88,7 @@ async function openBus({ projectDir, coordRoot })
     const offsets = new Map();
     const pending = new Map();
     const activity = new Map();
+    let seeded = false;
 
     // One pass over the bus so a fresh extension does not blank every agent's
     // presence until their next message.
@@ -136,8 +137,13 @@ async function openBus({ projectDir, coordRoot })
             }
             if (!offsets.has(file))
             {
-                offsets.set(file, size); // first sight: history comes from state(), not the stream
-                continue;
+                // First sight during the open pass: history comes from state(),
+                // not the stream. A file that appears AFTER the open pass — a
+                // room created by its first message, the human's inbox — is new
+                // content, so it is read from the top instead of swallowed.
+                offsets.set(file, seeded ? 0 : size);
+                if (!seeded)
+                    continue;
             }
             const start = offsets.get(file);
             if (size < start)
@@ -188,6 +194,7 @@ async function openBus({ projectDir, coordRoot })
                 fresh.push(decorated);
             }
         }
+        seeded = true;
         return fresh;
     }
 
@@ -240,6 +247,10 @@ async function openBus({ projectDir, coordRoot })
     }
 
     seedActivity();
+    // Establish the pump's file offsets at open time, before anything can be
+    // written: history is state()'s job, and a message that lands while the
+    // extension is still starting must not be swallowed as first-sight history.
+    pump();
     await actions.registerHuman(ctx);
     return {
         ctx,

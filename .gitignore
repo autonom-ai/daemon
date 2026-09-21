@@ -6,3 +6,5 @@ AGENTS.md
 COORDINATION.md
 ORGANICS.md
 tools/
+.playwright-mcp/
+extension/*.vsix

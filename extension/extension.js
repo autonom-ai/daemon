@@ -18,6 +18,7 @@ const POLL_MS = 750;
 const HEARTBEAT_MS = 30_000;
 
 let bus = null;
+let busPromise = null;
 let busError = null;
 let workspace = null;
 let view = null;
@@ -77,6 +78,8 @@ async function ensureBus()
 {
     if (bus || busError)
         return bus;
+    if (busPromise)
+        return busPromise;
     const projectDir = findWorkspace();
     if (!projectDir)
     {
@@ -92,20 +95,26 @@ async function ensureBus()
         postAll({ type: "toast", text: busError, tone: "bad" });
         return null;
     }
-    try
-    {
-        bus = await openBus({ projectDir, coordRoot });
-        workspace = projectDir;
-        postAll({ type: "conn", up: true });
-        await pushState();
-    }
-    catch (err)
-    {
-        busError = err?.message ?? String(err);
-        postAll({ type: "conn", up: false });
-        postAll({ type: "toast", text: `team room: ${busError}`, tone: "bad" });
-    }
-    return bus;
+    // One open, shared: the view and the first poll can both ask at once, and a
+    // second openBus would move the pump's boundary past messages that arrived
+    // while the first was still importing.
+    busPromise = openBus({ projectDir, coordRoot })
+        .then(async (opened) =>
+        {
+            bus = opened;
+            workspace = projectDir;
+            postAll({ type: "conn", up: true });
+            await pushState();
+            return bus;
+        })
+        .catch((err) =>
+        {
+            busError = err?.message ?? String(err);
+            postAll({ type: "conn", up: false });
+            postAll({ type: "toast", text: `team room: ${busError}`, tone: "bad" });
+            return null;
+        });
+    return busPromise;
 }
 
 async function statePayload()
@@ -127,6 +136,17 @@ async function pushState()
         postAll({ type: "conn", up: false });
         postAll({ type: "toast", text: `team room: ${err?.message ?? err}`, tone: "bad" });
     }
+}
+
+// A manual refresh is the retry path: a failed bus open (missing store, a
+// coord.json fix) clears here so the next attempt is real, not cached.
+async function refresh()
+{
+    busError = null;
+    busPromise = null;
+    if (!bus && !(await ensureBus()))
+        return;
+    await pushState();
 }
 
 // The room's own ping semantics, for the badge and the notification: a room
@@ -200,9 +220,14 @@ async function handleMessage(message)
         return;
     try
     {
-        if (message.type === "ready" || message.type === "refresh")
+        if (message.type === "ready")
         {
             await pushState();
+            return;
+        }
+        if (message.type === "refresh")
+        {
+            await refresh();
             return;
         }
         if (message.type === "say")
@@ -317,7 +342,7 @@ function activate(context)
         vscode.window.registerWebviewViewProvider(VIEW_ID, new RoomViewProvider(), { webviewOptions: { retainContextWhenHidden: true } }),
         vscode.commands.registerCommand("coordRoom.focus", () => vscode.commands.executeCommand(`${VIEW_ID}.focus`)),
         vscode.commands.registerCommand("coordRoom.openPanel", openPanel),
-        vscode.commands.registerCommand("coordRoom.refresh", pushState),
+        vscode.commands.registerCommand("coordRoom.refresh", refresh),
         vscode.commands.registerCommand("coordRoom.recess", () => handleMessage({ type: "recess", action: "start", note: "" })),
         vscode.commands.registerCommand("coordRoom.recessEnd", () => handleMessage({ type: "recess", action: "end", note: "" })),
         vscode.commands.registerCommand("coordRoom.standDown", () => handleMessage({ type: "standdown", active: true })),
