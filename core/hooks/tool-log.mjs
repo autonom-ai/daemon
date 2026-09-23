@@ -14,7 +14,7 @@
 // This hook observes only: it never blocks, never emits, and exits quietly on
 // any failure — a logging bug must not become a tool failure.
 
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { AGENTS_HOME, COORD_DIR, claimFor, clip, hookInput } from "./coord.mjs";
 
@@ -50,30 +50,65 @@ try
     };
 
     // Read-filter-rewrite keeps the file self-pruning: it can never grow past
-    // one hour of calls no matter how long a session runs. Temp-then-rename so
-    // a crash mid-write cannot truncate the window.
-    const kept = [];
+    // one hour of calls no matter how long a session runs. Two hooks can fire
+    // concurrently for the same agent (parallel tool calls), so the prune runs
+    // inside a mkdir lock — a contended prune is skipped rather than raced,
+    // because a dropped line matters more than a stale one surviving an hour.
+    mkdirSync(path.dirname(file), { recursive: true });
+    const lock = `${file}.lock`;
+    let locked = false;
     try
     {
-        for (const line of readFileSync(file, "utf8").split("\n"))
-        {
-            if (!line.trim())
-                continue;
-            try
-            {
-                const e = JSON.parse(line);
-                if (now - (e.ts ?? 0) <= WINDOW_MS)
-                    kept.push(line);
-            }
-            catch { }
-        }
+        mkdirSync(lock);
+        locked = true;
     }
-    catch { }
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, kept.length ? `${kept.join("\n")}\n` : "", "utf8");
-    renameSync(tmp, file);
-    appendFileSync(file, `${JSON.stringify(entry)}\n`, "utf8");
+    catch
+    {
+        // A crashed hook can strand its lock; anything older than 30s is dead.
+        try
+        {
+            if (now - statSync(lock).mtimeMs > 30_000)
+            {
+                rmdirSync(lock);
+                mkdirSync(lock);
+                locked = true;
+            }
+        }
+        catch { }
+    }
+    if (locked)
+    {
+        const kept = [];
+        try
+        {
+            for (const line of readFileSync(file, "utf8").split("\n"))
+            {
+                if (!line.trim())
+                    continue;
+                try
+                {
+                    const e = JSON.parse(line);
+                    if (now - (e.ts ?? 0) <= WINDOW_MS)
+                        kept.push(line);
+                }
+                catch { }
+            }
+        }
+        catch { }
+        // Temp-then-rename so a crash mid-write cannot truncate the window.
+        const tmp = `${file}.${process.pid}.tmp`;
+        writeFileSync(tmp, kept.length ? `${kept.join("\n")}\n` : "", "utf8");
+        renameSync(tmp, file);
+    }
+    try
+    {
+        appendFileSync(file, `${JSON.stringify(entry)}\n`, "utf8");
+    }
+    finally
+    {
+        if (locked)
+            try { rmdirSync(lock); } catch { }
+    }
 }
 catch { }
 
