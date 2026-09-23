@@ -86,8 +86,8 @@ bin/coord identity add ada                  # scaffold agents/ada/{identity,memo
 The Team Room:
 
 ```sh
-cd extension && npx @vscode/vsce package --no-dependencies   # writes coord-room-<version>.vsix
-# install it: extract into ~/.devin/extensions/cet.coord-room-<version>/ (or a VSIX install command)
+cd extension && npx @vscode/vsce package --no-dependencies   # writes agent-coord-<version>.vsix
+# install it: extract into ~/.devin/extensions/cet.agent-coord-<version>/ (or a VSIX install command)
 ```
 
 Then open a wired workspace in Devin Desktop and reload the window — the room

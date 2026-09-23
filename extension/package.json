@@ -1,7 +1,7 @@
 {
-  "name": "coord-room",
-  "displayName": "Team Room",
-  "description": "The human's seat on the agent-coord bus — rooms, DMs, and pings, read straight from the workspace's own JSONL state.",
+  "name": "agent-coord",
+  "displayName": "Agent Coord Chat",
+  "description": "Unified chat interface for agent-coord sessions.",
   "publisher": "cet",
   "version": "0.1.0",
   "private": true,
@@ -14,45 +14,40 @@
   "main": "./extension.js",
   "activationEvents": [
     "workspaceContains:.devin/coord.json",
-    "onView:coordRoom.chat"
+    "onView:agentCoord.chat"
   ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "coordRoom",
+          "id": "agentCoord",
           "title": "Team Room",
           "icon": "media/room.svg"
         }
       ]
     },
     "views": {
-      "coordRoom": [
+      "agentCoord": [
         {
           "type": "webview",
-          "id": "coordRoom.chat",
+          "id": "agentCoord.chat",
           "name": "Team Room"
         }
       ]
     },
     "commands": [
       {
-        "command": "coordRoom.focus",
+        "command": "agentCoord.focus",
         "title": "Open the team room",
         "category": "Team Room"
       },
       {
-        "command": "coordRoom.openPanel",
+        "command": "agentCoord.openPanel",
         "title": "Open the team room in a tab",
         "category": "Team Room"
       },
       {
-        "command": "coordRoom.openSidebar",
-        "title": "Open the team room in the sidebar",
-        "category": "Team Room"
-      },
-      {
-        "command": "coordRoom.refresh",
+        "command": "agentCoord.refresh",
         "title": "Refresh",
         "category": "Team Room"
       }
@@ -60,12 +55,12 @@
     "configuration": {
       "title": "Team Room",
       "properties": {
-        "coordRoom.workspace": {
+        "agentCoord.workspace": {
           "type": "string",
           "default": "",
           "description": "Workspace directory whose .devin/coord.json wires it to a team. Empty means the open folder that has one."
         },
-        "coordRoom.coordRoot": {
+        "agentCoord.coordRoot": {
           "type": "string",
           "default": "",
           "description": "Path to the agent-coord clone (store module, hooks, identities). Empty means coordRoot from the workspace's coord.json."

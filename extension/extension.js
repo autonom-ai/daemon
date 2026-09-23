@@ -4,16 +4,14 @@
 // browser, no respawn wrapper. The webview is presentation only — it renders
 // what the host posts and sends back say/dm intents.
 //
-// The room opens as an editor tab (coordRoom.focus / coordRoom.openPanel); the
-// activity-bar view is the same UI in the sidebar, reachable via
-// coordRoom.openSidebar.
+// The room opens as an editor tab (agentCoord.focus / agentCoord.openPanel).
 
 const vscode = require("vscode");
 const fs = require("node:fs");
 const path = require("node:path");
 const { openBus, readJson } = require("./bus.js");
 
-const VIEW_ID = "coordRoom.chat";
+const VIEW_ID = "agentCoord.chat";
 const MEDIA_DIR = path.join(__dirname, "media");
 const POLL_MS = 750;
 const HEARTBEAT_MS = 30_000;
@@ -36,7 +34,7 @@ let lastReconcile = 0;
 
 function findWorkspace()
 {
-    const configured = vscode.workspace.getConfiguration("coordRoom").get("workspace");
+    const configured = vscode.workspace.getConfiguration("agentCoord").get("workspace");
     const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
     for (const dir of [...(configured ? [configured] : []), ...folders])
         if (dir && fs.existsSync(path.join(dir, ".devin", "coord.json")))
@@ -48,7 +46,7 @@ function coordRootOf(projectDir)
 {
     const config = readJson(path.join(projectDir, ".devin", "coord.json"), {});
     return config.coordRoot
-        ?? vscode.workspace.getConfiguration("coordRoom").get("coordRoot")
+        ?? vscode.workspace.getConfiguration("agentCoord").get("coordRoot")
         ?? null;
 }
 
@@ -99,7 +97,7 @@ async function ensureBus()
     const coordRoot = coordRootOf(projectDir);
     if (!coordRoot)
     {
-        busError = "coord.json has no coordRoot and coordRoom.coordRoot is not set.";
+        busError = "coord.json has no coordRoot and agentCoord.coordRoot is not set.";
         postAll({ type: "toast", text: busError, tone: "bad" });
         scheduleReconnect();
         return null;
@@ -204,7 +202,7 @@ function notifyPing(entry)
         .then((choice) =>
         {
             if (choice === "Open Team Room")
-                vscode.commands.executeCommand("coordRoom.focus");
+                vscode.commands.executeCommand("agentCoord.focus");
         });
 }
 
@@ -345,7 +343,7 @@ function openPanel()
         panel.reveal();
         return;
     }
-    panel = vscode.window.createWebviewPanel("coordRoom.panel", "Team Room", vscode.ViewColumn.Active, { retainContextWhenHidden: true });
+    panel = vscode.window.createWebviewPanel("agentCoord.panel", "Team Room", vscode.ViewColumn.Active, { retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.file(path.join(MEDIA_DIR, "room.svg"));
     panel.onDidDispose(() => { panel = null; });
     panel.onDidChangeViewState(() =>
@@ -365,20 +363,15 @@ function activate(context)
 {
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(VIEW_ID, new RoomViewProvider(), { webviewOptions: { retainContextWhenHidden: true } }),
-        // The room's default surface is the editor tab: it gets the full width,
-        // survives a window reload as a real tab, and does not depend on the
-        // activity-bar view being resolved. The sidebar stays available as an
-        // explicit command.
-        vscode.commands.registerCommand("coordRoom.focus", openPanel),
-        vscode.commands.registerCommand("coordRoom.openPanel", openPanel),
-        vscode.commands.registerCommand("coordRoom.openSidebar", () => vscode.commands.executeCommand(`${VIEW_ID}.focus`)),
-        vscode.commands.registerCommand("coordRoom.refresh", refresh),
+        vscode.commands.registerCommand("agentCoord.focus", openPanel),
+        vscode.commands.registerCommand("agentCoord.openPanel", openPanel),
+        vscode.commands.registerCommand("agentCoord.refresh", refresh),
     );
 
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
     status.text = "$(comment-discussion) team room";
     status.tooltip = "Open the team room";
-    status.command = "coordRoom.focus";
+    status.command = "agentCoord.focus";
     status.show();
     context.subscriptions.push(status);
 
