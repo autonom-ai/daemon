@@ -13,8 +13,7 @@
   ],
   "main": "./extension.js",
   "activationEvents": [
-    "workspaceContains:.devin/coord.json",
-    "onView:agentCoord.chat"
+    "workspaceContains:.devin/coord.json"
   ],
   "contributes": {
     "viewsContainers": {
