@@ -5,7 +5,7 @@
 // what the host posts and sends back say/dm intents.
 //
 // The room opens as an editor tab (agentCoord.focus / agentCoord.openPanel).
-// The activity-bar icon is only a launcher for that tab — see RoomViewProvider.
+// The activity-bar view is a stable placeholder with a button to open that tab.
 
 const vscode = require("vscode");
 const fs = require("node:fs");
@@ -97,8 +97,8 @@ async function ensureBus()
         scheduleReconnect();
         return null;
     }
-    // One open, shared: the view and the first poll can both ask at once, and a
-    // second openBus would move the pump's boundary past messages that arrived
+    // One open, shared: the panel and the first poll can both ask at once, and
+    // a second openBus would move the pump's boundary past messages that arrived
     // while the first was still importing.
     busPromise = openBus({ projectDir, coordRoot })
         .then(async (opened) =>
@@ -312,18 +312,50 @@ function wire(webview)
     webview.onDidReceiveMessage((message) => handleMessage(message));
 }
 
-// The activity-bar icon is a launcher, not a surface: the sidebar view exists
-// only so the icon has something to point at. Resolving it opens (or focuses)
-// the editor tab and puts the sidebar away again. The view is kept for its
-// badge, which still counts pings on the activity-bar icon.
+function placeholderHtml()
+{
+    const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}';">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Room</title>
+</head>
+<body>
+<main>
+<h2>Team Room</h2>
+<p>Open the room in an editor tab to chat.</p>
+<button type="button" id="open-room">Open or focus Team Room tab</button>
+</main>
+<script nonce="${nonce}">
+const vscode = acquireVsCodeApi();
+document.getElementById("open-room").addEventListener("click", () =>
+    vscode.postMessage({ type: "openRoom" }));
+</script>
+</body>
+</html>`;
+}
+
 class RoomViewProvider
 {
     resolveWebviewView(webviewView)
     {
         view = webviewView;
+        webviewView.webview.options = { enableScripts: true };
+        webviewView.webview.html = placeholderHtml();
+        webviewView.webview.onDidReceiveMessage((message) =>
+        {
+            if (message.type === "openRoom")
+                vscode.commands.executeCommand("agentCoord.focus");
+        });
+        webviewView.onDidDispose(() =>
+        {
+            if (view === webviewView)
+                view = null;
+        });
         updateBadge();
-        openPanel();
-        vscode.commands.executeCommand("workbench.action.closeSidebar");
     }
 }
 
