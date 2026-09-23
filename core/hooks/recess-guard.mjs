@@ -304,9 +304,6 @@ if (!target)
 
 const resolved = path.resolve(PROJECT_DIR, target);
 
-// The stand-down marker is the human's release valve, not a seat's move.
-if (path.basename(resolved) === "stand-down" && within(collaboration, resolved))
-    block("Recess is open — stand-down is the user's call, not a seat's.");
 if (exempt(resolved))
     process.exit(0);
 block(agent

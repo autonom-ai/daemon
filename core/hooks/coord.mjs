@@ -56,7 +56,6 @@ export const COORD_DIR = path.join(PROJECT_DIR, ".devin", "agent-coord", "state"
 export const TEAM_ROOM = CONFIG.teamRoom;
 export const ROSTER = CONFIG.roster;
 export const HUMAN_SEAT = CONFIG.human;
-export const STAND_DOWN_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "stand-down");
 export const RECESS_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "recess");
 // The identity registry is clone content: agents/<name>/identity.md +
 // memory.md in this checkout (gitignored — the people are local material, not
@@ -318,11 +317,6 @@ function isAlive(pid)
     {
         return false;
     }
-}
-
-export function standDown()
-{
-    return existsSync(STAND_DOWN_FILE);
 }
 
 export function recess()

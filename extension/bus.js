@@ -6,7 +6,7 @@
 // offsets, mention fanout, presence, recess — lives here or in actions.mjs; the
 // webview is presentation only.
 
-const { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } = require("node:fs");
+const { existsSync, readFileSync, statSync } = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
@@ -81,7 +81,6 @@ async function openBus({ projectDir, coordRoot })
         teamRoom: config.teamRoom ?? "general",
         human: config.human ?? process.env.USER ?? "user",
     };
-    const standDownFile = path.join(projectDir, ".devin", "collaboration", "stand-down");
 
     // ---------- pump state ----------
 
@@ -206,7 +205,6 @@ async function openBus({ projectDir, coordRoot })
             project: ctx.project,
             human: ctx.human,
             teamRoom: ctx.teamRoom,
-            standDown: existsSync(standDownFile),
             recess: recessMod.recessState(projectDir),
             agents: actions.registryView({ ...ctx, activity }).map((agent) => ({ ...agent, ...identityMeta(coordRoot, agent.id) })),
             rooms: await actions.roomList(ctx),
@@ -224,18 +222,6 @@ async function openBus({ projectDir, coordRoot })
     async function sendDm(to, text, inReplyTo)
     {
         return actions.dm(ctx, to, text, inReplyTo);
-    }
-
-    async function setStandDown(active)
-    {
-        if (active)
-        {
-            mkdirSync(path.dirname(standDownFile), { recursive: true });
-            writeFileSync(standDownFile, `${new Date().toISOString()} — stand-down requested from the team room by ${ctx.human}\n`, "utf8");
-        }
-        else if (existsSync(standDownFile))
-            unlinkSync(standDownFile);
-        return existsSync(standDownFile);
     }
 
     async function recess(action, note)
@@ -260,7 +246,6 @@ async function openBus({ projectDir, coordRoot })
         pump,
         say,
         sendDm,
-        setStandDown,
         recess,
         heartbeat: () => actions.touchHeartbeat(ctx),
     };

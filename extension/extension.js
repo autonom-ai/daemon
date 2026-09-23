@@ -2,10 +2,11 @@
 //
 // The extension host owns the bus (./bus.js): no HTTP server, no port, no
 // browser, no respawn wrapper. The webview is presentation only — it renders
-// what the host posts and sends back say/dm/recess/stand-down intents.
+// what the host posts and sends back say/dm/recess intents.
 //
-// The view is the room; the same UI opens as an editor panel for a wide
-// layout (coordRoom.openPanel).
+// The room opens as an editor tab (coordRoom.focus / coordRoom.openPanel); the
+// activity-bar view is the same UI in the sidebar, reachable via
+// coordRoom.openSidebar.
 
 const vscode = require("vscode");
 const fs = require("node:fs");
@@ -16,6 +17,9 @@ const VIEW_ID = "coordRoom.chat";
 const MEDIA_DIR = path.join(__dirname, "media");
 const POLL_MS = 750;
 const HEARTBEAT_MS = 30_000;
+const RECONCILE_MS = 10_000;
+const RETRY_MS = 3_000;
+const RETRY_MAX_MS = 30_000;
 
 let bus = null;
 let busPromise = null;
@@ -24,8 +28,11 @@ let workspace = null;
 let view = null;
 let panel = null;
 let pollTimer = null;
+let retryTimer = null;
+let retryDelay = RETRY_MS;
 let unreadPings = 0;
 let lastHeartbeat = 0;
+let lastReconcile = 0;
 
 function findWorkspace()
 {
@@ -86,6 +93,7 @@ async function ensureBus()
         busError = "No .devin/coord.json in the open folders — this workspace is not wired into a team.";
         postAll({ type: "conn", up: false });
         postAll({ type: "toast", text: busError, tone: "bad" });
+        scheduleReconnect();
         return null;
     }
     const coordRoot = coordRootOf(projectDir);
@@ -93,6 +101,7 @@ async function ensureBus()
     {
         busError = "coord.json has no coordRoot and coordRoom.coordRoot is not set.";
         postAll({ type: "toast", text: busError, tone: "bad" });
+        scheduleReconnect();
         return null;
     }
     // One open, shared: the view and the first poll can both ask at once, and a
@@ -103,6 +112,7 @@ async function ensureBus()
         {
             bus = opened;
             workspace = projectDir;
+            retryDelay = RETRY_MS;
             postAll({ type: "conn", up: true });
             await pushState();
             return bus;
@@ -112,9 +122,26 @@ async function ensureBus()
             busError = err?.message ?? String(err);
             postAll({ type: "conn", up: false });
             postAll({ type: "toast", text: `team room: ${busError}`, tone: "bad" });
+            scheduleReconnect();
             return null;
         });
     return busPromise;
+}
+
+// A failed open is not terminal. The store may not be built yet, coord.json may
+// still be wrong, the workspace may still be opening — so back off and retry
+// instead of leaving the room dead until the extension is unloaded. This is the
+// recovery path the manual refresh used to be the only way to reach.
+function scheduleReconnect()
+{
+    if (retryTimer)
+        return;
+    retryTimer = setTimeout(() =>
+    {
+        retryTimer = null;
+        refresh();
+    }, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
 }
 
 async function statePayload()
@@ -144,6 +171,11 @@ async function refresh()
 {
     busError = null;
     busPromise = null;
+    if (retryTimer)
+    {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+    }
     if (!bus && !(await ensureBus()))
         return;
     await pushState();
@@ -183,9 +215,11 @@ async function poll()
     try
     {
         const fresh = bus.pump();
+        // One post for the whole batch: a burst used to mean one full re-render
+        // of the log per entry, which is where the room got sluggish.
+        if (fresh.length)
+            postAll({ type: "messages", entries: fresh });
         for (const entry of fresh)
-        {
-            postAll({ type: "message", entry });
             if (mentionsHuman(entry))
             {
                 if (visible())
@@ -200,6 +234,14 @@ async function poll()
                     notifyPing(entry);
                 }
             }
+        // The incremental stream can miss a line — a compaction reset, a write
+        // that lands between reads, a webview that reloaded mid-burst. A slow
+        // full-state push while the room is on screen makes the view converge
+        // on its own instead of waiting for a manual refresh.
+        if (visible() && Date.now() - lastReconcile > RECONCILE_MS)
+        {
+            lastReconcile = Date.now();
+            await pushState();
         }
         if (Date.now() - lastHeartbeat > HEARTBEAT_MS)
         {
@@ -209,8 +251,13 @@ async function poll()
     }
     catch (err)
     {
+        // Drop the bus so the retry reopens it from scratch rather than
+        // pumping through offsets that just failed.
+        bus = null;
+        busError = err?.message ?? String(err);
         postAll({ type: "conn", up: false });
-        postAll({ type: "toast", text: `team room: ${err?.message ?? err}`, tone: "bad" });
+        postAll({ type: "toast", text: `team room: ${busError}`, tone: "bad" });
+        scheduleReconnect();
     }
 }
 
@@ -256,12 +303,6 @@ async function handleMessage(message)
                     tone: "good",
                 });
             await pushState();
-            return;
-        }
-        if (message.type === "standdown")
-        {
-            const active = await bus.setStandDown(Boolean(message.active));
-            postAll({ type: "docs", ...await statePayload(), standDown: active });
             return;
         }
         if (message.type === "openLink")
@@ -340,13 +381,16 @@ function activate(context)
 {
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(VIEW_ID, new RoomViewProvider(), { webviewOptions: { retainContextWhenHidden: true } }),
-        vscode.commands.registerCommand("coordRoom.focus", () => vscode.commands.executeCommand(`${VIEW_ID}.focus`)),
+        // The room's default surface is the editor tab: it gets the full width,
+        // survives a window reload as a real tab, and does not depend on the
+        // activity-bar view being resolved. The sidebar stays available as an
+        // explicit command.
+        vscode.commands.registerCommand("coordRoom.focus", openPanel),
         vscode.commands.registerCommand("coordRoom.openPanel", openPanel),
+        vscode.commands.registerCommand("coordRoom.openSidebar", () => vscode.commands.executeCommand(`${VIEW_ID}.focus`)),
         vscode.commands.registerCommand("coordRoom.refresh", refresh),
         vscode.commands.registerCommand("coordRoom.recess", () => handleMessage({ type: "recess", action: "start", note: "" })),
         vscode.commands.registerCommand("coordRoom.recessEnd", () => handleMessage({ type: "recess", action: "end", note: "" })),
-        vscode.commands.registerCommand("coordRoom.standDown", () => handleMessage({ type: "standdown", active: true })),
-        vscode.commands.registerCommand("coordRoom.resume", () => handleMessage({ type: "standdown", active: false })),
     );
 
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
@@ -365,6 +409,8 @@ function deactivate()
 {
     if (pollTimer)
         clearInterval(pollTimer);
+    if (retryTimer)
+        clearTimeout(retryTimer);
 }
 
 module.exports = { activate, deactivate };

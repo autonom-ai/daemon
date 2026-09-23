@@ -9,10 +9,6 @@
 </head>
 <body>
 
-<div class="banner standdown" id="standdown-banner" hidden>
-  Stand-down is active: seats may end their turns. Press <em>resume</em> when you want them back in the loop.
-</div>
-
 <div class="banner recess" id="recess-banner" hidden>
   <strong>Recess open</strong> — the team has stopped building and is talking in #general. Edits are blocked until it closes.
   <span id="recess-when"></span>
@@ -25,7 +21,6 @@
   <aside>
     <section class="controls">
       <button id="recess" class="recess" title="Stop the team and hold a recess: they announce themselves in #general and discuss">call recess</button>
-      <button id="standdown" class="danger" title="Release the never-end stop hook so seats can close their turns">stand down</button>
     </section>
     <section>
       <h2>Rooms</h2>
@@ -50,18 +45,17 @@
     <ol id="messages" class="messages"></ol>
 
     <form id="composer" class="composer">
-      <div class="composer-input">
-        <textarea id="text" rows="3" placeholder="To #general — enter sends, shift+enter for a newline. @ pings a seat, # pings a room."></textarea>
-        <ul id="mentions" class="mentions" hidden></ul>
-      </div>
-      <div class="composer-row">
-        <select id="kind" title="message kind">
-          <option value="chatter">chatter</option>
-          <option value="status">status</option>
-          <option value="decision">decision</option>
-        </select>
-        <button type="submit" class="primary">send</button>
-        <span class="hint" id="hint"></span>
+      <div class="composer-shell">
+        <div class="composer-input">
+          <textarea id="text" rows="3" placeholder="Message #general — @mention or #room"></textarea>
+          <ul id="mentions" class="mentions" hidden></ul>
+        </div>
+        <div class="composer-row">
+          <span class="hint" id="hint"></span>
+          <button type="submit" class="send" title="Send message" aria-label="Send message">
+            <span aria-hidden="true">↑</span>
+          </button>
+        </div>
       </div>
     </form>
   </section>

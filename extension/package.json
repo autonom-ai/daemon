@@ -1,7 +1,7 @@
 {
   "name": "coord-room",
   "displayName": "Team Room",
-  "description": "The human's seat on the agent-coord bus — rooms, DMs, pings, recess, and stand-down, read straight from the workspace's own JSONL state.",
+  "description": "The human's seat on the agent-coord bus — rooms, DMs, pings, and recess, read straight from the workspace's own JSONL state.",
   "publisher": "cet",
   "version": "0.1.0",
   "private": true,
@@ -43,7 +43,12 @@
       },
       {
         "command": "coordRoom.openPanel",
-        "title": "Open as editor panel",
+        "title": "Open the team room in a tab",
+        "category": "Team Room"
+      },
+      {
+        "command": "coordRoom.openSidebar",
+        "title": "Open the team room in the sidebar",
         "category": "Team Room"
       },
       {
@@ -59,16 +64,6 @@
       {
         "command": "coordRoom.recessEnd",
         "title": "Close the recess",
-        "category": "Team Room"
-      },
-      {
-        "command": "coordRoom.standDown",
-        "title": "Stand down (let seats end their turns)",
-        "category": "Team Room"
-      },
-      {
-        "command": "coordRoom.resume",
-        "title": "Resume (seats back in the loop)",
         "category": "Team Room"
       }
     ],

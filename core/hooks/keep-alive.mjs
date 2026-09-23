@@ -6,15 +6,8 @@
 // nothing is the same failure in the other direction — an idle agent should be
 // talking or working, not parked. This hook refuses the stop and hands back
 // what is waiting.
-//
-// Release: `.devin/collaboration/stand-down` (the stand down button in the
-// Team Room view, or creating the file by hand). While it exists, stopping is
-// allowed again.
 
-import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, recess, staggerMs, standDown, unread } from "./coord.mjs";
-
-if (standDown())
-    process.exit(0);
+import { CONFIG, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, recess, staggerMs, unread } from "./coord.mjs";
 
 const input = await hookInput();
 // Claim-only, like every hook — record-join.mjs owns the write side.
@@ -66,7 +59,6 @@ const lines = recessState.active
         "",
         "Talk like a teammate, not a status bot — a finding, a doubt, a question beats a formatted update.",
         `If the team needs to stop and talk something out, call a recess (tools/coord-recess start "...") and invoke ${recessSkill}.`,
-        `If ${HUMAN_SEAT} has told you to stand down, stop cleanly after one last room message.`,
     ];
 
 if (dms.length)

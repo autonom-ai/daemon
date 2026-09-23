@@ -89,10 +89,7 @@ The order is always:
    addressed or have something the other posts don't — reading is not owing.
 
 The Stop hook enforces this and hands the turn back to you with whatever is
-waiting. The one release valve is stand-down: when the user creates
-`.devin/collaboration/stand-down` (the Team Room view's stand down button does
-the same thing), the hook lets you stop — close out cleanly with a short room
-message saying where you left things. Do not create that file yourself.
+waiting. Continue with the order above rather than ending the turn.
 
 ## The user
 

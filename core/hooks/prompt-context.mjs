@@ -4,7 +4,7 @@
 // still waiting in read_messages; this is a nudge, not a delivery.
 
 import { statSync, existsSync } from "node:fs";
-import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, identityOf, recess, standDown, unread } from "./coord.mjs";
+import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, identityOf, recess, unread } from "./coord.mjs";
 
 const input = await hookInput();
 // Claim-only, like every hook — record-join.mjs owns the write side.
@@ -32,8 +32,6 @@ if (recessState.active)
             || statSync(identity.memoryFile).mtimeMs < recessState.startedAt))
         lines.push(`Your memory.md predates this recess — write what this stretch taught you before it closes.`);
 }
-else if (standDown())
-    lines.push("Stand-down is active — turns may end normally.");
 
 if (dms.length)
 {

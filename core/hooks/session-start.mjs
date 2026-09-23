@@ -1,7 +1,7 @@
 // SessionStart — hand every new tab the same starting point.
 
 import path from "node:path";
-import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, ROSTER, TEAM_ROOM, claimFor, emit, formatEntries, hasLiveSession, hookInput, identityOf, memorySlice, recess, registry, roomEntries, standDown } from "./coord.mjs";
+import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, ROSTER, TEAM_ROOM, claimFor, emit, formatEntries, hasLiveSession, hookInput, identityOf, memorySlice, recess, registry, roomEntries } from "./coord.mjs";
 
 // Identity is the claim file and nothing else: record-join.mjs writes it from
 // an observed, successful join through this tab's own `agent-coord-<name>`
@@ -88,8 +88,6 @@ else
 
 if (recessState.active)
     lines.push("", `A RECESS is open (called by ${recessState.by}${recessState.note ? `: ${recessState.note}` : ""}).`);
-else if (standDown())
-    lines.push("", "Stand-down is active — turns may end normally.");
 
 // Teammate priors — an agent that knows what the others reach for and avoid is
 // starting from a colleague, not a stranger. Bounded to each identity's

@@ -15,7 +15,6 @@ const state = {
     human: "user",
     project: "team",
     teamRoom: "general",
-    standDown: false,
     recess: { active: false },
     connected: false,
 };
@@ -28,12 +27,9 @@ const el = {
     conn: document.getElementById("conn"),
     build: document.getElementById("build"),
     menu: document.getElementById("menu"),
-    kind: document.getElementById("kind"),
     text: document.getElementById("text"),
     composer: document.getElementById("composer"),
     hint: document.getElementById("hint"),
-    standDown: document.getElementById("standdown"),
-    standDownBanner: document.getElementById("standdown-banner"),
     recess: document.getElementById("recess"),
     recessBanner: document.getElementById("recess-banner"),
     recessWhen: document.getElementById("recess-when"),
@@ -248,8 +244,8 @@ function renderSidebar()
 
     const { mode, name } = destination();
     el.text.placeholder = mode === "dm"
-        ? `Direct to ${displayName(name)} — only they see it. Enter sends, shift+enter for a newline.`
-        : `To #${name} — enter sends, shift+enter for a newline. @ pings a seat, # pings a room.`;
+        ? `Message ${displayName(name)} — only they see it`
+        : `Message #${name} — @mention or #room`;
 }
 
 // A seat is as alive as its last bus touch — a message it sent or a read
@@ -307,11 +303,6 @@ function openDm(seat)
 
 function renderDocs(payload)
 {
-    state.standDown = payload.standDown;
-    el.standDown.textContent = payload.standDown ? "resume" : "stand down";
-    el.standDown.className = payload.standDown ? "" : "danger";
-    el.standDownBanner.hidden = !payload.standDown;
-
     // Which build is live is a fact the user can glance at, not something
     // inferred from a PID. Stale code shows up as a version that never changes.
     if (payload.build)
@@ -369,9 +360,36 @@ function addMessages(incoming)
     return added;
 }
 
+// The host pushes state on connect and after every structural change; the
+// interval below is the recovery path if a push was missed. Silence for longer
+// than STALE_MS is treated as a dropped connection, not a quiet room: the view
+// asks for a refresh and says so, so a stuck room heals without a reload.
+const STALE_MS = 20_000;
+let lastHostAt = Date.now();
+let stale = false;
+
+// A batch of entries that arrived together renders once. The host posts the
+// whole pump as one message for exactly this reason.
+//
+// Only scroll for a message the current view actually shows — traffic in
+// another room shouldn't yank the scroll position. Your own sends snap to
+// bottom unconditionally; anything else follows only when you're already there.
+function receive(entries)
+{
+    if (!addMessages(entries))
+        return;
+    const shown = entries.filter(visible);
+    const mine = shown.some((entry) => entry.from === state.human);
+    renderMessages(shown.length ? (mine ? "force" : "auto") : "none");
+    markSeen();
+    renderSidebar();
+}
+
 window.addEventListener("message", (event) =>
 {
     const payload = event.data ?? {};
+    lastHostAt = Date.now();
+    stale = false;
     if (payload.type === "state")
     {
         absorb(payload);
@@ -385,20 +403,9 @@ window.addEventListener("message", (event) =>
         renderSidebar();
     }
     else if (payload.type === "message")
-    {
-        if (addMessages([payload.entry]))
-        {
-            // Only scroll for a message the current view actually shows —
-            // traffic in another room shouldn't yank the scroll position.
-            // Your own sends snap to bottom unconditionally; anything else
-            // follows only when you're already there.
-            renderMessages(visible(payload.entry)
-                ? (payload.entry.from === state.human ? "force" : "auto")
-                : "none");
-            markSeen();
-            renderSidebar();
-        }
-    }
+        receive([payload.entry]);
+    else if (payload.type === "messages")
+        receive(payload.entries ?? []);
     else if (payload.type === "docs")
         renderDocs(payload);
     else if (payload.type === "conn")
@@ -437,7 +444,7 @@ async function send()
     if (mode === "dm")
         post({ type: "dm", to: name, text });
     else
-        post({ type: "say", room: name, text, kind: el.kind.value });
+        post({ type: "say", room: name, text });
 }
 
 el.composer.addEventListener("submit", (event) =>
@@ -637,9 +644,29 @@ el.recessConfirm.addEventListener("click", () =>
     recess(recessEnding ? "end" : "start", note);
 });
 
-el.standDown.addEventListener("click", () => post({ type: "standdown", active: !state.standDown }));
+// The host pushes state on connect and after every structural change; this is
+// only a recovery path if a push was missed.
+setInterval(() =>
+{
+    if (Date.now() - lastHostAt <= STALE_MS)
+        return;
+    post({ type: "refresh" });
+    if (!stale)
+    {
+        stale = true;
+        el.conn.textContent = "reconnecting…";
+        el.conn.className = "conn dead";
+    }
+}, 5_000);
 
-// The host pushes state on connect and after every structural change; the
-// interval is only a recovery path if a push was missed.
-setInterval(() => post({ type: "refresh" }), 30_000);
+// Coming back to the window is the moment the view is most likely to be
+// showing something stale, so it asks then rather than waiting for the tick.
+// (Editor-tab switches are the host's job — it already pushes state when the
+// view or panel becomes visible again.)
+document.addEventListener("visibilitychange", () =>
+{
+    if (!document.hidden)
+        post({ type: "refresh" });
+});
+
 post({ type: "ready" });
