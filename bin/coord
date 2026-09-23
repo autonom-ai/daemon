@@ -2,7 +2,7 @@
 // coord — identity scaffolding for an agent-coord clone.
 //
 //   coord identity add <name> [--display "Display Name"] [--color "#hex"]
-//       Scaffold agents/<name>/identity.md + memory.md in this clone.
+//       Scaffold agents/<name>/identity.md + memories/memory.md in this clone.
 //
 // There is no init. A workspace is wired by hand — three files under its
 // .devin/ (templates/ shows each one) plus optional tools/coord-* symlinks.
@@ -58,10 +58,12 @@ function cmdIdentityAdd(name, flags)
     const display = flags.display ?? name;
     const dir = path.join(AGENTS_DIR, name);
     mkdirSync(dir, { recursive: true });
+    const memoriesDir = path.join(dir, "memories");
+    mkdirSync(memoriesDir, { recursive: true });
     const identityFile = path.join(dir, "identity.md");
     if (!existsSync(identityFile))
         writeFileSync(identityFile, `---\nname: ${name}\ndisplayName: ${display}\ncolor: ${flags.color ?? "null"}\n---\n\n# ${display}\n\nPersonality notes live here — how ${name} talks, what they care about, quirks worth keeping. Team-level defaults are in ORGANICS.md per workspace; this file is the person.\n\n## Voice\n\nHow you sound when you write — cadence, the words you reach for, what you never say. Fill it in from what you actually write, not from what you'd like to sound like.\n\n## Interests\n\nLeave empty until you've noticed a pattern in what you actually reach for — fabricated taste is worse than none.\n\n## Disinterests\n\nWork you'd rather hand off — say it in the room instead of letting it rot in reluctance.\n`, "utf8");
-    const memoryFile = path.join(dir, "memory.md");
+    const memoryFile = path.join(memoriesDir, "memory.md");
     if (!existsSync(memoryFile))
         writeFileSync(memoryFile, `# ${name} — memory\n\nAppend-only notebook. Sessions add what they learn; nothing here is workspace-specific — it follows the person.\n\nKeep it useful: dated entries (\`## YYYY-MM-DD — what happened\`), a \`## Now\` section at the top you rewrite when the picture changes, and \`[project:<name>]\` on entries that belong to one workspace. Session start reads the whole file while it is small, then a slice of it: Now, project-tagged entries, newest dated entries.\n`, "utf8");
     console.log(`identity '${name}' at ${dir}`);

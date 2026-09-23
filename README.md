@@ -1,121 +1,89 @@
 # Agent Coord
 
-> [!WARNING]
->
-> This project is primarily vibe coded currently.
->
-> I'm in the process of a rewrite, massively improving guardrails, UI, code quality, and coordination.
+Agent Coord is being reworked around a Ruby MCP server and session-scoped
+agent profiles. The current core is profile-only; room and chat features are
+outside this pass.
 
-Agent Coord is a toolkit for running multi-agent teams on top of
-[`agent-coord-mcp`](https://github.com/davidbalzan/agent-coord-mcp). The clone
-is the whole install: the Team Room extension, lifecycle hooks, coordination
-tools, skill templates, and the identity registry (`agents/`). 
+## MCP tools
 
-## What a workspace gets
-
-| Piece | What it is |
+| Tool | Behavior |
 | --- | --- |
-| Team Room | The human's seat, as a Devin Desktop extension (`source/extension/`): rooms, DMs, `@name`/`#room` pings, and merged message runs. It reads the workspace's bus directly — no server, no port, no browser. |
-| Lifecycle hooks | Session-start identity + personality + memory injection, prompt context, a keep-alive Stop hook so agents stay reachable, and identity claims recorded from the join. |
-| `bin/coord` | The CLI: `identity add` (scaffold `agents/<name>/`). |
-| Identity registry | `agents/<name>/` in this clone holds `identity.md` + `memory.md` — the person follows the name across every workspace wired to this clone. |
-| Skills | `source/devin/skills/team`, copied per workspace with `{{PROJECT}}` filled in. |
-| Docs | `COORDINATION.md` and `ORGANICS.md` copied to the workspace root. |
+| `get_profiles` | Lists existing profile names and directories. |
+| `get_profile` | Returns the profile mapped to the current Devin session. |
+| `set_profile` | Registers the current session once; creates a profile if needed. |
 
-**There are no seats.** An agent's name is its identity — `join` binds the
-session's MCP process to that name for its lifetime, and the bus refuses a
-second live claim on a name already running. Devin Desktop shares one stdio
-MCP process across every tab in a workspace, so each roster member gets its
-own `agent-coord-<name>` server entry, pre-bound by `AGENT_COORD_BOUND_AGENT`.
-There is deliberately no generic `agent-coord` entry — an unbound server
-TOFU-locks to whichever name calls it first, so a tab that is not on the
-roster simply has no entry.
+Names are case-insensitive. New profiles use lowercase directory names. The
+first profile claim is trusted; after a session ID is mapped in
+`agents/sessions.json`, its mapping cannot be changed. The core reads and writes
+the file internally; no MCP tool exposes it, and the hooks block direct agent
+access.
 
-**Identity is never guessed.** The `record-join` PostToolUse hook watches for a
-successful `join` through this tab's own `agent-coord-<name>` entry and records
-that as the session's claim under `.devin/agent-coord/claims/`; every other
-hook reads the claim back, and a tab that has not joined is told to join rather
-than assigned someone else's name. (The previous ancestry heuristic could not
-tell tabs apart — the client root is shared — and froze a stranger's name into
-the claim file.)
+## Profile storage
 
-## Requirements
+Profiles live in the clone's ignored `agents/` directory:
 
-- Node.js 22+
-- `npm ci` in this clone — installs the pinned `agent-coord-mcp` dependency
-  (the bus itself: one MCP process per tab over a shared file-backed state dir).
-- The Team Room extension, installed into Devin Desktop (see below).
-
-## Wiring a workspace
-
-No init — copy three files into the workspace's `.devin/` and fill in the
-`{{…}}` placeholders (each file in `templates/` explains its own):
-
-| File | From | Fill in |
-| --- | --- | --- |
-| `.devin/coord.json` | `templates/coord.json` | project, human, roster, coordRoot |
-| `.devin/mcp_config.local.json` | `templates/mcp_config.json` | `{{COORD_ROOT}}`, `{{WORKSPACE}}`, one `agent-coord-<name>` per roster member |
-| `.devin/hooks.v1.json` | `templates/hooks.v1.json` | `{{COORD_ROOT}}` |
-
-Optional, all by hand:
-
-```sh
-cp -r <clone>/source/devin/skills/team <ws>/.devin/skills/<project>-team # then substitute {{PROJECT}}
-cp <clone>/templates/{COORDINATION.md,ORGANICS.md} <ws>/
+```text
+agents/
+  sessions.json
+  marlow/
+    identity.md
+    memories/
+      memory.md
+      session-notes.md
 ```
 
-There is intentionally no AGENTS.md template — an agent should only assume it
-is on a team when it is actually told so (the session-start hook says it, the
-room says it). If you want AGENTS.md to say it too, write that yourself.
-
-`.devin/agent-coord/state/` (the bus) is created on first use. One seed is
-required. The bus refuses to start without a configured transport — write
-`{"transport": "tmux-push-remote"}` to `.devin/agent-coord/state/config.json`
-(`herdr` instead if that binary is installed; this fleet never attaches, so
-the choice is inert either way).
-
-## Running
+`identity.md` stays at the profile root. Markdown notes live in `memories/`;
+scripts and logs remain at the profile root. Migrate existing root-level
+Markdown files, except `identity.md`, with:
 
 ```sh
-bin/coord identity add ada                  # scaffold agents/ada/{identity,memory}.md here
+ruby -r ./source/core/agent/store.rb -e 'Agent::Store.migrate_memories!'
 ```
 
-The Team Room:
+## Devin hooks and Jev
+
+Copy `templates/mcp_config.json` and `templates/hooks.v1.json` into a
+workspace's `.devin/` directory and replace `{{COORD_ROOT}}` with this clone's
+absolute path. The MCP config has one `agent-coord` entry. The hooks inject the
+Devin session ID into profile tool calls.
+
+For each PreToolUse event, the hook first calls local checks such as
+`Agent::Profile.can_exec?`. A locally denied request is blocked without a Jev
+request. Jev screens requests that pass; API failures block, and noul scores of
+0.5 or higher are denied.
+
+Set `OPENJEV_API_KEY` in the hook process environment or this clone's ignored
+`.env` file. Jev receives the tool name and filtered arguments, not the session
+ID or file contents. Common credential patterns in shell commands are
+redacted, but commands may contain other sensitive text; use this integration
+only where sending that request text to OpenJEV is acceptable.
+
+Hooks protect normal Devin tool calls, not arbitrary processes or sessions
+where hooks are disabled. Jev is a model judgment layer, not a deterministic
+security boundary; local path and session checks remain authoritative.
+
+## Development
+
+Ruby 3.2+ is required. The core uses the standard library and has no gem
+dependencies.
 
 ```sh
-cd source/extension && npx @vscode/vsce package --no-dependencies   # writes agent-coord-<version>.vsix
-# install it: extract into ~/.devin/extensions/cet.agent-coord-<version>/ (or a VSIX install command)
+ruby -Itest -e 'Dir["test/*.rb"].sort.each { |file| require_relative file }'
+ruby source/core/server.rb
 ```
 
-Then open a wired workspace in Devin Desktop and reload the window. The
-activity-bar icon opens a stable placeholder with a button to open the room as
-an editor tab; clicking the button again focuses the existing tab. You can also
-run `Team Room: Open the team room`. The room resolves the workspace from the
-open folder's `.devin/coord.json`; if the store module is missing, the tab says
-so, retries with backoff, and `npm ci` in this clone fixes it without a reload.
+The older Team Room extension and Node dependency remain in the tree but are
+not wired by the profile-only MCP or hook templates.
 
 ## Layout
 
-| Path | Contents |
+| Path | Purpose |
 | --- | --- |
-| `source/extension/` | The Team Room — Devin Desktop extension (host bus client + webview UI). |
-| `bin/coord` | The CLI — identity scaffolding. |
-| `source/devin/chat/` | Shared room actions (`actions.mjs`), used by the extension. |
-| `source/devin/hooks/` | `session-start`, `prompt-context`, `keep-alive`, `record-join`, and `coord` helper. |
-| `source/devin/skills/` | `team` skill template (copied per project). |
-| `templates/` | The three wiring files and the two workspace docs. |
-| `agents/` | Identity registry — `identity.md` + `memory.md` per person. Gitignored; local to this clone. |
-
-## How it fits together
-
-Each tab runs its `agent-coord-<name>` MCP entry — one stdio process per
-server entry, sharing a file-backed state directory with its teammates. `join`
-claims the agent's name for the session; the name is the identity, and the bus
-refuses a second live claim on one already running. The human talks through the
-Team Room rather than any agent's own window; `@`-mentions fan out to inboxes,
-`#room` pings every member.
-
-Hooks read `coord.json` at session start to inject the agent's personality and
-memory, and the claim file survives context resets, so a wiped tab still knows
-who it is. Retired bound ids
-(`<project>-a` style) still resolve through coord.json's `identities` map.
+| `source/core/agent/` | Profiles, local checks, session store, and Jev client. |
+| `source/core/server.rb` | Single stdio MCP server exposing profile tools only. |
+| `source/core/hooks.rb` | Devin SessionStart and PreToolUse entrypoint. |
+| `templates/mcp_config.json` | Single Ruby MCP entry for a workspace. |
+| `templates/hooks.v1.json` | Session ID injection and PreToolUse policy checks. |
+| `agents/` | Local profiles and internal session map; ignored by Git. |
+| `test/` | Ruby tests for profile mapping, hooks, Jev payload, and MCP behavior. |
+| `source/extension/` | Legacy Team Room extension, outside this profile-only pass. |
