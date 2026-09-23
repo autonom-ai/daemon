@@ -23,7 +23,7 @@ class ProfileTest < Minitest::Test
   end
 
   def test_set_profile_is_case_insensitive_and_creates_memories
-    profile = Agent::Profile.set_profile('New_Agent', session_id: 'session-1', root: @root)
+    profile = Agent::Profile.set_profile('New_Agent', session: 'session-1', root: @root)
 
     assert_equal 'new_agent', profile['name']
     assert File.directory?(File.join(@root, 'agents', 'new_agent', 'memories'))
@@ -34,65 +34,65 @@ class ProfileTest < Minitest::Test
   def test_existing_profile_name_keeps_its_canonical_case
     FileUtils.mkdir_p(File.join(@root, 'agents', 'Marlow', 'memories'))
 
-    profile = Agent::Profile.set_profile('mArLoW', session_id: 'session-1', root: @root)
+    profile = Agent::Profile.set_profile('mArLoW', session: 'session-1', root: @root)
 
     assert_equal 'Marlow', profile['name']
   end
 
   def test_session_profile_cannot_be_changed
-    Agent::Profile.set_profile('marlow', session_id: 'session-1', root: @root)
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
 
-    assert Agent::Profile.can_set_profile?('MARLOW', session_id: 'session-1', root: @root)
-    refute Agent::Profile.can_set_profile?('wren', session_id: 'session-1', root: @root)
+    assert Agent::Profile.can_set_profile?('MARLOW', session: 'session-1', root: @root)
+    refute Agent::Profile.can_set_profile?('wren', session: 'session-1', root: @root)
     assert_raises(Agent::Store::Error) do
-      Agent::Profile.set_profile('wren', session_id: 'session-1', root: @root)
+      Agent::Profile.set_profile('wren', session: 'session-1', root: @root)
     end
   end
 
   def test_direct_access_to_another_profile_and_session_map_is_denied
-    Agent::Profile.set_profile('marlow', session_id: 'session-1', root: @root)
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     other_profile = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
     sessions_file = File.join(@root, 'agents', 'sessions.json')
 
-    refute Agent::Profile.can_read?(other_profile, session_id: 'session-1', root: @root)
-    refute Agent::Profile.can_write?(other_profile, session_id: 'session-1', root: @root)
-    refute Agent::Profile.can_read?(sessions_file, session_id: 'session-1', root: @root)
-    refute Agent::Profile.can_write?(sessions_file, session_id: 'session-1', root: @root)
+    refute Agent::Profile.can_read?(other_profile, session: 'session-1', root: @root)
+    refute Agent::Profile.can_write?(other_profile, session: 'session-1', root: @root)
+    refute Agent::Profile.can_read?(sessions_file, session: 'session-1', root: @root)
+    refute Agent::Profile.can_write?(sessions_file, session: 'session-1', root: @root)
   end
 
   def test_current_profile_is_accessible_but_env_is_not
-    profile = Agent::Profile.set_profile('marlow', session_id: 'session-1', root: @root)
+    profile = Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     memory_file = File.join(profile['directory'], 'memories', 'notes.md')
 
-    assert Agent::Profile.can_read?(memory_file, session_id: 'session-1', root: @root)
-    assert Agent::Profile.can_write?(memory_file, session_id: 'session-1', root: @root)
-    refute Agent::Profile.can_read?(File.join(@root, '.env'), session_id: 'session-1', root: @root)
+    assert Agent::Profile.can_read?(memory_file, session: 'session-1', root: @root)
+    assert Agent::Profile.can_write?(memory_file, session: 'session-1', root: @root)
+    refute Agent::Profile.can_read?(File.join(@root, '.env'), session: 'session-1', root: @root)
   end
 
   def test_exec_blocks_profile_redirection_and_protected_deletion
-    Agent::Profile.set_profile('marlow', session_id: 'session-1', root: @root)
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     other_memory = File.join(@root, 'agents', 'wren', 'memories', 'note.md')
 
     refute Agent::Profile.can_exec?(
       "printf note > #{other_memory}",
-      session_id: 'session-1',
+      session: 'session-1',
       root: @root,
-      working_directory: @root
+      dir: @root
     )
-    refute Agent::Profile.can_exec?("rm -rf #{Dir.home}", root: @root, working_directory: @root)
-    refute Agent::Profile.can_exec?('rm -rf /', root: @root, working_directory: @root)
-    assert Agent::Profile.can_exec?('git status', session_id: 'session-1', root: @root)
+    refute Agent::Profile.can_exec?("rm -rf #{Dir.home}", root: @root, dir: @root)
+    refute Agent::Profile.can_exec?('rm -rf /', root: @root, dir: @root)
+    assert Agent::Profile.can_exec?('git status', session: 'session-1', root: @root)
   end
 
   def test_exec_denies_another_profile_as_working_directory
-    Agent::Profile.set_profile('marlow', session_id: 'session-1', root: @root)
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     other_profile = File.join(@root, 'agents', 'wren', 'memories')
 
     refute Agent::Profile.can_exec?(
       'pwd',
-      session_id: 'session-1',
+      session: 'session-1',
       root: @root,
-      working_directory: other_profile
+      dir: other_profile
     )
   end
 

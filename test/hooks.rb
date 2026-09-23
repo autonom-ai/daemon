@@ -116,7 +116,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_reassignment_is_denied_before_jev
-    Agent::Profile.set_profile('marlow', session_id: 'session-1', root: @root)
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
 
     result = Agent::Hooks.call(event('mcp__agent-coord__set_profile', 'name' => 'wren'), jev: @jev, root: @root)
 

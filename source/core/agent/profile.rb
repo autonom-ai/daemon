@@ -10,152 +10,148 @@ module Agent
       Store.get_profiles(root: root)
     end
 
-    def get_profile(session_id, root: Store::ROOT)
-      Store.get_profile(session_id, root: root)
+    def get_profile(session, root: Store::ROOT)
+      Store.get_profile(session, root: root)
     end
 
-    def set_profile(name, session_id:, root: Store::ROOT)
-      Store.set_profile(session_id, name, root: root)
+    def set_profile(name, session:, root: Store::ROOT)
+      Store.set_profile(session, name, root: root)
     end
 
-    def can_set_profile?(name, session_id:, root: Store::ROOT)
-      requested_name = Store.normalize_profile_name(name)
-      profile = get_profile(session_id, root: root)
+    def can_set_profile?(name, session:, root: Store::ROOT)
+      name = Store.normalize_name(name)
+      profile = get_profile(session, root: root)
       return true unless profile
 
-      profile['name'].casecmp?(requested_name)
+      profile['name'].casecmp?(name)
     rescue Store::Error
       false
     end
 
-    def can_read?(path, session_id: nil, root: Store::ROOT, working_directory: Dir.pwd)
-      can_access?(path, session_id: session_id, root: root, working_directory: working_directory)
+    def can_read?(path, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      can_access?(path, session: session, root: root, dir: dir)
     end
 
-    def can_write?(path, session_id: nil, root: Store::ROOT, working_directory: Dir.pwd)
-      can_access?(path, session_id: session_id, root: root, working_directory: working_directory)
+    def can_write?(path, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      can_access?(path, session: session, root: root, dir: dir)
     end
 
-    def can_search?(path, session_id: nil, root: Store::ROOT, working_directory: Dir.pwd)
-      return false unless can_read?(path, session_id: session_id, root: root, working_directory: working_directory)
+    def can_search?(path, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      return false unless can_read?(path, session: session, root: root, dir: dir)
 
-      resolved_path = canonical_path(path, working_directory)
-      agents_path = canonical_path(File.join(root, 'agents'))
-      prefix = resolved_path.end_with?(File::SEPARATOR) ? resolved_path : "#{resolved_path}#{File::SEPARATOR}"
-      !agents_path.start_with?(prefix)
+      path = resolve(path, dir)
+      agents = resolve(File.join(root, 'agents'))
+      prefix = path.end_with?(File::SEPARATOR) ? path : "#{path}#{File::SEPARATOR}"
+      !agents.start_with?(prefix)
     end
 
-    def can_glob?(pattern, path:, session_id: nil, root: Store::ROOT, working_directory: Dir.pwd)
+    def can_glob?(pattern, path:, session: nil, root: Store::ROOT, dir: Dir.pwd)
       return false unless pattern.is_a?(String) && !pattern.empty?
-      return false unless can_read?(path, session_id: session_id, root: root, working_directory: working_directory)
+      return false unless can_read?(path, session: session, root: root, dir: dir)
 
-      base = canonical_path(path, working_directory)
-      absolute_pattern = File.expand_path(pattern, base)
-      agents_path = canonical_path(File.join(root, 'agents'))
-      restricted_paths = [
-        agents_path,
-        File.join(agents_path, 'sessions.json'),
-        File.join(agents_path, 'sessions.json.lock'),
-        *Dir.glob(File.join(agents_path, '.sessions-*'))
+      base = resolve(path, dir)
+      glob = File.expand_path(pattern, base)
+      agents = resolve(File.join(root, 'agents'))
+      restricted = [
+        agents,
+        File.join(agents, 'sessions.json'),
+        File.join(agents, 'sessions.json.lock'),
+        *Dir.glob(File.join(agents, '.sessions-*'))
       ]
-      current_profile = get_profile(session_id, root: root)
+      current = get_profile(session, root: root)
       Store.get_profiles(root: root).each do |profile|
-        next if current_profile && profile['name'].casecmp?(current_profile['name'])
+        next if current && profile['name'].casecmp?(current['name'])
 
-        restricted_paths.concat(Dir.glob(File.join(profile['directory'], '**', '*'), File::FNM_DOTMATCH))
+        restricted.concat(Dir.glob(File.join(profile['directory'], '**', '*'), File::FNM_DOTMATCH))
       end
 
       flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
-      return false if restricted_paths.any? { |target| File.fnmatch?(absolute_pattern, target, flags) }
+      return false if restricted.any? { |path| File.fnmatch?(glob, path, flags) }
 
-      Dir.glob(absolute_pattern, File::FNM_DOTMATCH).all? do |match|
-        can_read?(match, session_id: session_id, root: root, working_directory: base)
+      Dir.glob(glob, File::FNM_DOTMATCH).all? do |path|
+        can_read?(path, session: session, root: root, dir: base)
       end
     rescue ArgumentError, SystemCallError
       false
     end
 
-    def can_exec?(command, session_id: nil, root: Store::ROOT, working_directory: Dir.pwd)
-      return false unless command.is_a?(String)
-      return false unless can_read?(
-        working_directory,
-        session_id: session_id,
-        root: root
-      )
-      return false if deletes_protected_directory?(command, root: root, working_directory: working_directory)
+    def can_exec?(cmd, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      return false unless cmd.is_a?(String)
+      return false unless can_read?(dir, session: session, root: root)
+      return false if deletes_protected?(cmd, root: root, dir: dir)
 
-      shell_paths(command).all? do |path|
-        can_read?(path, session_id: session_id, root: root, working_directory: working_directory) &&
-          can_write?(path, session_id: session_id, root: root, working_directory: working_directory)
+      shell_paths(cmd).all? do |path|
+        can_read?(path, session: session, root: root, dir: dir) &&
+          can_write?(path, session: session, root: root, dir: dir)
       end
     end
 
     private
 
-    def can_access?(path, session_id:, root:, working_directory:)
+    def can_access?(path, session:, root:, dir:)
       return false unless path.is_a?(String) && !path.empty?
 
-      resolved_path = canonical_path(path, working_directory)
-      root_path = canonical_path(File.expand_path(root))
-      basename = File.basename(resolved_path)
-      return false if basename == '.env' || basename.start_with?('.env.')
+      path = resolve(path, dir)
+      root = resolve(root)
+      name = File.basename(path)
+      return false if name == '.env' || name.start_with?('.env.')
 
-      agents_path = canonical_path(File.join(root_path, 'agents'))
-      if resolved_path == agents_path || resolved_path.start_with?("#{agents_path}#{File::SEPARATOR}")
-        relative_path = resolved_path.delete_prefix("#{agents_path}#{File::SEPARATOR}")
-        return false if relative_path.empty? || protected_store_file?(relative_path)
+      agents = resolve(File.join(root, 'agents'))
+      if path == agents || path.start_with?("#{agents}#{File::SEPARATOR}")
+        relative = path.delete_prefix("#{agents}#{File::SEPARATOR}")
+        return false if relative.empty? || store_file?(relative)
 
-        profile_name = relative_path.split(File::SEPARATOR).first
-        profile = get_profile(session_id, root: root)
-        return profile && profile['name'].casecmp?(profile_name)
+        name = relative.split(File::SEPARATOR).first
+        profile = get_profile(session, root: root)
+        return profile && profile['name'].casecmp?(name)
       end
 
-      profile_name = profile_in_path(path)
-      return true unless profile_name
-      return false if protected_store_file?(profile_name)
+      name = profile_name(path)
+      return true unless name
+      return false if store_file?(name)
 
-      profile = get_profile(session_id, root: root)
-      profile && profile['name'].casecmp?(profile_name)
+      profile = get_profile(session, root: root)
+      profile && profile['name'].casecmp?(name)
     end
 
-    def shell_paths(command)
-      Shellwords.shellsplit(command).select do |token|
-        token.include?(File::SEPARATOR) ||
-          token.include?('\\') ||
-          token.start_with?('.', '~') ||
-          token.match?(/\A\$\{?HOME\}?/)
+    def shell_paths(cmd)
+      Shellwords.shellsplit(cmd).select do |arg|
+        arg.include?(File::SEPARATOR) ||
+          arg.include?('\\') ||
+          arg.start_with?('.', '~') ||
+          arg.match?(/\A\$\{?HOME\}?/)
       end
     rescue ArgumentError
       []
     end
 
-    def profile_in_path(path)
-      normalized_path = path.to_s.tr('\\', '/')
-      match = %r{(?:\A|/)agents/([^/]+)(?:/|\z)}i.match(normalized_path)
+    def profile_name(path)
+      match = %r{(?:\A|/)agents/([^/]+)(?:/|\z)}i.match(path.to_s.tr('\\', '/'))
       match && match[1]
     end
 
-    def protected_store_file?(relative_path)
-      first = relative_path.to_s.split(/[\\\/]/).first.to_s.downcase
-      first.start_with?('sessions.json', '.sessions-') || first == 'sessions.json.lock'
+    def store_file?(path)
+      name = path.to_s.split(/[\\\/]/).first.to_s.downcase
+      name.start_with?('sessions.json', '.sessions-') || name == 'sessions.json.lock'
     end
 
-    def deletes_protected_directory?(command, root:, working_directory:)
-      return false unless command.match?(/\b(?:rm|rmdir|shred)\b/i)
+    def deletes_protected?(cmd, root:, dir:)
+      return false unless cmd.match?(/\b(?:rm|rmdir|shred)\b/i)
 
-      paths = shell_paths(command).map { |path| canonical_path(path, working_directory) }
-      home_path = canonical_path(Dir.home)
-      core_path = canonical_path(File.join(root, 'source', 'core'))
-      root_path = canonical_path(File::SEPARATOR)
-      paths.any? { |path| path == home_path || path == core_path || path == root_path }
+      paths = shell_paths(cmd).map { |path| resolve(path, dir) }
+      paths.any? do |path|
+        path == resolve(Dir.home) ||
+          path == resolve(File.join(root, 'source', 'core')) ||
+          path == resolve(File::SEPARATOR)
+      end
     end
 
-    def canonical_path(path, working_directory = Dir.pwd)
-      expanded = path.to_s
+    def resolve(path, dir = Dir.pwd)
+      path = path.to_s
         .sub(/\A~(?=\/|\z)/, Dir.home)
         .gsub(/\$\{?HOME\}?/, Dir.home)
-      expanded = File.expand_path(expanded, working_directory)
-      probe = expanded
+      path = File.expand_path(path, dir)
+      probe = path
       suffix = []
 
       until File.exist?(probe) || File.symlink?(probe)
@@ -168,7 +164,7 @@ module Agent
 
       File.join(File.realpath(probe), *suffix)
     rescue SystemCallError
-      expanded
+      path
     end
   end
 end

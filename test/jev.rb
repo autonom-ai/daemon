@@ -5,7 +5,7 @@ require_relative '../source/core/agent/jev'
 
 class JevTest < Minitest::Test
   def test_request_omits_session_id_and_file_contents
-    body = Agent::Jev.request_body(
+    body = Agent::Jev.payload(
       'exec',
       {
         'command' => 'OPENJEV_API_KEY=secret-value echo 123e4567-e89b-12d3-a456-426614174000',
