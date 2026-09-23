@@ -1,10 +1,11 @@
-// Team Room — the human's seat on the coord bus, as a Devin Desktop view.
+// Team Room — the human's seat on the coord bus, as a Devin Desktop tab.
 //
 // The extension host owns the bus (./bus.js): no HTTP server, no port, no
 // browser, no respawn wrapper. The webview is presentation only — it renders
 // what the host posts and sends back say/dm intents.
 //
 // The room opens as an editor tab (agentCoord.focus / agentCoord.openPanel).
+// The activity-bar icon is only a launcher for that tab — see RoomViewProvider.
 
 const vscode = require("vscode");
 const fs = require("node:fs");
@@ -50,24 +51,18 @@ function coordRootOf(projectDir)
         ?? null;
 }
 
-function webviews()
-{
-    return [view?.webview, panel?.webview].filter(Boolean);
-}
-
 function postAll(message)
 {
-    for (const webview of webviews())
-        try
-        {
-            webview.postMessage(message);
-        }
-        catch { }
+    try
+    {
+        panel?.webview.postMessage(message);
+    }
+    catch { }
 }
 
 function visible()
 {
-    return Boolean(view?.visible || panel?.visible);
+    return Boolean(panel?.visible);
 }
 
 function updateBadge()
@@ -317,22 +312,18 @@ function wire(webview)
     webview.onDidReceiveMessage((message) => handleMessage(message));
 }
 
+// The activity-bar icon is a launcher, not a surface: the sidebar view exists
+// only so the icon has something to point at. Resolving it opens (or focuses)
+// the editor tab and puts the sidebar away again. The view is kept for its
+// badge, which still counts pings on the activity-bar icon.
 class RoomViewProvider
 {
     resolveWebviewView(webviewView)
     {
         view = webviewView;
-        wire(webviewView.webview);
-        webviewView.onDidChangeVisibility(() =>
-        {
-            if (webviewView.visible)
-            {
-                unreadPings = 0;
-                updateBadge();
-                pushState();
-            }
-        });
-        ensureBus();
+        updateBadge();
+        openPanel();
+        vscode.commands.executeCommand("workbench.action.closeSidebar");
     }
 }
 
@@ -362,18 +353,11 @@ function openPanel()
 function activate(context)
 {
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(VIEW_ID, new RoomViewProvider(), { webviewOptions: { retainContextWhenHidden: true } }),
+        vscode.window.registerWebviewViewProvider(VIEW_ID, new RoomViewProvider()),
         vscode.commands.registerCommand("agentCoord.focus", openPanel),
         vscode.commands.registerCommand("agentCoord.openPanel", openPanel),
         vscode.commands.registerCommand("agentCoord.refresh", refresh),
     );
-
-    const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
-    status.text = "$(comment-discussion) team room";
-    status.tooltip = "Open the team room";
-    status.command = "agentCoord.focus";
-    status.show();
-    context.subscriptions.push(status);
 
     pollTimer = setInterval(poll, POLL_MS);
     context.subscriptions.push({ dispose: () => clearInterval(pollTimer) });

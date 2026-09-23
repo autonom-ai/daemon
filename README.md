@@ -91,12 +91,11 @@ cd extension && npx @vscode/vsce package --no-dependencies   # writes agent-coor
 ```
 
 Then open a wired workspace in Devin Desktop and reload the window — the room
-opens as an editor tab (click the status-bar item, or run `Team Room: Open the
-team room`). The activity-bar view is the same UI in the sidebar, reachable via
-`Team Room: Open the team room in the sidebar`. It resolves the workspace from
-the open folder's `.devin/coord.json`; if the store module is missing, the view
-says so, retries with backoff, and `npm ci` in this clone fixes it without a
-reload.
+opens as an editor tab (click the activity-bar icon, or run `Team Room: Open
+the team room`); clicking again focuses the existing tab. It resolves the
+workspace from the open folder's `.devin/coord.json`; if the store module is
+missing, the view says so, retries with backoff, and `npm ci` in this clone
+fixes it without a reload.
 
 ## Layout
 
