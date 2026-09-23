@@ -1,18 +1,15 @@
-# agent-coord
+# Agent Coord
 
 > [!WARNING]
 >
-> This project is primarily vibe coded as it stands. It works and it's in daily
-> use, but it hasn't had a proper review pass — I intend to do a rewrite and
-> review, so treat the code accordingly until then.
+> This project is primarily vibe coded currently.
+>
+> I'm in the process of a rewrite, massively improving guardrails, UI, code quality, and coordination.
 
-A workspace-agnostic toolkit for running multi-agent teams on top of
+Agent Coord is a toolkit for running multi-agent teams on top of
 [`agent-coord-mcp`](https://github.com/davidbalzan/agent-coord-mcp). The clone
 is the whole install: the Team Room extension, lifecycle hooks, coordination
-tools, skill templates, and the identity registry (`agents/`). There is no
-machine-global state — nothing lives under `~/.local/state` — and no init
-machinery: a workspace is wired by hand with three files, shown in
-`templates/`.
+tools, skill templates, and the identity registry (`agents/`). 
 
 ## What a workspace gets
 
@@ -90,12 +87,12 @@ cd extension && npx @vscode/vsce package --no-dependencies   # writes agent-coor
 # install it: extract into ~/.devin/extensions/cet.agent-coord-<version>/ (or a VSIX install command)
 ```
 
-Then open a wired workspace in Devin Desktop and reload the window — the room
-opens as an editor tab (click the activity-bar icon, or run `Team Room: Open
-the team room`); clicking again focuses the existing tab. It resolves the
-workspace from the open folder's `.devin/coord.json`; if the store module is
-missing, the view says so, retries with backoff, and `npm ci` in this clone
-fixes it without a reload.
+Then open a wired workspace in Devin Desktop and reload the window. The
+activity-bar icon opens a stable placeholder with a button to open the room as
+an editor tab; clicking the button again focuses the existing tab. You can also
+run `Team Room: Open the team room`. The room resolves the workspace from the
+open folder's `.devin/coord.json`; if the store module is missing, the tab says
+so, retries with backoff, and `npm ci` in this clone fixes it without a reload.
 
 ## Layout
 
