@@ -15,11 +15,11 @@ tools, skill templates, and the identity registry (`agents/`).
 
 | Piece | What it is |
 | --- | --- |
-| Team Room | The human's seat, as a Devin Desktop extension (`extension/`): rooms, DMs, `@name`/`#room` pings, and merged message runs. It reads the workspace's bus directly — no server, no port, no browser. |
+| Team Room | The human's seat, as a Devin Desktop extension (`source/extension/`): rooms, DMs, `@name`/`#room` pings, and merged message runs. It reads the workspace's bus directly — no server, no port, no browser. |
 | Lifecycle hooks | Session-start identity + personality + memory injection, prompt context, a keep-alive Stop hook so agents stay reachable, and identity claims recorded from the join. |
 | `bin/coord` | The CLI: `identity add` (scaffold `agents/<name>/`). |
 | Identity registry | `agents/<name>/` in this clone holds `identity.md` + `memory.md` — the person follows the name across every workspace wired to this clone. |
-| Skills | `core/skills/team`, copied per workspace with `{{PROJECT}}` filled in. |
+| Skills | `source/devin/skills/team`, copied per workspace with `{{PROJECT}}` filled in. |
 | Docs | `COORDINATION.md` and `ORGANICS.md` copied to the workspace root. |
 
 **There are no seats.** An agent's name is its identity — `join` binds the
@@ -60,7 +60,7 @@ No init — copy three files into the workspace's `.devin/` and fill in the
 Optional, all by hand:
 
 ```sh
-cp -r <clone>/core/skills/team <ws>/.devin/skills/<project>-team # then substitute {{PROJECT}}
+cp -r <clone>/source/devin/skills/team <ws>/.devin/skills/<project>-team # then substitute {{PROJECT}}
 cp <clone>/templates/{COORDINATION.md,ORGANICS.md} <ws>/
 ```
 
@@ -83,7 +83,7 @@ bin/coord identity add ada                  # scaffold agents/ada/{identity,memo
 The Team Room:
 
 ```sh
-cd extension && npx @vscode/vsce package --no-dependencies   # writes agent-coord-<version>.vsix
+cd source/extension && npx @vscode/vsce package --no-dependencies   # writes agent-coord-<version>.vsix
 # install it: extract into ~/.devin/extensions/cet.agent-coord-<version>/ (or a VSIX install command)
 ```
 
@@ -98,11 +98,11 @@ so, retries with backoff, and `npm ci` in this clone fixes it without a reload.
 
 | Path | Contents |
 | --- | --- |
-| `extension/` | The Team Room — Devin Desktop extension (host bus client + webview UI). |
+| `source/extension/` | The Team Room — Devin Desktop extension (host bus client + webview UI). |
 | `bin/coord` | The CLI — identity scaffolding. |
-| `core/chat/` | Shared room actions (`actions.mjs`), used by the extension. |
-| `core/hooks/` | `session-start`, `prompt-context`, `keep-alive`, `record-join`, and `coord` helper. |
-| `core/skills/` | `team` skill template (copied per project). |
+| `source/devin/chat/` | Shared room actions (`actions.mjs`), used by the extension. |
+| `source/devin/hooks/` | `session-start`, `prompt-context`, `keep-alive`, `record-join`, and `coord` helper. |
+| `source/devin/skills/` | `team` skill template (copied per project). |
 | `templates/` | The three wiring files and the two workspace docs. |
 | `agents/` | Identity registry — `identity.md` + `memory.md` per person. Gitignored; local to this clone. |
 

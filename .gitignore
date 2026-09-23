@@ -7,7 +7,7 @@ COORDINATION.md
 ORGANICS.md
 tools/
 .playwright-mcp/
-extension/*.vsix
+source/extension/*.vsix
 .env
 bin/
 !bin/.gitkeep
