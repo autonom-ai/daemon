@@ -4,8 +4,8 @@ require 'json'
 
 module Agent
   class Server
-    SERVER_INFO = { 'name' => 'agent-coord', 'version' => '0.1.0' }.freeze
-    PROTOCOL_VERSIONS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
+    INFO = { 'name' => 'agent-coord', 'version' => '0.1.0' }.freeze
+    PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
 
     def initialize(root: Store::ROOT)
       @root = root
@@ -14,53 +14,53 @@ module Agent
     def run(input: STDIN, output: STDOUT)
       output.sync = true
       input.each_line do |line|
-        request = nil
+        req = nil
         begin
-          request = JSON.parse(line)
-          response = handle(request)
-          output.puts(JSON.generate(response)) if response
+          req = JSON.parse(line)
+          res = handle(req)
+          output.puts(JSON.generate(res)) if res
         rescue JSON::ParserError
-          output.puts(JSON.generate(error_response(nil, -32700, 'Parse error')))
+          output.puts(JSON.generate(error(nil, -32700, 'Parse error')))
         rescue StandardError
-          output.puts(JSON.generate(error_response(request&.fetch('id', nil), -32603, 'Internal error')))
+          output.puts(JSON.generate(error(req&.fetch('id', nil), -32603, 'Internal error')))
         end
       end
     end
 
     private
 
-    def handle(request)
-      return error_response(nil, -32600, 'Invalid request') unless request.is_a?(Hash)
+    def handle(req)
+      return error(nil, -32600, 'Invalid request') unless req.is_a?(Hash)
 
-      request_id = request['id']
-      method = request['method']
-      params = request['params'].is_a?(Hash) ? request['params'] : {}
+      id = req['id']
+      method = req['method']
+      params = req['params'].is_a?(Hash) ? req['params'] : {}
       return nil if method == 'notifications/initialized' || method == 'notifications/cancelled'
-      return error_response(request_id, -32600, 'Invalid request') unless method.is_a?(String)
+      return error(id, -32600, 'Invalid request') unless method.is_a?(String)
 
       case method
       when 'initialize'
-        protocol_version = params['protocolVersion']
-        protocol_version = '2025-03-26' unless PROTOCOL_VERSIONS.include?(protocol_version)
-        success_response(
-          request_id,
-          'protocolVersion' => protocol_version,
+        protocol = params['protocolVersion']
+        protocol = '2025-03-26' unless PROTOCOLS.include?(protocol)
+        success(
+          id,
+          'protocolVersion' => protocol,
           'capabilities' => { 'tools' => { 'listChanged' => false } },
-          'serverInfo' => SERVER_INFO
+          'serverInfo' => INFO
         )
       when 'ping'
-        success_response(request_id, {})
+        success(id, {})
       when 'tools/list'
-        success_response(request_id, 'tools' => tools)
+        success(id, 'tools' => tools)
       when 'tools/call'
-        success_response(request_id, call_tool(params))
+        success(id, call_tool(params))
       else
-        error_response(request_id, -32601, 'Method not found')
+        error(id, -32601, 'Method not found')
       end
     end
 
     def tools
-      session_id = {
+      session = {
         'type' => 'string',
         'description' => 'Injected by the Devin session hook.'
       }
@@ -68,12 +68,12 @@ module Agent
         {
           'name' => 'get_profiles',
           'description' => 'List existing profile names and directories.',
-          'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session_id } }
+          'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session } }
         },
         {
           'name' => 'get_profile',
           'description' => 'Get the profile registered to this Devin session.',
-          'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session_id } }
+          'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session } }
         },
         {
           'name' => 'set_profile',
@@ -82,7 +82,7 @@ module Agent
             'type' => 'object',
             'properties' => {
               'name' => { 'type' => 'string', 'description' => 'The profile name to register.' },
-              'session_id' => session_id
+              'session_id' => session
             },
             'required' => ['name']
           }
@@ -91,24 +91,24 @@ module Agent
     end
 
     def call_tool(params)
-      name = params['name'].to_s
-      arguments = params['arguments'].is_a?(Hash) ? params['arguments'] : {}
-      session_id = arguments['session_id']
+      tool = params['name'].to_s
+      args = params['arguments'].is_a?(Hash) ? params['arguments'] : {}
+      session = args['session_id']
 
-      data = case name
+      ret = case tool
       when 'get_profiles'
         Profile.get_profiles(root: @root)
       when 'get_profile'
-        Profile.get_profile(session_id, root: @root)
+        Profile.get_profile(session, root: @root)
       when 'set_profile'
-        Profile.set_profile(arguments['name'], session_id: session_id, root: @root)
+        Profile.set_profile(args['name'], session: session, root: @root)
       else
         return tool_error('Unknown profile tool')
       end
 
       {
-        'content' => [{ 'type' => 'text', 'text' => JSON.generate(data) }],
-        'structuredContent' => data,
+        'content' => [{ 'type' => 'text', 'text' => JSON.generate(ret) }],
+        'structuredContent' => ret,
         'isError' => false
       }
     rescue Store::Error => error
@@ -119,12 +119,12 @@ module Agent
       { 'content' => [{ 'type' => 'text', 'text' => message }], 'isError' => true }
     end
 
-    def success_response(request_id, result)
-      { 'jsonrpc' => '2.0', 'id' => request_id, 'result' => result }
+    def success(id, ret)
+      { 'jsonrpc' => '2.0', 'id' => id, 'result' => ret }
     end
 
-    def error_response(request_id, code, message)
-      { 'jsonrpc' => '2.0', 'id' => request_id, 'error' => { 'code' => code, 'message' => message } }
+    def error(id, code, message)
+      { 'jsonrpc' => '2.0', 'id' => id, 'error' => { 'code' => code, 'message' => message } }
     end
   end
 end

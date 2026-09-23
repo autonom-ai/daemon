@@ -13,25 +13,25 @@ module Agent
     extend self
 
     def get_profiles(root: ROOT)
-      directory = agents_directory(root)
-      return [] unless File.directory?(directory)
-      raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(directory)
+      dir = agents_dir(root)
+      return [] unless File.directory?(dir)
+      raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
-      Dir.children(directory).filter_map do |name|
-        next unless valid_profile_name?(name)
+      Dir.children(dir).filter_map do |name|
+        next unless valid_name?(name)
 
-        profile_directory = File.join(directory, name)
-        next unless File.directory?(profile_directory) && !File.symlink?(profile_directory)
+        profile = File.join(dir, name)
+        next unless File.directory?(profile) && !File.symlink?(profile)
 
-        { 'name' => name, 'directory' => File.realpath(profile_directory) }
+        { 'name' => name, 'directory' => File.realpath(profile) }
       end.sort_by { |profile| profile['name'].downcase }
     end
 
-    def get_profile(session_id, root: ROOT)
-      return nil if session_id.nil? || session_id.to_s.empty?
+    def get_profile(session, root: ROOT)
+      return nil if session.nil? || session.to_s.empty?
 
       name = with_lock(root, File::LOCK_SH) do
-        read_sessions(root)[validate_session_id(session_id)]
+        read_sessions(root)[validate_session(session)]
       end
       return nil unless name
 
@@ -41,27 +41,24 @@ module Agent
       profile
     end
 
-    def set_profile(session_id, name, root: ROOT)
-      session_key = validate_session_id(session_id)
-      requested_name = normalize_profile_name(name)
+    def set_profile(session, name, root: ROOT)
+      session = validate_session(session)
+      name = normalize_name(name)
 
       with_lock(root, File::LOCK_EX) do
         sessions = read_sessions(root)
-        registered_name = sessions[session_key]
+        current = sessions[session]
 
-        if registered_name
-          registered = find_profile(registered_name, root: root)
-          raise Error, 'The registered profile no longer exists' unless registered
-          unless registered['name'].casecmp?(requested_name)
-            raise Error, 'A session profile cannot be changed after registration'
-          end
+        if current
+          profile = find_profile(current, root: root)
+          raise Error, 'The registered profile no longer exists' unless profile
+          raise Error, 'A session profile cannot be changed after registration' unless profile['name'].casecmp?(name)
 
-          next registered
+          next profile
         end
 
-        profile = find_profile(requested_name, root: root) ||
-          create_profile(requested_name.downcase, root: root)
-        sessions[session_key] = profile['name']
+        profile = find_profile(name, root: root) || create_profile(name.downcase, root: root)
+        sessions[session] = profile['name']
         write_sessions(sessions, root: root)
         profile
       end
@@ -69,42 +66,43 @@ module Agent
 
     def migrate_memories!(root: ROOT)
       get_profiles(root: root).each do |profile|
-        profile_directory = profile['directory']
-        memories_directory = File.join(profile_directory, 'memories')
-        FileUtils.mkdir_p(memories_directory)
-        memory_files = Dir.glob(File.join(profile_directory, '*.md'), File::FNM_DOTMATCH).reject do |file|
+        dir = profile['directory']
+        memories = File.join(dir, 'memories')
+        FileUtils.mkdir_p(memories)
+        files = Dir.glob(File.join(dir, '*.md'), File::FNM_DOTMATCH).reject do |file|
           File.basename(file).casecmp?('identity.md')
         end
-        next if memory_files.empty?
-        memory_files.each do |source|
-          destination = File.join(memories_directory, File.basename(source))
-          if File.exist?(destination)
-            unless FileUtils.compare_file(source, destination)
-              raise Error, "Memory destination already exists: #{File.basename(destination)}"
+        next if files.empty?
+
+        files.each do |file|
+          dest = File.join(memories, File.basename(file))
+          if File.exist?(dest)
+            unless FileUtils.compare_file(file, dest)
+              raise Error, "Memory destination already exists: #{File.basename(dest)}"
             end
 
-            File.delete(source)
+            File.delete(file)
           else
-            FileUtils.mv(source, destination)
+            FileUtils.mv(file, dest)
           end
         end
       end
     end
 
-    def valid_profile_name?(name)
+    def valid_name?(name)
       name.is_a?(String) && NAME_PATTERN.match?(name)
     end
 
-    def normalize_profile_name(name)
-      normalized = name.to_s.strip
-      raise Error, 'Invalid profile name' unless valid_profile_name?(normalized)
+    def normalize_name(name)
+      name = name.to_s.strip
+      raise Error, 'Invalid profile name' unless valid_name?(name)
 
-      normalized
+      name
     end
 
     private
 
-    def agents_directory(root)
+    def agents_dir(root)
       File.join(File.expand_path(root), 'agents')
     end
 
@@ -116,42 +114,42 @@ module Agent
     end
 
     def create_profile(name, root: ROOT)
-      directory = agents_directory(root)
-      FileUtils.mkdir_p(directory)
-      raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(directory)
+      dir = agents_dir(root)
+      FileUtils.mkdir_p(dir)
+      raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
-      profile_directory = File.join(directory, name)
-      FileUtils.mkdir(profile_directory, mode: 0o700)
-      FileUtils.mkdir(File.join(profile_directory, 'memories'), mode: 0o700)
+      profile = File.join(dir, name)
+      FileUtils.mkdir(profile, mode: 0o700)
+      FileUtils.mkdir(File.join(profile, 'memories'), mode: 0o700)
       File.open(
-        File.join(profile_directory, 'identity.md'),
+        File.join(profile, 'identity.md'),
         File::WRONLY | File::CREAT | File::EXCL,
         0o600
       ) do |file|
         file.write("---\nname: #{name}\ndisplayName: #{name}\n---\n\n# #{name}\n")
       end
-      { 'name' => name, 'directory' => File.realpath(profile_directory) }
+      { 'name' => name, 'directory' => File.realpath(profile) }
     rescue SystemCallError => error
       raise Error, "Could not create profile: #{error.class}"
     end
 
-    def validate_session_id(session_id)
-      value = session_id.to_s
-      raise Error, 'A valid session ID is required' if value.empty? || value.length > 512 || value.include?("\0")
+    def validate_session(session)
+      session = session.to_s
+      raise Error, 'A valid session ID is required' if session.empty? || session.length > 512 || session.include?("\0")
 
-      value
+      session
     end
 
     def with_lock(root, mode)
-      directory = agents_directory(root)
-      FileUtils.mkdir_p(directory)
-      raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(directory)
+      dir = agents_dir(root)
+      FileUtils.mkdir_p(dir)
+      raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
-      lock_path = File.join(directory, 'sessions.json.lock')
-      raise Error, 'Session lock must not be a symlink' if File.symlink?(lock_path)
+      path = File.join(dir, 'sessions.json.lock')
+      raise Error, 'Session lock must not be a symlink' if File.symlink?(path)
 
-      File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |file|
-        File.chmod(0o600, lock_path)
+      File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
+        File.chmod(0o600, path)
         file.flock(mode)
         yield
       ensure
@@ -162,7 +160,7 @@ module Agent
     end
 
     def read_sessions(root)
-      path = File.join(agents_directory(root), 'sessions.json')
+      path = File.join(agents_dir(root), 'sessions.json')
       return {} unless File.exist?(path)
       raise Error, 'Session mapping file must not be a symlink' if File.symlink?(path)
 
@@ -180,20 +178,20 @@ module Agent
     end
 
     def write_sessions(sessions, root: ROOT)
-      directory = agents_directory(root)
-      path = File.join(directory, 'sessions.json')
-      temporary_path = File.join(directory, ".sessions-#{Process.pid}-#{SecureRandom.hex(8)}.tmp")
-      File.open(temporary_path, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
+      dir = agents_dir(root)
+      path = File.join(dir, 'sessions.json')
+      tmp = File.join(dir, ".sessions-#{Process.pid}-#{SecureRandom.hex(8)}.tmp")
+      File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
         file.write(JSON.pretty_generate(sessions))
         file.write("\n")
         file.flush
         file.fsync
       end
-      File.rename(temporary_path, path)
+      File.rename(tmp, path)
     rescue SystemCallError => error
       raise Error, "Could not save session mapping: #{error.class}"
     ensure
-      File.unlink(temporary_path) if temporary_path && File.exist?(temporary_path)
+      File.unlink(tmp) if tmp && File.exist?(tmp)
     end
   end
 end

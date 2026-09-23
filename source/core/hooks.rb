@@ -5,7 +5,7 @@ require 'json'
 
 module Agent
   module Hooks
-    CORE_TOOLS = %w[
+    PROFILE_TOOLS = %w[
       mcp__agent-coord__get_profiles
       mcp__agent-coord__get_profile
       mcp__agent-coord__set_profile
@@ -23,16 +23,16 @@ module Agent
     rescue Jev::Error
       block('OpenJEV policy check is unavailable; request blocked')
     rescue Store::Error
-      event['hook_event_name'] == 'PreToolUse' ? block('Profile access could not be verified') : profile_context_error
+      event['hook_event_name'] == 'PreToolUse' ? block('Profile access could not be verified') : context_error
     end
 
     private
 
     def session_start(event, root:)
-      session_id = event['session_id']
-      profile = Profile.get_profile(session_id, root: root)
+      session = event['session_id']
+      profile = Profile.get_profile(session, root: root)
       lines = []
-      lines << "Your session ID is #{session_id}. Tell the user what it is." if session_id
+      lines << "Your session ID is #{session}. Tell the user what it is." if session
 
       if profile
         lines << "Your profile is #{profile['name']} at #{profile['directory']}."
@@ -50,87 +50,87 @@ module Agent
     end
 
     def pre_tool_use(event, jev:, root:)
-      tool_name = event['tool_name'].to_s
-      tool_input = event['tool_input'].is_a?(Hash) ? event['tool_input'] : {}
-      session_id = event['session_id']
-      denial = local_denial(tool_name, tool_input, session_id, root: root)
-      return block(denial) if denial
+      tool = event['tool_name'].to_s
+      input = event['tool_input'].is_a?(Hash) ? event['tool_input'] : {}
+      session = event['session_id']
+      reason = denial(tool, input, session, root: root)
+      return block(reason) if reason
 
-      profile = Profile.get_profile(session_id, root: root)
-      if jev.harmful?(tool_name: tool_name, tool_input: tool_input, profile_name: profile&.fetch('name', nil))
+      profile = Profile.get_profile(session, root: root)
+      if jev.harmful?(tool: tool, input: input, name: profile&.fetch('name', nil))
         return block('OpenJEV policy check denied this request')
       end
 
-      return nil unless CORE_TOOLS.include?(tool_name) && valid_session_id?(session_id)
+      return nil unless PROFILE_TOOLS.include?(tool) && valid_session?(session)
 
       {
         'hookSpecificOutput' => {
           'hookEventName' => 'PreToolUse',
-          'updatedInput' => { 'session_id' => session_id }
+          'updatedInput' => { 'session_id' => session }
         }
       }
     end
 
-    def local_denial(tool_name, tool_input, session_id, root:)
-      case tool_name
+    def denial(tool, input, session, root:)
+      case tool
       when 'mcp__agent-coord__get_profile'
-        'A Devin session ID is required' unless valid_session_id?(session_id)
+        'A Devin session ID is required' unless valid_session?(session)
       when 'mcp__agent-coord__set_profile'
-        return 'A Devin session ID is required' unless valid_session_id?(session_id)
+        return 'A Devin session ID is required' unless valid_session?(session)
         return 'A session profile cannot be changed after registration' unless Profile.can_set_profile?(
-          tool_input['name'],
-          session_id: session_id,
+          input['name'],
+          session: session,
           root: root
         )
       when 'read', 'notebook_read'
-        paths_for(tool_name, tool_input).each do |path|
+        paths(tool, input).each do |path|
           return 'Access to this profile or protected file is blocked' unless Profile.can_read?(
             path,
-            session_id: session_id,
+            session: session,
             root: root,
-            working_directory: project_directory
+            dir: project_dir
           )
         end
       when 'grep'
         return 'Access to this profile or protected file is blocked' unless Profile.can_search?(
-          tool_input['path'] || project_directory,
-          session_id: session_id,
+          input['path'] || project_dir,
+          session: session,
           root: root,
-          working_directory: project_directory
+          dir: project_dir
         )
       when 'glob'
         return 'Access to this profile or protected file is blocked' unless Profile.can_glob?(
-          tool_input['pattern'],
-          path: tool_input['path'] || project_directory,
-          session_id: session_id,
+          input['pattern'],
+          path: input['path'] || project_dir,
+          session: session,
           root: root,
-          working_directory: project_directory
+          dir: project_dir
         )
       when 'write', 'edit', 'notebook_edit', 'apply_patch'
-        paths_for(tool_name, tool_input).each do |path|
+        paths(tool, input).each do |path|
           return 'Access to this profile or protected file is blocked' unless Profile.can_write?(
             path,
-            session_id: session_id,
+            session: session,
             root: root,
-            working_directory: project_directory
+            dir: project_dir
           )
         end
       when 'exec'
         return 'Execution targets a protected profile or directory' unless Profile.can_exec?(
-          tool_input['command'],
-          session_id: session_id,
+          input['command'],
+          session: session,
           root: root,
-          working_directory: tool_input['cwd'] || tool_input['working_directory'] || project_directory
+          dir: input['cwd'] || input['working_directory'] || project_dir
         )
       end
 
       nil
     end
 
-    def paths_for(tool_name, tool_input)
-      return patch_paths(tool_input['patch']) if tool_name == 'apply_patch'
+    def paths(tool, input)
+      return patch_paths(input['patch']) if tool == 'apply_patch'
 
-      [tool_input['file_path'], tool_input['notebook_path'], tool_input['path']].compact
+      [input['file_path'], input['notebook_path'], input['path']].compact
     end
 
     def patch_paths(patch)
@@ -139,19 +139,19 @@ module Agent
       patch.scan(/^\*\*\* (?:Update|Add|Delete) File:\s*(.+)$/).flatten
     end
 
-    def project_directory
+    def project_dir
       ENV['DEVIN_PROJECT_DIR'] || Dir.pwd
     end
 
-    def valid_session_id?(session_id)
-      session_id.is_a?(String) && !session_id.empty?
+    def valid_session?(session)
+      session.is_a?(String) && !session.empty?
     end
 
     def block(reason)
       { 'decision' => 'block', 'reason' => reason }
     end
 
-    def profile_context_error
+    def context_error
       {
         'hookSpecificOutput' => {
           'hookEventName' => 'SessionStart',
@@ -164,8 +164,8 @@ end
 
 if $PROGRAM_NAME == __FILE__
   begin
-    hook_output = Agent::Hooks.call(JSON.parse(STDIN.read))
-    puts JSON.generate(hook_output) if hook_output
+    ret = Agent::Hooks.call(JSON.parse(STDIN.read))
+    puts JSON.generate(ret) if ret
   rescue JSON::ParserError
     puts JSON.generate('decision' => 'block', 'reason' => 'The hook payload was invalid')
   rescue StandardError
