@@ -5,54 +5,20 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/session-start.mjs\"",
-          "timeout": 10
-        }
-      ]
-    }
-  ],
-  "UserPromptSubmit": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/prompt-context.mjs\"",
-          "timeout": 10
-        }
-      ]
-    }
-  ],
-  "PostToolUse": [
-    {
-      "matcher": "^mcp__agent-coord-.*__(join|register)$",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/record-join.mjs\"",
-          "timeout": 5
-        }
-      ]
-    },
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/tool-log.mjs\"",
+          "command": "ruby \"{{COORD_ROOT}}/source/core/hooks.rb\"",
           "timeout": 5
         }
       ]
     }
   ],
-  "Stop": [
+  "PreToolUse": [
     {
       "matcher": "",
       "hooks": [
         {
           "type": "command",
-          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/keep-alive.mjs\"",
-          "timeout": 10
+          "command": "ruby \"{{COORD_ROOT}}/source/core/hooks.rb\"",
+          "timeout": 15
         }
       ]
     }
