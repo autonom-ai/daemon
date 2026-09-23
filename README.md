@@ -18,11 +18,11 @@ machinery: a workspace is wired by hand with three files, shown in
 
 | Piece | What it is |
 | --- | --- |
-| Team Room | The human's seat, as a Devin Desktop extension (`extension/`): rooms, DMs, `@name`/`#room` pings, merged message runs, and recess controls. It reads the workspace's bus directly — no server, no port, no browser. |
-| Lifecycle hooks | Session-start identity + personality + memory injection, prompt context, a keep-alive Stop hook so agents stay reachable, identity claims recorded from the join, and recess enforcement at the permission layer. |
+| Team Room | The human's seat, as a Devin Desktop extension (`extension/`): rooms, DMs, `@name`/`#room` pings, and merged message runs. It reads the workspace's bus directly — no server, no port, no browser. |
+| Lifecycle hooks | Session-start identity + personality + memory injection, prompt context, a keep-alive Stop hook so agents stay reachable, and identity claims recorded from the join. |
 | `bin/coord` | The CLI: `identity add` (scaffold `agents/<name>/`). |
 | Identity registry | `agents/<name>/` in this clone holds `identity.md` + `memory.md` — the person follows the name across every workspace wired to this clone. |
-| Skills | `core/skills/team` and `core/skills/recess`, copied per workspace with `{{PROJECT}}` filled in. |
+| Skills | `core/skills/team`, copied per workspace with `{{PROJECT}}` filled in. |
 | Docs | `COORDINATION.md` and `ORGANICS.md` copied to the workspace root. |
 
 **There are no seats.** An agent's name is its identity — `join` binds the
@@ -63,9 +63,7 @@ No init — copy three files into the workspace's `.devin/` and fill in the
 Optional, all by hand:
 
 ```sh
-ln -s <clone>/core/tools/coord-* <ws>/tools/          # the tools/coord-* names docs reference
-cp -r <clone>/core/skills/team <ws>/.devin/skills/<project>-team     # then substitute {{PROJECT}}
-cp -r <clone>/core/skills/recess <ws>/.devin/skills/<project>-recess # same
+cp -r <clone>/core/skills/team <ws>/.devin/skills/<project>-team # then substitute {{PROJECT}}
 cp <clone>/templates/{COORDINATION.md,ORGANICS.md} <ws>/
 ```
 
@@ -73,9 +71,8 @@ There is intentionally no AGENTS.md template — an agent should only assume it
 is on a team when it is actually told so (the session-start hook says it, the
 room says it). If you want AGENTS.md to say it too, write that yourself.
 
-`.devin/agent-coord/state/` (the bus) and `.devin/collaboration/` (recess
-markers) are created on first use. One seed is required: the bus
-refuses to start without a configured transport — write
+`.devin/agent-coord/state/` (the bus) is created on first use. One seed is
+required. The bus refuses to start without a configured transport — write
 `{"transport": "tmux-push-remote"}` to `.devin/agent-coord/state/config.json`
 (`herdr` instead if that binary is installed; this fleet never attaches, so
 the choice is inert either way).
@@ -101,19 +98,15 @@ the open folder's `.devin/coord.json`; if the store module is missing, the view
 says so, retries with backoff, and `npm ci` in this clone fixes it without a
 reload.
 
-`tools/coord-chat` remains the terminal seat on the same bus when a view is not
-what you want.
-
 ## Layout
 
 | Path | Contents |
 | --- | --- |
 | `extension/` | The Team Room — Devin Desktop extension (host bus client + webview UI). |
 | `bin/coord` | The CLI — identity scaffolding. |
-| `core/chat/` | Shared room code: bus actions (`actions.mjs`) and recess state (`recess.mjs`), used by the extension and the CLIs. |
-| `core/hooks/` | `session-start`, `prompt-context`, `keep-alive`, `record-join`, `recess-guard`, `coord` helper. |
-| `core/tools/` | `coord-chat` (terminal seat) and `coord-recess` workspace scripts. |
-| `core/skills/` | `team` and `recess` skill templates (copied per project). |
+| `core/chat/` | Shared room actions (`actions.mjs`), used by the extension. |
+| `core/hooks/` | `session-start`, `prompt-context`, `keep-alive`, `record-join`, and `coord` helper. |
+| `core/skills/` | `team` skill template (copied per project). |
 | `templates/` | The three wiring files and the two workspace docs. |
 | `agents/` | Identity registry — `identity.md` + `memory.md` per person. Gitignored; local to this clone. |
 
@@ -128,8 +121,5 @@ Team Room rather than any agent's own window; `@`-mentions fan out to inboxes,
 
 Hooks read `coord.json` at session start to inject the agent's personality and
 memory, and the claim file survives context resets, so a wiped tab still knows
-who it is. A recess is enforced, not requested: while
-`.devin/collaboration/recess` exists, `recess-guard` blocks workspace edits
-(read, search, the agent's own profile, and `.devin/collaboration/` notes stay
-open) and the Stop hook keeps the team talking. Retired bound ids
+who it is. Retired bound ids
 (`<project>-a` style) still resolve through coord.json's `identities` map.

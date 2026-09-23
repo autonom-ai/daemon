@@ -1,7 +1,7 @@
 {
   "name": "coord-room",
   "displayName": "Team Room",
-  "description": "The human's seat on the agent-coord bus — rooms, DMs, pings, and recess, read straight from the workspace's own JSONL state.",
+  "description": "The human's seat on the agent-coord bus — rooms, DMs, and pings, read straight from the workspace's own JSONL state.",
   "publisher": "cet",
   "version": "0.1.0",
   "private": true,
@@ -54,16 +54,6 @@
       {
         "command": "coordRoom.refresh",
         "title": "Refresh",
-        "category": "Team Room"
-      },
-      {
-        "command": "coordRoom.recess",
-        "title": "Call a recess",
-        "category": "Team Room"
-      },
-      {
-        "command": "coordRoom.recessEnd",
-        "title": "Close the recess",
         "category": "Team Room"
       }
     ],

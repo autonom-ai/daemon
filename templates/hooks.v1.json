@@ -23,18 +23,6 @@
       ]
     }
   ],
-  "PreToolUse": [
-    {
-      "matcher": "^(edit|write|apply_patch|notebook_edit|exec|write_to_process)$",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"{{COORD_ROOT}}/core/hooks/recess-guard.mjs\"",
-          "timeout": 5
-        }
-      ]
-    }
-  ],
   "PostToolUse": [
     {
       "matcher": "^mcp__agent-coord-.*__(join|register)$",

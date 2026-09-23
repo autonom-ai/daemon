@@ -3,35 +3,16 @@
 // Reads only. Cursors stay where the agent left them, so the same traffic is
 // still waiting in read_messages; this is a nudge, not a delivery.
 
-import { statSync, existsSync } from "node:fs";
-import { CONFIG, HUMAN_SEAT, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, identityOf, recess, unread } from "./coord.mjs";
+import { HUMAN_SEAT, TEAM_ROOM, claimFor, emit, formatEntries, hookInput, unread } from "./coord.mjs";
 
 const input = await hookInput();
 // Claim-only, like every hook — record-join.mjs owns the write side.
 const agent = claimFor(input.session_id);
 const { dms, room } = unread(agent);
-const recessState = recess();
-const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
 const lines = [];
 
 if (agent)
     lines.push(`You are ${agent}. Team room: #${TEAM_ROOM}.`);
-
-if (recessState.active)
-{
-    lines.push(
-        `A RECESS is open (called by ${recessState.by}${recessState.note ? `: ${recessState.note}` : ""}).`,
-        `Invoke the ${recessSkill} skill and follow it: announce yourself in the room, keep talking, minimal edits.`
-    );
-    // Event-driven nudge: if this agent's memory.md predates the recess,
-    // surface it — recess is exactly when durable memory gets written, and
-    // nobody should have to remember that on their own.
-    const identity = agent && identityOf(agent);
-    if (identity && recessState.startedAt
-        && (!existsSync(identity.memoryFile)
-            || statSync(identity.memoryFile).mtimeMs < recessState.startedAt))
-        lines.push(`Your memory.md predates this recess — write what this stretch taught you before it closes.`);
-}
 
 if (dms.length)
 {

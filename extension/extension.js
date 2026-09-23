@@ -2,7 +2,7 @@
 //
 // The extension host owns the bus (./bus.js): no HTTP server, no port, no
 // browser, no respawn wrapper. The webview is presentation only — it renders
-// what the host posts and sends back say/dm/recess intents.
+// what the host posts and sends back say/dm intents.
 //
 // The room opens as an editor tab (coordRoom.focus / coordRoom.openPanel); the
 // activity-bar view is the same UI in the sidebar, reachable via
@@ -289,22 +289,6 @@ async function handleMessage(message)
             postAll({ type: "sent", ok: true, pinged: [message.to] });
             return;
         }
-        if (message.type === "recess")
-        {
-            const result = await bus.recess(message.action, String(message.note ?? "").trim());
-            if (!result.ok)
-                postAll({ type: "toast", text: `recess: ${result.error}`, tone: "bad" });
-            else
-                postAll({
-                    type: "toast",
-                    text: message.action === "end"
-                        ? "recess closed — the outcome is in #general"
-                        : "recess open — every seat has been asked to stop and talk; workspace edits are blocked",
-                    tone: "good",
-                });
-            await pushState();
-            return;
-        }
         if (message.type === "openLink")
         {
             vscode.env.openExternal(vscode.Uri.parse(message.href));
@@ -389,8 +373,6 @@ function activate(context)
         vscode.commands.registerCommand("coordRoom.openPanel", openPanel),
         vscode.commands.registerCommand("coordRoom.openSidebar", () => vscode.commands.executeCommand(`${VIEW_ID}.focus`)),
         vscode.commands.registerCommand("coordRoom.refresh", refresh),
-        vscode.commands.registerCommand("coordRoom.recess", () => handleMessage({ type: "recess", action: "start", note: "" })),
-        vscode.commands.registerCommand("coordRoom.recessEnd", () => handleMessage({ type: "recess", action: "end", note: "" })),
     );
 
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);

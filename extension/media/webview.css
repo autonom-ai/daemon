@@ -27,7 +27,6 @@
     --danger: var(--vscode-errorForeground, #f85149);
     --human: var(--vscode-terminal-ansiBrightRed, #f48771);
     --me-bubble: var(--vscode-button-background, #0078d4);
-    --widget: var(--vscode-widget-border, #313131);
     --shadow: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
     --radius: var(--vscode-cornerRadius-small, 4px);
 }
@@ -63,8 +62,6 @@ body
     background-clip: padding-box;
 }
 
-.controls { display: flex; gap: 8px; }
-.controls button { flex: 1; font-size: 12px; }
 .conn { color: var(--dim); font-size: 11px; }
 .conn.live { color: var(--status); }
 .conn.dead { color: var(--danger); }
@@ -85,36 +82,6 @@ button
 
 button:hover { background: var(--hover); border-color: var(--line-3); }
 button:active { background: var(--bg); }
-.banner
-{
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--line);
-    font-size: 13px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-}
-
-/* `display: flex` above beats the UA stylesheet's [hidden] rule, so an inactive
-   banner would stay on screen without this. */
-.banner[hidden] { display: none; }
-
-.banner.recess
-{
-    background: color-mix(in srgb, var(--link) 12%, transparent);
-    color: var(--link);
-    border-bottom-color: color-mix(in srgb, var(--link) 30%, transparent);
-}
-.banner button { padding: 3px 10px; font-size: 12px; }
-button.recess:hover
-{
-    border-color: var(--decision);
-    color: var(--decision);
-    background: color-mix(in srgb, var(--decision) 9%, transparent);
-}
-button.recess.on { border-color: var(--decision); color: var(--decision); }
-
 main { flex: 1; display: flex; min-height: 0; }
 
 aside
@@ -418,31 +385,6 @@ textarea::placeholder { color: var(--faint); }
     border-color: color-mix(in srgb, var(--status) 45%, transparent);
     color: var(--status);
 }
-
-.dialog
-{
-    background: var(--panel-2);
-    color: var(--text);
-    border: 1px solid var(--widget);
-    border-radius: calc(var(--radius) + 2px);
-    padding: 20px;
-    width: min(520px, 90vw);
-    font: inherit;
-    box-shadow: 0 20px 60px var(--shadow);
-}
-
-.dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
-.dialog h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
-.dialog-lede { color: var(--dim); font-size: 13px; margin: 0 0 12px; line-height: 1.5; }
-.dialog textarea { width: 100%; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.dialog-actions button:last-child
-{
-    border-color: var(--accent);
-    background: var(--accent);
-    color: var(--vscode-button-foreground, #fff);
-}
-.dialog-actions button:last-child:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
 /* Narrow screens — the activity-bar view is always narrow — the sidebar
    becomes a slide-over drawer (☰ button in the toolbar) so the chat gets the

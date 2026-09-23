@@ -3,7 +3,7 @@
 // CommonJS on purpose: the extension host loads `main` as CJS, and the bus
 // modules it needs (agent-coord-mcp's store, core/chat/actions.mjs) are ESM, so
 // they come in through dynamic import(). Everything the old HTTP server did —
-// offsets, mention fanout, presence, recess — lives here or in actions.mjs; the
+// offsets, mention fanout, presence — lives here or in actions.mjs; the
 // webview is presentation only.
 
 const { existsSync, readFileSync, statSync } = require("node:fs");
@@ -72,7 +72,6 @@ async function openBus({ projectDir, coordRoot })
     process.env.AGENT_COORD_DIR = coordDir;
     const store = await loadStore(coordRoot);
     const actions = await importEsm(path.join(coordRoot, "core", "chat", "actions.mjs"));
-    const recessMod = await importEsm(path.join(coordRoot, "core", "chat", "recess.mjs"));
 
     const ctx = {
         store,
@@ -205,7 +204,6 @@ async function openBus({ projectDir, coordRoot })
             project: ctx.project,
             human: ctx.human,
             teamRoom: ctx.teamRoom,
-            recess: recessMod.recessState(projectDir),
             agents: actions.registryView({ ...ctx, activity }).map((agent) => ({ ...agent, ...identityMeta(coordRoot, agent.id) })),
             rooms: await actions.roomList(ctx),
             messages: await actions.history(ctx, 400),
@@ -224,14 +222,6 @@ async function openBus({ projectDir, coordRoot })
         return actions.dm(ctx, to, text, inReplyTo);
     }
 
-    async function recess(action, note)
-    {
-        const result = action === "end"
-            ? await recessMod.endRecess(store, { projectDir, room: ctx.teamRoom, by: ctx.human, note })
-            : await recessMod.startRecess(store, { projectDir, room: ctx.teamRoom, by: ctx.human, note });
-        return { ...result, state: recessMod.recessState(projectDir) };
-    }
-
     seedActivity();
     // Establish the pump's file offsets at open time, before anything can be
     // written: history is state()'s job, and a message that lands while the
@@ -246,7 +236,6 @@ async function openBus({ projectDir, coordRoot })
         pump,
         say,
         sendDm,
-        recess,
         heartbeat: () => actions.touchHeartbeat(ctx),
     };
 }

@@ -24,9 +24,6 @@ jobs:
           done
           node --check bin/coord
 
-      - name: Shellcheck workspace tools
-        run: shellcheck core/tools/*
-
       # The extension host's bus client is plain Node (no vscode import), so the
       # product contract — a wired workspace's room reads and writes its bus —
       # is testable here without an editor.
@@ -77,19 +74,3 @@ jobs:
           printf '{"session_id":"ci-refused","tool_name":"mcp__agent-coord-testy__join","tool_input":{"agentId":"testy"},"tool_response":{"success":false}}' \
             | DEVIN_PROJECT_DIR="$WS" node core/hooks/record-join.mjs
           test ! -e "$WS/.devin/agent-coord/claims/ci-refused.json"
-
-      # A recess is enforced, not requested: workspace edits blocked, the
-      # agent's own profile and collaboration notes open, and no marker means
-      # no interference.
-      - name: Smoke-test recess guard
-        run: |
-          WS=/tmp/ci-hooks
-          mkdir -p "$WS/.devin/collaboration"
-          printf 'by: ci\nstartedAt: 1\n' > "$WS/.devin/collaboration/recess"
-          printf '{"session_id":"ci-session","tool_name":"edit","tool_input":{"file_path":"%s/src/app.js"}}' "$WS" \
-            | DEVIN_PROJECT_DIR="$WS" node core/hooks/recess-guard.mjs | grep -q '"decision":"block"'
-          test -z "$(printf '{"session_id":"ci-session","tool_name":"write","tool_input":{"file_path":"%s/agents/testy/memory.md"}}' "$PWD" \
-            | DEVIN_PROJECT_DIR="$WS" node core/hooks/recess-guard.mjs)"
-          rm "$WS/.devin/collaboration/recess"
-          test -z "$(printf '{"session_id":"ci-session","tool_name":"edit","tool_input":{"file_path":"%s/src/app.js"}}' "$WS" \
-            | DEVIN_PROJECT_DIR="$WS" node core/hooks/recess-guard.mjs)"

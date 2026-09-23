@@ -26,7 +26,6 @@ const DEFAULTS = {
     teamRoom: "general",
     roster: [],
     teamSkill: null,
-    recessSkill: null,
 };
 
 export function config()
@@ -56,7 +55,6 @@ export const COORD_DIR = path.join(PROJECT_DIR, ".devin", "agent-coord", "state"
 export const TEAM_ROOM = CONFIG.teamRoom;
 export const ROSTER = CONFIG.roster;
 export const HUMAN_SEAT = CONFIG.human;
-export const RECESS_FILE = path.join(PROJECT_DIR, ".devin", "collaboration", "recess");
 // The identity registry is clone content: agents/<name>/identity.md +
 // memory.md in this checkout (gitignored — the people are local material, not
 // upstream). It follows the person across workspaces because every wired
@@ -317,18 +315,6 @@ function isAlive(pid)
     {
         return false;
     }
-}
-
-export function recess()
-{
-    if (!existsSync(RECESS_FILE))
-        return { active: false };
-    const raw = readFileSync(RECESS_FILE, "utf8");
-    const meta = Object.fromEntries(raw.split("\n")
-        .map((line) => /^(\w+):\s*(.*)$/.exec(line.trim()))
-        .filter(Boolean)
-        .map((match) => [match[1], match[2]]));
-    return { active: true, by: meta.by ?? "unknown", note: meta.note ?? "", startedAt: Number(meta.startedAt ?? 0) };
 }
 
 export function clip(text, max)

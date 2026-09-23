@@ -9,19 +9,10 @@
 </head>
 <body>
 
-<div class="banner recess" id="recess-banner" hidden>
-  <strong>Recess open</strong> — the team has stopped building and is talking in #general. Edits are blocked until it closes.
-  <span id="recess-when"></span>
-  <button id="recess-end" type="button">close the recess</button>
-</div>
-
 <div class="toast" id="toast" hidden></div>
 
 <main>
   <aside>
-    <section class="controls">
-      <button id="recess" class="recess" title="Stop the team and hold a recess: they announce themselves in #general and discuss">call recess</button>
-    </section>
     <section>
       <h2>Rooms</h2>
       <ul id="rooms" class="rooms"></ul>
@@ -60,16 +51,6 @@
     </form>
   </section>
 </main>
-
-<dialog id="recess-dialog" class="dialog">
-  <h2 id="recess-dialog-title">call recess</h2>
-  <p class="dialog-lede" id="recess-dialog-lede"></p>
-  <textarea id="recess-note" rows="3"></textarea>
-  <div class="dialog-actions">
-    <button type="button" id="recess-cancel">cancel</button>
-    <button type="button" id="recess-confirm">call recess</button>
-  </div>
-</dialog>
 
 <script nonce="{{NONCE}}" src="{{JS_URI}}"></script>
 </body>

@@ -15,7 +15,6 @@ const state = {
     human: "user",
     project: "team",
     teamRoom: "general",
-    recess: { active: false },
     connected: false,
 };
 
@@ -30,18 +29,8 @@ const el = {
     text: document.getElementById("text"),
     composer: document.getElementById("composer"),
     hint: document.getElementById("hint"),
-    recess: document.getElementById("recess"),
-    recessBanner: document.getElementById("recess-banner"),
-    recessWhen: document.getElementById("recess-when"),
-    recessEnd: document.getElementById("recess-end"),
     mentions: document.getElementById("mentions"),
     toast: document.getElementById("toast"),
-    recessDialog: document.getElementById("recess-dialog"),
-    recessDialogTitle: document.getElementById("recess-dialog-title"),
-    recessDialogLede: document.getElementById("recess-dialog-lede"),
-    recessNote: document.getElementById("recess-note"),
-    recessConfirm: document.getElementById("recess-confirm"),
-    recessCancel: document.getElementById("recess-cancel"),
 };
 
 function esc(text)
@@ -301,7 +290,7 @@ function openDm(seat)
     el.hint.textContent = "";
 }
 
-function renderDocs(payload)
+function renderBuild(payload)
 {
     // Which build is live is a fact the user can glance at, not something
     // inferred from a PID. Stale code shows up as a version that never changes.
@@ -310,14 +299,6 @@ function renderDocs(payload)
         el.build.textContent = `v${payload.build}`;
         el.build.title = `team room ${payload.build}`;
     }
-
-    state.recess = payload.recess ?? { active: false };
-    el.recess.textContent = state.recess.active ? "recess open" : "call recess";
-    el.recess.className = state.recess.active ? "recess on" : "recess";
-    el.recessBanner.hidden = !state.recess.active;
-    el.recessWhen.textContent = state.recess.active
-        ? `called by ${state.recess.by}${state.recess.note ? `: ${state.recess.note}` : ""}`
-        : "";
 }
 
 function absorb(payload)
@@ -330,7 +311,7 @@ function absorb(payload)
     if (!state.room && !state.dm)
         state.room = state.teamRoom;
     renderSidebar();
-    renderDocs(payload);
+    renderBuild(payload);
 }
 
 function markSeen()
@@ -406,8 +387,6 @@ window.addEventListener("message", (event) =>
         receive([payload.entry]);
     else if (payload.type === "messages")
         receive(payload.entries ?? []);
-    else if (payload.type === "docs")
-        renderDocs(payload);
     else if (payload.type === "conn")
     {
         state.connected = payload.up;
@@ -607,41 +586,6 @@ el.messages.addEventListener("click", (event) =>
         event.preventDefault();
         post({ type: "openLink", href: link.href });
     }
-});
-
-function recess(action, note)
-{
-    el.hint.textContent = "";
-    post({ type: "recess", action, note });
-}
-
-let recessEnding = false;
-
-function openRecessDialog(ending)
-{
-    recessEnding = ending;
-    el.recessDialogTitle.textContent = ending ? "close the recess" : "call recess";
-    el.recessDialogLede.textContent = ending
-        ? "What did the recess decide? It is posted to #general, and it is what the seats read as the outcome."
-        : "Everything stops: every seat is asked to say who they are, what they are holding, and what they want to argue about. Workspace edits are blocked until the recess closes. The note is posted to #general.";
-    el.recessNote.value = "";
-    el.recessNote.placeholder = ending ? "the decision" : "why the team is stopping (optional)";
-    el.recessConfirm.textContent = ending ? "close recess" : "call recess";
-    el.recessDialog.showModal();
-    el.recessNote.focus();
-}
-
-el.recess.addEventListener("click", () => openRecessDialog(state.recess.active));
-
-el.recessEnd.addEventListener("click", () => openRecessDialog(true));
-
-el.recessCancel.addEventListener("click", () => el.recessDialog.close());
-
-el.recessConfirm.addEventListener("click", () =>
-{
-    const note = el.recessNote.value.trim();
-    el.recessDialog.close();
-    recess(recessEnding ? "end" : "start", note);
 });
 
 // The host pushes state on connect and after every structural change; this is

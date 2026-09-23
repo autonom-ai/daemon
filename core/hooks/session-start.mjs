@@ -1,7 +1,7 @@
 // SessionStart — hand every new tab the same starting point.
 
 import path from "node:path";
-import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, ROSTER, TEAM_ROOM, claimFor, emit, formatEntries, hasLiveSession, hookInput, identityOf, memorySlice, recess, registry, roomEntries } from "./coord.mjs";
+import { AGENTS_HOME, CANONICAL_ROOT, CONFIG, HUMAN_SEAT, ROSTER, TEAM_ROOM, claimFor, emit, formatEntries, hasLiveSession, hookInput, identityOf, memorySlice, registry, roomEntries } from "./coord.mjs";
 
 // Identity is the claim file and nothing else: record-join.mjs writes it from
 // an observed, successful join through this tab's own `agent-coord-<name>`
@@ -18,24 +18,21 @@ const rejoin = agentId && !hasLiveSession(agentId)
     ? `No live bus session for ${agentId} — rejoin: call \`join\` on the agent-coord-${agentId} MCP entry with this same name.`
     : null;
 
-const recessState = recess();
 const recent = roomEntries(TEAM_ROOM).slice(-6);
 const teamSkill = CONFIG.teamSkill ?? `${CONFIG.project ?? "team"}-team`;
-const recessSkill = CONFIG.recessSkill ?? `${CONFIG.project ?? "team"}-recess`;
 const onBus = Object.keys(registry()).filter((name) => name !== HUMAN_SEAT);
 
 const lines = [
     `This repository is worked by an agent team${ROSTER.length ? ` — the roster: ${ROSTER.join(", ")}` : ""}.`,
     "The room is where the team actually is: talk there, coordinate there, post what you find.",
-    `Start with the ${teamSkill} skill, join #${TEAM_ROOM}, and talk to the others — if the team has`,
-    `stopped to talk something out, that is the ${recessSkill} skill.`,
+    `Start with the ${teamSkill} skill, join #${TEAM_ROOM}, and talk to the others.`,
     "",
     `The user (${HUMAN_SEAT}) sits in the same room and speaks through the Team Room view in Devin`,
     "Desktop (the team-room extension). Treat the room, not your own window, as where you are reachable and where",
     "decisions are visible.",
     "",
     "Announce yourself once in the room — name and lane — then hold: no posts, no edits, no hunting for",
-    "work until someone addresses you or a recess is called. Being addressed is your start signal.",
+    "work until someone addresses you. Being addressed is your start signal.",
     "",
     "Once active, do not idle. If the room is waiting on you, talk; if it is not, do real work — searches,",
     "checks, notes — and post what you find. Never end a turn on a summary: end it on an action, or a",
@@ -85,9 +82,6 @@ if (recent.length)
     lines.push("", `Recent #${TEAM_ROOM} traffic:`, formatEntries(recent, 6, agentId));
 else
     lines.push("", "The room is empty so far — introducing yourself is a fine first move.");
-
-if (recessState.active)
-    lines.push("", `A RECESS is open (called by ${recessState.by}${recessState.note ? `: ${recessState.note}` : ""}).`);
 
 // Teammate priors — an agent that knows what the others reach for and avoid is
 // starting from a colleague, not a stranger. Bounded to each identity's

@@ -10,8 +10,6 @@ others are your team, not your environment: what you say to them is part of the
 work, and the artifacts the work produces are what the conversation plus the
 doing produce.
 
-If the team stops to talk something out, that is `{{PROJECT}}-recess`.
-
 ## Joining
 
 1. Read `AGENTS.md`, then `COORDINATION.md` and `ORGANICS.md` if they exist.
@@ -29,7 +27,7 @@ If the team stops to talk something out, that is `{{PROJECT}}-recess`.
 5. Join the team room (default `general`), read it, and announce yourself once —
    name and lane. That announcement is the only thing a fresh agent does.
    Then hold: no posts, no edits, no hunting for work until someone addresses
-   you or a recess is called. Being addressed is the start signal — a teammate
+   you. Being addressed is the start signal — a teammate
    can deputize you, it does not have to be the user. A hold freezes outward
    action — posts, shared-tree edits, claimed work — never inward: reading,
    searching, checking pages, and writing your own profile (identity.md,
@@ -62,8 +60,8 @@ Ending a turn means going dark: teammates cannot ask you anything, and the user
 has to wake you by hand. An agent that sits in a wait loop doing nothing is idle
 in the other direction. Neither is acceptable.
 
-When the user calls a hold — "stop", "wait", a recess — it freezes posts too,
-not just edits. Answer anything directly asked of you in one line, then quiet.
+When the user asks you to hold — "stop" or "wait" — freeze posts too, not
+just edits. Answer anything directly asked of you in one line, then quiet.
 Quiet means quiet to the room, not inert: reading, searching, looking around,
 and writing to your own profile or memory stay open — a hold is not a freeze
 on noticing things or recording them.
@@ -81,8 +79,8 @@ The order is always:
 3. Only when there is genuinely nothing to say and nothing to do, call
    `wait_for_message` (your stagger — short, never near 60s without a
    very good reason; the wait is a check-in, not a nap) on the room, then go back to 1. A quiet
-   wait is normal; it is not a reason to stop. During a recess or a genuinely
-   quiet stretch, waiting on your `inbox` instead is the better posture —
+   wait is normal; it is not a reason to stop. During a genuinely quiet
+   stretch, waiting on your `inbox` instead is the better posture —
    @mentions are fanned out there, so you wake when addressed without waking
    on every room line; drain the room backlog on your own cadence with
    `read_messages`. When a wait does wake you, reply only if you were
