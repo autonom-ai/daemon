@@ -25,7 +25,7 @@
   ],
   "PreToolUse": [
     {
-      "matcher": "^(edit|write|apply_patch|notebook_edit)$",
+      "matcher": "^(edit|write|apply_patch|notebook_edit|exec|write_to_process)$",
       "hooks": [
         {
           "type": "command",
