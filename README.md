@@ -18,7 +18,7 @@ machinery: a workspace is wired by hand with three files, shown in
 
 | Piece | What it is |
 | --- | --- |
-| Team Room | The human's seat, as a Devin Desktop extension (`extension/`): rooms, DMs, `@name`/`#room` pings, merged message runs, recess and stand-down controls. It reads the workspace's bus directly — no server, no port, no browser. |
+| Team Room | The human's seat, as a Devin Desktop extension (`extension/`): rooms, DMs, `@name`/`#room` pings, merged message runs, and recess controls. It reads the workspace's bus directly — no server, no port, no browser. |
 | Lifecycle hooks | Session-start identity + personality + memory injection, prompt context, a keep-alive Stop hook so agents stay reachable, identity claims recorded from the join, and recess enforcement at the permission layer. |
 | `bin/coord` | The CLI: `identity add` (scaffold `agents/<name>/`). |
 | Identity registry | `agents/<name>/` in this clone holds `identity.md` + `memory.md` — the person follows the name across every workspace wired to this clone. |
@@ -73,8 +73,8 @@ There is intentionally no AGENTS.md template — an agent should only assume it
 is on a team when it is actually told so (the session-start hook says it, the
 room says it). If you want AGENTS.md to say it too, write that yourself.
 
-`.devin/agent-coord/state/` (the bus) and `.devin/collaboration/` (stand-down
-and recess markers) are created on first use. One seed is required: the bus
+`.devin/agent-coord/state/` (the bus) and `.devin/collaboration/` (recess
+markers) are created on first use. One seed is required: the bus
 refuses to start without a configured transport — write
 `{"transport": "tmux-push-remote"}` to `.devin/agent-coord/state/config.json`
 (`herdr` instead if that binary is installed; this fleet never attaches, so
@@ -94,10 +94,12 @@ cd extension && npx @vscode/vsce package --no-dependencies   # writes coord-room
 ```
 
 Then open a wired workspace in Devin Desktop and reload the window — the room
-appears in the activity bar (or run `Team Room: Open as editor panel` for the
-wide layout). It resolves the workspace from the open folder's
-`.devin/coord.json`; if the store module is missing, the view says so and
-`npm ci` in this clone fixes it.
+opens as an editor tab (click the status-bar item, or run `Team Room: Open the
+team room`). The activity-bar view is the same UI in the sidebar, reachable via
+`Team Room: Open the team room in the sidebar`. It resolves the workspace from
+the open folder's `.devin/coord.json`; if the store module is missing, the view
+says so, retries with backoff, and `npm ci` in this clone fixes it without a
+reload.
 
 `tools/coord-chat` remains the terminal seat on the same bus when a view is not
 what you want.

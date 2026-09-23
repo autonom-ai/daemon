@@ -8,3 +8,6 @@ ORGANICS.md
 tools/
 .playwright-mcp/
 extension/*.vsix
+.env
+bin/
+!bin/.gitkeep
