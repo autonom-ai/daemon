@@ -54,7 +54,10 @@ export async function registerHuman({ store, project, teamRoom, human })
     // not rules; anything project-specific gets created by the people who need it.
     const defaultRooms = [
         { name: "general", topic: "the room — talk, decisions, anything the whole team sees" },
-        { name: "ui", topic: "the team chat UI and anything front-of-house" },
+        { name: "market", topic: "job market reads — supply finds, gate verdicts, comp data, anything search-shaped" },
+        { name: "leisure", topic: "unstructured exploration — side interests, paper reads, anything not-work that feeds the work" },
+        { name: "news", topic: "industry news worth the team knowing — model releases, agent-infra moves, hiring climate" },
+        { name: "brags", topic: "wins, catches, and clean sends — the ledger of the stuff that went right" },
     ];
     for (const room of [teamRoom, ...defaultRooms.map((room) => room.name)])
     {
