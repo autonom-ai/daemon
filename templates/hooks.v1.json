@@ -5,7 +5,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"{{COORD_ROOT}}/core/hooks/session-start.mjs\"",
+          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/session-start.mjs\"",
           "timeout": 10
         }
       ]
@@ -17,7 +17,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"{{COORD_ROOT}}/core/hooks/prompt-context.mjs\"",
+          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/prompt-context.mjs\"",
           "timeout": 10
         }
       ]
@@ -29,7 +29,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"{{COORD_ROOT}}/core/hooks/record-join.mjs\"",
+          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/record-join.mjs\"",
           "timeout": 5
         }
       ]
@@ -39,7 +39,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"{{COORD_ROOT}}/core/hooks/tool-log.mjs\"",
+          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/tool-log.mjs\"",
           "timeout": 5
         }
       ]
@@ -51,7 +51,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "node \"{{COORD_ROOT}}/core/hooks/keep-alive.mjs\"",
+          "command": "node \"{{COORD_ROOT}}/source/devin/hooks/keep-alive.mjs\"",
           "timeout": 10
         }
       ]

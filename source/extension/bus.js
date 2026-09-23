@@ -1,7 +1,7 @@
 // The extension host's view of one workspace's bus.
 //
 // CommonJS on purpose: the extension host loads `main` as CJS, and the bus
-// modules it needs (agent-coord-mcp's store, core/chat/actions.mjs) are ESM, so
+// modules it needs (agent-coord-mcp's store, devin/chat/actions.mjs) are ESM, so
 // they come in through dynamic import(). Everything the old HTTP server did —
 // offsets, mention fanout, presence — lives here or in actions.mjs; the
 // webview is presentation only.
@@ -71,7 +71,7 @@ async function openBus({ projectDir, coordRoot })
     const coordDir = path.join(projectDir, ".devin", "agent-coord", "state");
     process.env.AGENT_COORD_DIR = coordDir;
     const store = await loadStore(coordRoot);
-    const actions = await importEsm(path.join(coordRoot, "core", "chat", "actions.mjs"));
+    const actions = await importEsm(path.join(coordRoot, "source", "devin", "chat", "actions.mjs"));
 
     const ctx = {
         store,

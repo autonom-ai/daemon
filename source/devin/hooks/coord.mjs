@@ -16,9 +16,9 @@ import { fileURLToPath } from "node:url";
 // Hooks run by absolute path in the clone (or through a symlink into it), so
 // the script's own path is useless for locating the workspace: use the env
 // var, then the cwd. The clone root is the other direction — the real path of
-// this file, two levels up.
+// this file, three levels up.
 const HERE = path.dirname(realpathSync(fileURLToPath(import.meta.url)));
-export const CANONICAL_ROOT = path.resolve(HERE, "..", "..");
+export const CANONICAL_ROOT = path.resolve(HERE, "..", "..", "..");
 export const PROJECT_DIR = process.env.DEVIN_PROJECT_DIR ?? process.cwd();
 
 const DEFAULTS = {

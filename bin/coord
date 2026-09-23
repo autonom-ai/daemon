@@ -10,7 +10,7 @@
 // registry (agents/), and the hooks all live in this tree — nothing reads or
 // writes an XDG state dir.
 //
-// The team room is the Devin Desktop extension in extension/ — it reads the
+// The team room is the Devin Desktop extension in source/extension/ — it reads the
 // workspace's bus directly, so there is no chat server, no port, and no
 // browser. tools/coord-chat remains the terminal seat.
 
