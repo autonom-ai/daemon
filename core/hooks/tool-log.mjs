@@ -1,12 +1,11 @@
 // PostToolUse — a rolling one-hour window of tool calls, kept in the agent's
 // own profile.
 //
-// Every completed tool call appends one line to
+// Every completed tool call from a joined session appends one line to
 // agents/<name>/tool-calls.jsonl and drops entries older than an hour on the
 // same pass — the file is the window, so there is no timer, no cron, and no
-// separate pruning step. Calls from a session that has not joined yet land in
-// the bus's tool-calls-anon.jsonl instead: nothing escapes the log, but a
-// profile only ever carries its owner's calls.
+// separate pruning step. Calls from sessions without a recorded identity are
+// ignored; no central or anonymous log is written.
 //
 // Usage review (credits, debugging, "what was this tab doing") reads the file
 // directly — it is already the last hour, no date math needed.
@@ -16,7 +15,7 @@
 
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { AGENTS_HOME, COORD_DIR, claimFor, clip, hookInput } from "./coord.mjs";
+import { AGENTS_HOME, claimFor, clip, hookInput } from "./coord.mjs";
 
 const WINDOW_MS = 3600_000;
 
@@ -38,9 +37,9 @@ try
     if (!tool)
         process.exit(0);
     const agent = claimFor(input.session_id);
-    const file = agent
-        ? path.join(AGENTS_HOME, agent, "tool-calls.jsonl")
-        : path.join(COORD_DIR, "tool-calls-anon.jsonl");
+    if (!agent)
+        process.exit(0);
+    const file = path.join(AGENTS_HOME, agent, "tool-calls.jsonl");
     const now = Date.now();
     const entry = {
         ts: now,

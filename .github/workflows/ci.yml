@@ -74,3 +74,16 @@ jobs:
           printf '{"session_id":"ci-refused","tool_name":"mcp__agent-coord-testy__join","tool_input":{"agentId":"testy"},"tool_response":{"success":false}}' \
             | DEVIN_PROJECT_DIR="$WS" node core/hooks/record-join.mjs
           test ! -e "$WS/.devin/agent-coord/claims/ci-refused.json"
+
+      - name: Smoke-test per-agent tool log
+        run: |
+          WS=/tmp/ci-hooks
+          PROFILE=agents/testy/tool-calls.jsonl
+          printf '{"ts":1,"tool":"old"}\n' > "$PROFILE"
+          printf '{"session_id":"ci-unjoined","tool_name":"exec","tool_input":{"command":"git status"}}' \
+            | DEVIN_PROJECT_DIR="$WS" node core/hooks/tool-log.mjs
+          test ! -e "$WS/.devin/agent-coord/state/tool-calls-anon.jsonl"
+          printf '{"session_id":"ci-session","tool_name":"exec","tool_input":{"command":"git status"}}' \
+            | DEVIN_PROJECT_DIR="$WS" node core/hooks/tool-log.mjs
+          test "$(wc -l < "$PROFILE")" -eq 1
+          grep -q '"tool":"exec"' "$PROFILE"
