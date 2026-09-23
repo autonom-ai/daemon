@@ -5,6 +5,5 @@
   "teamRoom": "general",
   "roster": [],
   "teamSkill": "{{PROJECT}}-team",
-  "recessSkill": "{{PROJECT}}-recess",
   "coordRoot": "{{COORD_ROOT}}"
 }
