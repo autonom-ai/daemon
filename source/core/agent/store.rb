@@ -6,6 +6,9 @@ module Agent
   module Store
     ROOT = File.expand_path('../../..', __dir__)
     NAME_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\z/
+    INBOX_FILE = 'inbox.jsonl'
+    PINGS_FILE = 'pings.jsonl'
+    PINGS_CURSOR_FILE = 'pings.cursor'
 
     class Error < StandardError
     end
@@ -75,10 +78,73 @@ module Agent
       name
     end
 
+    def inbox_file(name, root: ROOT)
+      chat_file(name, INBOX_FILE, root: root)
+    end
+
+    def pings_file(name, root: ROOT)
+      chat_file(name, PINGS_FILE, root: root)
+    end
+
+    def read_jsonl(path)
+      return [] unless File.exist?(path)
+
+      File.read(path).lines.filter_map do |line|
+        JSON.parse(line)
+      rescue JSON::ParserError
+        nil
+      end
+    rescue SystemCallError => error
+      raise Error, "Could not read chat stream: #{error.class}"
+    end
+
+    def append_jsonl(path, entry)
+      FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
+      File.open(path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
+        file.write("#{JSON.generate(entry)}\n")
+      end
+    rescue SystemCallError => error
+      raise Error, "Could not append to chat stream: #{error.class}"
+    end
+
+    def pings_cursor(name, root: ROOT)
+      path = chat_file(name, PINGS_CURSOR_FILE, root: root)
+      File.exist?(path) ? File.read(path).to_i : 0
+    end
+
+    def advance_pings_cursor(name, count, root: ROOT)
+      path = chat_file(name, PINGS_CURSOR_FILE, root: root)
+      FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
+      File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
+        file.flock(File::LOCK_EX)
+        current = file.read.to_i
+        next if current >= count
+
+        file.rewind
+        file.truncate(0)
+        file.write(count.to_s)
+        file.flush
+      ensure
+        file.flock(File::LOCK_UN)
+      end
+    rescue SystemCallError => error
+      raise Error, "Could not update the ping cursor: #{error.class}"
+    end
+
     private
 
     def agents_dir(root)
       File.join(File.expand_path(root), 'agents')
+    end
+
+    def chat_file(name, file, root:)
+      dir = File.join(agents_dir(root), normalize_name(name))
+      raise Error, 'Profile directory must not be a symlink' if File.symlink?(dir)
+
+      path = File.join(dir, file)
+      raise Error, 'Chat stream must not be a symlink' if File.symlink?(path)
+
+      path
     end
 
     def find_profile(name, root: ROOT)

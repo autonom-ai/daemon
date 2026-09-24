@@ -3,7 +3,7 @@
   "displayName": "Agent Coord Chat",
   "description": "Unified chat interface for agent-coord sessions.",
   "publisher": "cet",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "engines": {
     "vscode": "^1.85.0"
@@ -62,7 +62,7 @@
         "agentCoord.coordRoot": {
           "type": "string",
           "default": "",
-          "description": "Path to the agent-coord clone (store module, hooks, identities). Empty means coordRoot from the workspace's coord.json."
+          "description": "Path to the agent-coord clone (profiles, DMs, pings). Empty means coordRoot from the workspace's coord.json."
         }
       }
     }

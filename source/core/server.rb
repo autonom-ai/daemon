@@ -1,4 +1,5 @@
 require_relative 'agent/profile'
+require_relative 'room'
 
 require 'json'
 
@@ -6,9 +7,13 @@ module Agent
   class Server
     INFO = { 'name' => 'agent-coord', 'version' => '0.1.0' }.freeze
     PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
+    SOURCES = %w[room inbox pings].freeze
+    DEFAULT_LIMIT = 50
+    MAX_LIMIT = 500
 
-    def initialize(root: Store::ROOT)
+    def initialize(root: Store::ROOT, project: Room.project_root)
       @root = root
+      @project = project
     end
 
     def run(input: STDIN, output: STDOUT)
@@ -86,6 +91,42 @@ module Agent
             },
             'required' => ['name']
           }
+        },
+        {
+          'name' => 'send_message',
+          'description' => 'Send a chat message. Pass `to` to DM one profile (the DM sits in their ' \
+                           'inbox and does not ping), or `room` for a room message (defaults to the ' \
+                           'team room). `ping` names profiles to notify — each gets an unread ping, ' \
+                           'delivered on their next tool call.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'text' => { 'type' => 'string', 'description' => 'The message text.' },
+              'to' => { 'type' => 'string', 'description' => 'Profile name to DM; omit to post in a room.' },
+              'room' => { 'type' => 'string', 'description' => 'Room to post in; ignored when `to` is set.' },
+              'ping' => {
+                'type' => 'array',
+                'items' => { 'type' => 'string' },
+                'description' => 'Profile names to ping.'
+              },
+              'session_id' => session
+            },
+            'required' => ['text']
+          }
+        },
+        {
+          'name' => 'read_messages',
+          'description' => 'Read chat messages. `source` picks the stream: `room` (recent room traffic, ' \
+                           'the default), `inbox` (recent DMs), or `pings` (unread pings; reading clears them).',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'source' => { 'type' => 'string', 'enum' => SOURCES, 'description' => 'Which stream to read.' },
+              'room' => { 'type' => 'string', 'description' => 'Room to read when source is room.' },
+              'limit' => { 'type' => 'integer', 'description' => "Maximum entries to return (default #{DEFAULT_LIMIT})." },
+              'session_id' => session
+            }
+          }
         }
       ]
     end
@@ -102,6 +143,10 @@ module Agent
         Profile.get_profile(session, root: @root)
       when 'set_profile'
         Profile.set_profile(args['name'], session: session, root: @root)
+      when 'send_message'
+        send_message(args, session)
+      when 'read_messages'
+        read_messages(args, session)
       else
         return tool_error('Unknown profile tool')
       end
@@ -111,8 +156,67 @@ module Agent
         'structuredContent' => ret,
         'isError' => false
       }
-    rescue Store::Error => error
+    rescue Store::Error, Room::Error => error
       tool_error(error.message)
+    end
+
+    def send_message(args, session)
+      from = registered_name(session)
+      text = args['text'].to_s
+      raise Store::Error, 'A message needs text' if text.strip.empty?
+
+      targets = ping_targets(args['ping'], from)
+      if args['to'].to_s.empty?
+        room = Room.normalize(args['room'], root: @project)
+        entry = Room.post(room, text, from: from, root: @project)
+        targets.each { |target| Profile.ping(target, text, from: from, room: room, root: @root) }
+        { 'room' => room, 'entry' => entry, 'pinged' => targets }
+      else
+        to = Store.normalize_name(args['to'])
+        entry = Profile.dm(to, text, from: from, root: @root)
+        targets.each { |target| Profile.ping(target, text, from: from, root: @root) }
+        { 'to' => to, 'entry' => entry, 'pinged' => targets }
+      end
+    end
+
+    def read_messages(args, session)
+      name = registered_name(session)
+      source = args['source'].to_s
+      raise Store::Error, "Unknown source: #{source}" unless source.empty? || SOURCES.include?(source)
+
+      case source
+      when 'inbox'
+        { 'source' => 'inbox', 'messages' => Profile.inbox(name, root: @root).last(limit(args)) }
+      when 'pings'
+        { 'source' => 'pings', 'messages' => Profile.read_pings(name, root: @root) }
+      else
+        room = Room.normalize(args['room'], root: @project)
+        { 'source' => 'room', 'room' => room, 'messages' => Room.messages(room, root: @project).last(limit(args)) }
+      end
+    end
+
+    def registered_name(session)
+      profile = Profile.get_profile(session, root: @root)
+      raise Store::Error, 'No profile is registered for this session; register one first' unless profile
+
+      profile['name']
+    end
+
+    def ping_targets(names, from)
+      return [] unless names.is_a?(Array)
+
+      known = Profile.get_profiles(root: @root).map { |profile| profile['name'] }
+      names.filter_map do |name|
+        target = known.find { |candidate| candidate.casecmp?(Store.normalize_name(name)) }
+        raise Store::Error, "Unknown profile to ping: #{name}" unless target
+
+        target
+      end.uniq - [from]
+    end
+
+    def limit(args)
+      value = args['limit']
+      value.is_a?(Integer) ? value.clamp(1, MAX_LIMIT) : DEFAULT_LIMIT
     end
 
     def tool_error(message)

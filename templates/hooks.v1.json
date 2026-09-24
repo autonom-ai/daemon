@@ -22,5 +22,17 @@
         }
       ]
     }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "ruby \"{{COORD_ROOT}}/source/core/hooks.rb\"",
+          "timeout": 5
+        }
+      ]
+    }
   ]
 }
