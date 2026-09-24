@@ -64,31 +64,6 @@ module Agent
       end
     end
 
-    def migrate_memories!(root: ROOT)
-      get_profiles(root: root).each do |profile|
-        dir = profile['directory']
-        memories = File.join(dir, 'memories')
-        FileUtils.mkdir_p(memories)
-        files = Dir.glob(File.join(dir, '*.md'), File::FNM_DOTMATCH).reject do |file|
-          File.basename(file).casecmp?('identity.md')
-        end
-        next if files.empty?
-
-        files.each do |file|
-          dest = File.join(memories, File.basename(file))
-          if File.exist?(dest)
-            unless FileUtils.compare_file(file, dest)
-              raise Error, "Memory destination already exists: #{File.basename(dest)}"
-            end
-
-            File.delete(file)
-          else
-            FileUtils.mv(file, dest)
-          end
-        end
-      end
-    end
-
     def valid_name?(name)
       name.is_a?(String) && NAME_PATTERN.match?(name)
     end

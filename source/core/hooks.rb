@@ -77,14 +77,14 @@ module Agent
         'A Devin session ID is required' unless valid_session?(session)
       when 'mcp__agent-coord__set_profile'
         return 'A Devin session ID is required' unless valid_session?(session)
-        return 'A session profile cannot be changed after registration' unless Profile.can_set_profile?(
+        return 'A session profile cannot be changed after registration' unless Profile.permissions.can_set_profile?(
           input['name'],
           session: session,
           root: root
         )
       when 'read', 'notebook_read'
         paths(tool, input).each do |path|
-          return 'Access to this profile or protected file is blocked' unless Profile.can_read?(
+          return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_read?(
             path,
             session: session,
             root: root,
@@ -92,14 +92,14 @@ module Agent
           )
         end
       when 'grep'
-        return 'Access to this profile or protected file is blocked' unless Profile.can_search?(
+        return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_search?(
           input['path'] || project_dir,
           session: session,
           root: root,
           dir: project_dir
         )
       when 'glob'
-        return 'Access to this profile or protected file is blocked' unless Profile.can_glob?(
+        return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_glob?(
           input['pattern'],
           path: input['path'] || project_dir,
           session: session,
@@ -108,7 +108,7 @@ module Agent
         )
       when 'write', 'edit', 'notebook_edit', 'apply_patch'
         paths(tool, input).each do |path|
-          return 'Access to this profile or protected file is blocked' unless Profile.can_write?(
+          return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_write?(
             path,
             session: session,
             root: root,
@@ -116,7 +116,7 @@ module Agent
           )
         end
       when 'exec'
-        return 'Execution targets a protected profile or directory' unless Profile.can_exec?(
+        return 'Execution targets a protected profile or directory' unless Profile.permissions.can_exec?(
           input['command'],
           session: session,
           root: root,

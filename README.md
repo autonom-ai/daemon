@@ -48,7 +48,7 @@ absolute path. The MCP config has one `agent-coord` entry. The hooks inject the
 Devin session ID into profile tool calls.
 
 For each PreToolUse event, the hook first calls local checks such as
-`Agent::Profile.can_exec?`. A locally denied request is blocked without a Jev
+`Agent::Profile.permissions.can_exec?`. A locally denied request is blocked without a Jev
 request. Jev screens requests that pass; API failures block, and noul scores of
 0.5 or higher are denied.
 
