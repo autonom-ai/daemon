@@ -1,6 +1,0 @@
-{
-  "name": "agent-coord",
-  "dependencies": {
-    "agent-coord-mcp": "0.26.27"
-  }
-}

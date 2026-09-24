@@ -95,4 +95,33 @@ class ProfileTest < Minitest::Test
       dir: other_profile
     )
   end
+
+  def test_dms_and_pings_are_profile_scoped
+    Agent::Profile.dm('marlow', 'first', from: 'wren', root: @root)
+    Agent::Profile.ping('marlow', 'look here', from: 'wren', room: 'general', root: @root)
+
+    inbox = Agent::Profile.inbox('marlow', root: @root)
+    pings = Agent::Profile.pings('marlow', root: @root)
+
+    assert_equal ['first'], inbox.map { |entry| entry['text'] }
+    assert_equal 'marlow', inbox.first['to']
+    assert_equal ['look here'], pings.map { |entry| entry['text'] }
+    assert_equal 'general', pings.first['room']
+    assert File.file?(File.join(@root, 'agents', 'marlow', 'inbox.jsonl'))
+    assert_empty Agent::Profile.inbox('wren', root: @root)
+  end
+
+  def test_read_pings_delivers_each_ping_once
+    Agent::Profile.ping('marlow', 'look here', from: 'wren', room: 'general', root: @root)
+    Agent::Profile.ping('marlow', 'and here', from: 'sable', root: @root)
+
+    assert_equal ['look here', 'and here'], Agent::Profile.read_pings('marlow', root: @root).map { |ping| ping['text'] }
+    assert_empty Agent::Profile.read_pings('marlow', root: @root)
+    assert_equal 2, Agent::Profile.pings('marlow', root: @root).length
+  end
+
+  def test_chat_names_are_validated
+    assert_raises(Agent::Store::Error) { Agent::Profile.dm('../wren', 'hi', from: 'marlow', root: @root) }
+    assert_raises(Agent::Store::Error) { Agent::Profile.ping('..', 'hi', from: 'marlow', root: @root) }
+  end
 end

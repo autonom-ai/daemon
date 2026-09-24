@@ -5,10 +5,12 @@ require 'json'
 
 module Agent
   module Hooks
-    PROFILE_TOOLS = %w[
+    SESSION_TOOLS = %w[
       mcp__agent-coord__get_profiles
       mcp__agent-coord__get_profile
       mcp__agent-coord__set_profile
+      mcp__agent-coord__send_message
+      mcp__agent-coord__read_messages
     ].freeze
 
     extend self
@@ -19,11 +21,18 @@ module Agent
         session_start(event, root: root)
       when 'PreToolUse'
         pre_tool_use(event, jev: jev, root: root)
+      when 'PostToolUse'
+        post_tool_use(event, root: root)
       end
     rescue Jev::Error
       block('OpenJEV policy check is unavailable; request blocked')
     rescue Store::Error
-      event['hook_event_name'] == 'PreToolUse' ? block('Profile access could not be verified') : context_error
+      case event['hook_event_name']
+      when 'PreToolUse'
+        block('Profile access could not be verified')
+      when 'SessionStart'
+        context_error
+      end
     end
 
     private
@@ -61,7 +70,7 @@ module Agent
         return block('OpenJEV policy check denied this request')
       end
 
-      return nil unless PROFILE_TOOLS.include?(tool) && valid_session?(session)
+      return nil unless SESSION_TOOLS.include?(tool) && valid_session?(session)
 
       {
         'hookSpecificOutput' => {
@@ -69,6 +78,36 @@ module Agent
           'updatedInput' => { 'session_id' => session }
         }
       }
+    end
+
+    # Every tool call is a chance to deliver what the agent has not seen: an
+    # unread ping rides back as context, and reading it advances the cursor so
+    # it is delivered exactly once. A failure here must never break the tool.
+    def post_tool_use(event, root:)
+      session = event['session_id']
+      return nil unless valid_session?(session)
+
+      profile = Profile.get_profile(session, root: root)
+      return nil unless profile
+
+      pings = Profile.read_pings(profile['name'], root: root)
+      return nil if pings.empty?
+
+      {
+        'hookSpecificOutput' => {
+          'hookEventName' => 'PostToolUse',
+          'additionalContext' => ping_context(pings)
+        }
+      }
+    end
+
+    def ping_context(pings)
+      lines = ["Unread pings (#{pings.length}) — reply in the room when you get a turn:"]
+      pings.each do |ping|
+        room = ping['room'] ? " in ##{ping['room']}" : ''
+        lines << "[#{Time.at(ping['ts'].to_i / 1000.0).strftime('%H:%M:%S')}] #{ping['from']}#{room}: #{ping['text']}"
+      end
+      lines.join("\n")
     end
 
     def denial(tool, input, session, root:)

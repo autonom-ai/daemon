@@ -1,5 +1,5 @@
 {
-  "comment": "Workspace coordination config — copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks and the Team Room extension read this; nothing else should need to. `roster` is the expected team — agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: the extension loads the bus store and the shared room actions from it.",
+  "comment": "Workspace coordination config — copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks, the Ruby MCP server, and the Team Room extension read this. `roster` is the expected team — agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: profiles, DMs, and pings live there; rooms live in this workspace.",
   "project": "{{PROJECT}}",
   "human": "{{HUMAN}}",
   "teamRoom": "general",

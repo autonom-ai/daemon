@@ -71,11 +71,11 @@ function paintColors(root)
 }
 
 // The seats that can be pinged, plus @everyone. The human is excluded: pinging
-// yourself is not a ping. #room pings every member of that room.
+// yourself is not a ping. #room is a plain reference — pings are named people.
 function mentionCandidates(sigil)
 {
     if (sigil === "#")
-        return state.rooms.map((room) => ({ name: room.name, role: `every member of #${room.name}` }));
+        return state.rooms.map((room) => ({ name: room.name, role: `reference #${room.name}` }));
     const ret = [{ name: "everyone", role: "every seat in the room" }];
     for (const agent of state.agents)
         if (agent.id !== state.human)
@@ -88,8 +88,8 @@ function knownMentions()
     return new Set(["everyone", ...state.agents.map((agent) => agent.id)]);
 }
 
-// A ping is a room message that names the human or everyone. Such a message is
-// marked in the log rather than left to look like ordinary chatter.
+// A ping is delivered to the human's own pings stream; this is display only —
+// a room message that names the human or everyone reads as one.
 function isPing(message)
 {
     if (message.stream !== "room")
@@ -101,17 +101,7 @@ function isPing(message)
         if (name === "everyone" || name === "all" || name === me)
             return true;
     }
-    for (const match of (message.text ?? "").matchAll(/#([A-Za-z0-9_-]+)/g))
-        if (state.rooms.some((room) => room.name === match[1] && room.members.includes(state.human)))
-            return true;
     return false;
-}
-
-// Pings are fanned out to inboxes as `[PING] ...` DMs; the room view already
-// shows the original, so the mirror is noise there and only noise.
-function isPingMirror(message)
-{
-    return message.stream === "dm" && typeof message.text === "string" && message.text.startsWith("[PING]");
 }
 
 function renderText(text)
@@ -156,8 +146,6 @@ function clock(ts)
 
 function visible(message)
 {
-    if (isPingMirror(message))
-        return false;
     if (state.dm)
     {
         // A 1:1 shows both directions of that conversation and nothing else.
@@ -223,9 +211,9 @@ function renderSidebar()
         const last = room.lastTs ? state.seen[room.name] ?? 0 : Infinity;
         const unread = (room.lastTs ?? 0) > last;
         const active = state.room === room.name ? "active" : "";
-        return `<li class="${active} ${unread ? "unread" : ""}" data-room="${esc(room.name)}" title="${esc(room.topic)}">
+        return `<li class="${active} ${unread ? "unread" : ""}" data-room="${esc(room.name)}" title="${room.count} message${room.count === 1 ? "" : "s"}">
             <span class="name">#${esc(room.name)}</span>
-            <span class="meta">${room.count} · ${room.members.length} seats</span>
+            <span class="meta">${room.count} msgs</span>
         </li>`;
     }).join("");
 
@@ -237,23 +225,17 @@ function renderSidebar()
         : `Message #${name} — @mention or #room`;
 }
 
-// A seat is as alive as its last bus touch — a message it sent or a read
-// cursor its coord server moved. Thirty silent minutes means gone: it sinks
-// out of the list entirely unless it left unread pings (those dim instead).
-// The list doubles as the DM target picker, so a hidden seat cannot be written
-// to at all — hiding is a reachability claim, not just decluttering.
-const DM_INACTIVE_MS = 30 * 60_000;
-
+// A seat is as alive as the newest bus line it authored — a message it sent.
+// Thirty silent minutes marks it offline in the list; it still stays listed,
+// because hiding a seat would hide a DM target.
 function renderDms()
 {
     const unreadFor = (agent) => state.messages.filter((message) =>
         message.stream === "dm" && message.from === agent.id && message.to === state.human
-        && !isPingMirror(message)
         && message.ts > (state.seen[`dm:${agent.id}`] ?? 0)).length;
 
     const shown = state.agents
-        .filter((agent) => agent.id !== state.human
-            && (Date.now() - (agent.lastActive ?? 0) < DM_INACTIVE_MS || unreadFor(agent) > 0))
+        .filter((agent) => agent.id !== state.human)
         .sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0));
 
     el.dms.innerHTML = shown.map((agent) =>
@@ -400,7 +382,7 @@ window.addEventListener("message", (event) =>
             el.hint.textContent = "";
             closeMentions();
             if (payload.pinged?.length)
-                toast(`pinged ${payload.pinged.map((name) => `@${name}`).join(", ")} — delivered to their inbox`, "good");
+                toast(`pinged ${payload.pinged.map((name) => `@${name}`).join(", ")} — delivered as a ping`, "good");
         }
         else
         {

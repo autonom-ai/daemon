@@ -38,25 +38,35 @@ jobs:
           node --check bin/coord
 
       # The extension host's bus client is plain Node (no vscode import), so the
-      # product contract — a wired workspace's room reads and writes its bus —
-      # is testable here without an editor.
+      # product contract — a wired workspace's rooms and profiles read and write
+      # the same files the Ruby core does — is testable here without an editor.
       - name: Smoke-test the room bus client
         run: |
-          npm ci --ignore-scripts
           WS=/tmp/ci-room
-          mkdir -p "$WS/.devin"
-          printf '{"project":"ci-room","human":"ci","teamRoom":"general","roster":[],"coordRoot":"%s"}\n' "$PWD" > "$WS/.devin/coord.json"
+          ROOT=/tmp/ci-root
+          rm -rf "$WS" "$ROOT"
+          mkdir -p "$WS/.devin" "$ROOT/agents/marlow"
+          printf -- '---\nname: marlow\ndisplayName: Marlow\n---\n\nTest persona.\n' > "$ROOT/agents/marlow/identity.md"
+          printf '{"project":"ci-room","human":"ci","teamRoom":"general","coordRoot":"%s"}\n' "$ROOT" > "$WS/.devin/coord.json"
           node -e '
+            const { readFileSync } = require("node:fs");
             const { openBus } = require("./source/extension/bus.js");
             (async () => {
-              const bus = await openBus({ projectDir: "/tmp/ci-room", coordRoot: process.cwd() });
+              const bus = await openBus({ projectDir: "/tmp/ci-room", coordRoot: "/tmp/ci-root" });
               const before = await bus.state();
               if (!before.rooms.some((room) => room.name === "general")) throw new Error("no #general");
-              await bus.say("general", "hello from CI", "chatter");
-              const after = await bus.state();
-              const last = after.messages[after.messages.length - 1];
-              if (last?.text !== "hello from CI") throw new Error("say did not land");
-              console.log("bus ok:", after.messages.length, "message(s)");
+              if (!before.agents.some((agent) => agent.id === "ci")) throw new Error("human profile missing");
+              const said = await bus.say("general", "hello from CI @marlow");
+              if (String(said.pinged) !== "marlow") throw new Error("mention did not ping marlow");
+              const ping = JSON.parse(readFileSync("/tmp/ci-root/agents/marlow/pings.jsonl", "utf8").trim());
+              if (ping.room !== "general" || ping.from !== "ci") throw new Error("ping did not land");
+              await bus.dm("marlow", "psst");
+              const dm = JSON.parse(readFileSync("/tmp/ci-root/agents/marlow/inbox.jsonl", "utf8").trim());
+              if (dm.to !== "marlow") throw new Error("dm did not land");
+              const texts = (await bus.state()).messages.map((message) => message.text);
+              if (!texts.includes("hello from CI @marlow") || !texts.includes("psst"))
+                throw new Error("messages did not land");
+              console.log("bus ok:", texts.length, "message(s)");
             })().catch((err) => { console.error(err); process.exit(1); });
           '
 

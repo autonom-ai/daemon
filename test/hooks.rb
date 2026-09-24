@@ -149,6 +149,50 @@ class HooksTest < Minitest::Test
     assert_equal 0, @jev.calls
   end
 
+  def test_unread_pings_ride_back_after_a_tool_call
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Agent::Profile.ping('marlow', '@marlow check the pricer', from: 'wren', room: 'general', root: @root)
+
+    result = Agent::Hooks.call(post_event, jev: @jev, root: @root)
+    context = result.dig('hookSpecificOutput', 'additionalContext')
+
+    assert_includes context, 'Unread pings (1)'
+    assert_includes context, 'wren in #general'
+    assert_includes context, '@marlow check the pricer'
+    assert_equal 0, @jev.calls
+    assert_nil Agent::Hooks.call(post_event, jev: @jev, root: @root)
+  end
+
+  def test_post_tool_use_stays_quiet_without_pings
+    assert_nil Agent::Hooks.call(post_event, jev: @jev, root: @root)
+
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+
+    assert_nil Agent::Hooks.call(post_event, jev: @jev, root: @root)
+  end
+
+  def test_post_tool_use_never_blocks_a_tool
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    pings = File.join(@root, 'agents', 'marlow', 'pings.jsonl')
+    File.symlink(File.join(@root, 'agents', 'marlow', 'identity.md'), pings)
+
+    assert_nil Agent::Hooks.call(post_event, jev: @jev, root: @root)
+  end
+
+  def test_pings_wait_for_a_tool_to_finish
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Agent::Profile.ping('marlow', 'look', from: 'wren', root: @root)
+
+    assert_nil Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+    assert_equal 1, Agent::Profile.read_pings('marlow', root: @root).length
+  end
+
+  def test_session_id_is_injected_for_chat_tools
+    result = Agent::Hooks.call(event('mcp__agent-coord__send_message', 'text' => 'hi'), jev: @jev, root: @root)
+
+    assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
+  end
+
   private
 
   def event(tool_name, tool_input)
@@ -157,6 +201,16 @@ class HooksTest < Minitest::Test
       'session_id' => 'session-1',
       'tool_name' => tool_name,
       'tool_input' => tool_input
+    }
+  end
+
+  def post_event
+    {
+      'hook_event_name' => 'PostToolUse',
+      'session_id' => 'session-1',
+      'tool_name' => 'exec',
+      'tool_input' => { 'command' => 'git status' },
+      'tool_response' => { 'success' => true, 'output' => '' }
     }
   end
 end

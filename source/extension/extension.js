@@ -15,7 +15,6 @@ const { openBus, readJson } = require("./bus.js");
 const VIEW_ID = "agentCoord.chat";
 const MEDIA_DIR = path.join(__dirname, "media");
 const POLL_MS = 750;
-const HEARTBEAT_MS = 30_000;
 const RECONCILE_MS = 10_000;
 const RETRY_MS = 3_000;
 const RETRY_MAX_MS = 30_000;
@@ -30,7 +29,6 @@ let pollTimer = null;
 let retryTimer = null;
 let retryDelay = RETRY_MS;
 let unreadPings = 0;
-let lastHeartbeat = 0;
 let lastReconcile = 0;
 
 function findWorkspace()
@@ -174,26 +172,14 @@ async function refresh()
     await pushState();
 }
 
-// The room's own ping semantics, for the badge and the notification: a room
-// line that names the human or @everyone.
-function mentionsHuman(entry)
+// A ping names the human: the human's profile collects pings in the same
+// pings.jsonl every agent has, and the badge counts the ones they have not
+// looked at yet. Notifications carry the text itself.
+function notifyPing(ping)
 {
-    if (entry.stream !== "room" || !entry.from || entry.from === bus.ctx.human)
-        return false;
-    const me = bus.ctx.human.toLowerCase();
-    for (const match of (entry.text ?? "").matchAll(/@([A-Za-z0-9_-]+)/g))
-    {
-        const name = match[1].toLowerCase();
-        if (name === me || name === "everyone" || name === "all")
-            return true;
-    }
-    return false;
-}
-
-function notifyPing(entry)
-{
-    const preview = (entry.text ?? "").length > 140 ? `${entry.text.slice(0, 140)}…` : entry.text;
-    vscode.window.showInformationMessage(`${entry.from} in #${entry.room}: ${preview}`, "Open Team Room")
+    const preview = (ping.text ?? "").length > 140 ? `${ping.text.slice(0, 140)}…` : ping.text;
+    const where = ping.room ? ` in #${ping.room}` : "";
+    vscode.window.showInformationMessage(`${ping.from}${where}: ${preview}`, "Open Team Room")
         .then((choice) =>
         {
             if (choice === "Open Team Room")
@@ -207,26 +193,25 @@ async function poll()
         return;
     try
     {
-        const fresh = bus.pump();
+        const { entries, pings } = bus.pump();
         // One post for the whole batch: a burst used to mean one full re-render
         // of the log per entry, which is where the room got sluggish.
-        if (fresh.length)
-            postAll({ type: "messages", entries: fresh });
-        for (const entry of fresh)
-            if (mentionsHuman(entry))
+        if (entries.length)
+            postAll({ type: "messages", entries });
+        for (const ping of pings)
+        {
+            if (visible())
             {
-                if (visible())
-                {
-                    unreadPings = 0;
-                    updateBadge();
-                }
-                else
-                {
-                    unreadPings++;
-                    updateBadge();
-                    notifyPing(entry);
-                }
+                unreadPings = 0;
+                updateBadge();
             }
+            else
+            {
+                unreadPings++;
+                updateBadge();
+            }
+            notifyPing(ping);
+        }
         // The incremental stream can miss a line — a compaction reset, a write
         // that lands between reads, a webview that reloaded mid-burst. A slow
         // full-state push while the room is on screen makes the view converge
@@ -235,11 +220,6 @@ async function poll()
         {
             lastReconcile = Date.now();
             await pushState();
-        }
-        if (Date.now() - lastHeartbeat > HEARTBEAT_MS)
-        {
-            lastHeartbeat = Date.now();
-            await bus.heartbeat();
         }
     }
     catch (err)
@@ -272,14 +252,14 @@ async function handleMessage(message)
         }
         if (message.type === "say")
         {
-            const { pinged } = await bus.say(message.room, String(message.text ?? "").trim(), message.kind);
+            const { pinged } = await bus.say(message.room, String(message.text ?? "").trim());
             postAll({ type: "sent", ok: true, pinged });
             return;
         }
         if (message.type === "dm")
         {
-            await bus.sendDm(message.to, String(message.text ?? "").trim());
-            postAll({ type: "sent", ok: true, pinged: [message.to] });
+            const { pinged } = await bus.dm(message.to, String(message.text ?? "").trim());
+            postAll({ type: "sent", ok: true, pinged });
             return;
         }
         if (message.type === "openLink")
