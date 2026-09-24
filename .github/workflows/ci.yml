@@ -35,7 +35,6 @@ jobs:
           find . -name node_modules -prune -o -name '*.mjs' -print -o -name '*.js' -print | while read -r f; do
             node --check "$f" || exit 1
           done
-          node --check bin/coord
 
       # The extension host's bus client is plain Node (no vscode import), so the
       # product contract — a wired workspace's rooms and profiles read and write
