@@ -41,7 +41,7 @@ class HooksTest < Minitest::Test
   def test_direct_cross_profile_read_is_denied_before_jev
     path = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
 
-    result = Agent::Hooks.call(event('read', 'file_path' => path), jev: @jev, root: @root)
+    result = Hooks.call(event('read', 'file_path' => path), jev: @jev, root: @root)
 
     assert_equal 'block', result['decision']
     assert_equal 0, @jev.calls
@@ -50,7 +50,7 @@ class HooksTest < Minitest::Test
   def test_mapping_file_write_is_denied_before_jev
     path = File.join(@root, 'agents', 'sessions.json')
 
-    result = Agent::Hooks.call(event('write', 'file_path' => path), jev: @jev, root: @root)
+    result = Hooks.call(event('write', 'file_path' => path), jev: @jev, root: @root)
 
     assert_equal 'block', result['decision']
     assert_equal 0, @jev.calls
@@ -60,7 +60,7 @@ class HooksTest < Minitest::Test
     path = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
     patch = ['*** Begin Patch', "*** Update File: #{path}", '+note', '*** End Patch'].join("\n")
 
-    result = Agent::Hooks.call(event('apply_patch', 'patch' => patch), jev: @jev, root: @root)
+    result = Hooks.call(event('apply_patch', 'patch' => patch), jev: @jev, root: @root)
 
     assert_equal 'block', result['decision']
     assert_equal 0, @jev.calls
@@ -69,7 +69,7 @@ class HooksTest < Minitest::Test
   def test_shell_redirection_to_another_profile_is_denied_before_jev
     path = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
 
-    result = Agent::Hooks.call(
+    result = Hooks.call(
       event('exec', 'command' => "printf note > #{path}"),
       jev: @jev,
       root: @root
@@ -81,7 +81,7 @@ class HooksTest < Minitest::Test
 
   def test_recursive_search_of_profile_root_is_denied_before_jev
     FileUtils.mkdir_p(File.join(@root, 'agents', 'wren', 'memories'))
-    result = Agent::Hooks.call(
+    result = Hooks.call(
       event('grep', 'pattern' => 'memory', 'path' => @root),
       jev: @jev,
       root: @root
@@ -92,7 +92,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_recursive_search_of_filesystem_root_is_denied_before_jev
-    result = Agent::Hooks.call(
+    result = Hooks.call(
       event('glob', 'pattern' => '**/*', 'path' => File::SEPARATOR),
       jev: @jev,
       root: @root
@@ -103,7 +103,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_allowed_request_reaches_jev
-    result = Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+    result = Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
 
     assert_nil result
     assert_equal 1, @jev.calls
@@ -112,7 +112,7 @@ class HooksTest < Minitest::Test
   def test_jev_denial_blocks_an_allowed_request
     @jev = FakeJev.new(harmful: true)
 
-    result = Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+    result = Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
 
     assert_equal 'block', result['decision']
     assert_equal 1, @jev.calls
@@ -120,7 +120,7 @@ class HooksTest < Minitest::Test
 
   def test_session_id_is_injected_for_profile_tools
     event = event('mcp__agent-coord__set_profile', 'name' => 'marlow', 'session_id' => 'forged')
-    result = Agent::Hooks.call(event, jev: @jev, root: @root)
+    result = Hooks.call(event, jev: @jev, root: @root)
 
     assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
     assert_equal 1, @jev.calls
@@ -129,14 +129,14 @@ class HooksTest < Minitest::Test
   def test_reassignment_is_denied_before_jev
     Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
 
-    result = Agent::Hooks.call(event('mcp__agent-coord__set_profile', 'name' => 'wren'), jev: @jev, root: @root)
+    result = Hooks.call(event('mcp__agent-coord__set_profile', 'name' => 'wren'), jev: @jev, root: @root)
 
     assert_equal 'block', result['decision']
     assert_equal 0, @jev.calls
   end
 
   def test_profile_registration_requires_hook_session_id
-    result = Agent::Hooks.call(
+    result = Hooks.call(
       {
         'hook_event_name' => 'PreToolUse',
         'tool_name' => 'mcp__agent-coord__set_profile',
@@ -151,7 +151,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_session_start_reports_id_without_calling_jev
-    result = Agent::Hooks.call(
+    result = Hooks.call(
       { 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' },
       jev: @jev, root: @root
     )
@@ -164,22 +164,22 @@ class HooksTest < Minitest::Test
     Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     Agent::Profile.ping('marlow', '@marlow check the pricer', from: 'wren', room: 'general', root: @root)
 
-    result = Agent::Hooks.call(post_event, jev: @jev, root: @root)
+    result = Hooks.call(post_event, jev: @jev, root: @root)
     context = result.dig('hookSpecificOutput', 'additionalContext')
 
     assert_includes context, 'Unread pings (1)'
     assert_includes context, 'wren in #general'
     assert_includes context, '@marlow check the pricer'
     assert_equal 0, @jev.calls
-    assert_nil Agent::Hooks.call(post_event, jev: @jev, root: @root)
+    assert_nil Hooks.call(post_event, jev: @jev, root: @root)
   end
 
   def test_post_tool_use_stays_quiet_without_pings
-    assert_nil Agent::Hooks.call(post_event, jev: @jev, root: @root)
+    assert_nil Hooks.call(post_event, jev: @jev, root: @root)
 
     Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
 
-    assert_nil Agent::Hooks.call(post_event, jev: @jev, root: @root)
+    assert_nil Hooks.call(post_event, jev: @jev, root: @root)
   end
 
   def test_post_tool_use_never_blocks_a_tool
@@ -187,25 +187,25 @@ class HooksTest < Minitest::Test
     pings = File.join(@root, 'agents', 'marlow', 'pings.jsonl')
     File.symlink(File.join(@root, 'agents', 'marlow', 'identity.md'), pings)
 
-    assert_nil Agent::Hooks.call(post_event, jev: @jev, root: @root)
+    assert_nil Hooks.call(post_event, jev: @jev, root: @root)
   end
 
   def test_pings_wait_for_a_tool_to_finish
     Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     Agent::Profile.ping('marlow', 'look', from: 'wren', root: @root)
 
-    assert_nil Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+    assert_nil Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
     assert_equal 1, Agent::Profile.read_pings('marlow', root: @root).length
   end
 
   def test_session_id_is_injected_for_chat_tools
-    result = Agent::Hooks.call(event('mcp__agent-coord__send_message', 'text' => 'hi'), jev: @jev, root: @root)
+    result = Hooks.call(event('mcp__agent-coord__send_message', 'text' => 'hi'), jev: @jev, root: @root)
 
     assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
   end
 
   def test_session_id_is_injected_for_the_heartbeat_tool
-    result = Agent::Hooks.call(event('mcp__agent-coord__get_heartbeat', 'name' => 'wren'), jev: @jev, root: @root)
+    result = Hooks.call(event('mcp__agent-coord__get_heartbeat', 'name' => 'wren'), jev: @jev, root: @root)
 
     assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
   end
@@ -217,7 +217,7 @@ class HooksTest < Minitest::Test
     Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     Room.post('general', 'hello team', from: 'wren', root: @project)
 
-    result = Agent::Hooks.call({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    result = Hooks.call({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' }, jev: @jev, root: @root)
     context = result.dig('hookSpecificOutput', 'additionalContext')
 
     assert_includes context, 'You are Marlow (marlow)'
@@ -231,7 +231,7 @@ class HooksTest < Minitest::Test
   def test_session_start_asks_an_unclaimed_tab_to_claim_a_name
     write_coord
 
-    result = Agent::Hooks.call({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    result = Hooks.call({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' }, jev: @jev, root: @root)
 
     assert_includes result.dig('hookSpecificOutput', 'additionalContext'), 'Claim your name with set_profile'
   end
@@ -241,7 +241,7 @@ class HooksTest < Minitest::Test
     Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     Agent::Profile.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
 
-    result = Agent::Hooks.call({ 'hook_event_name' => 'UserPromptSubmit', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    result = Hooks.call({ 'hook_event_name' => 'UserPromptSubmit', 'session_id' => 'session-1' }, jev: @jev, root: @root)
 
     assert_includes result.dig('hookSpecificOutput', 'additionalContext'), 'Unread pings (1)'
     assert_equal 1, Agent::Profile.unread_pings('marlow', root: @root).length
@@ -253,7 +253,7 @@ class HooksTest < Minitest::Test
     Agent::Profile.ping('marlow', '@marlow the pricer moved', from: 'wren', room: 'general', root: @root)
     Room.post('general', 'anyone around?', from: 'wren', root: @project)
 
-    result = Agent::Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    result = Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
     reason = result['reason']
 
     assert_equal 'block', result['decision']
@@ -271,20 +271,20 @@ class HooksTest < Minitest::Test
     FileUtils.mkdir_p(File.join(@project, '.devin', 'collaboration'))
     File.write(File.join(@project, '.devin', 'collaboration', 'stand-down'), '')
 
-    assert_nil Agent::Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    assert_nil Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
   end
 
   def test_jev_can_be_turned_off_per_workspace
     write_coord(jev: false)
 
-    assert_nil Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+    assert_nil Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
     assert_equal 0, @jev.calls
   end
 
   def test_the_workspace_names_the_backend_it_screens_with
     write_coord(jev: 'typesafe')
 
-    assert_nil Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+    assert_nil Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
     assert_equal 'typesafe', @jev.backend_name
     assert_equal 1, @jev.calls
   end
@@ -292,14 +292,14 @@ class HooksTest < Minitest::Test
   def test_an_unknown_backend_blocks_the_request
     write_coord(jev: 'nope')
 
-    assert_equal 'block', Agent::Hooks.call(event('exec', 'command' => 'git status'), root: @root)['decision']
+    assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'), root: @root)['decision']
   end
 
   def test_the_screen_sends_a_scrubbed_state
     write_coord
     input = { 'file_path' => File.join(@project, 'notes.md'), 'content' => 'private memory content' }
 
-    assert_nil Agent::Hooks.call(event('write', input), jev: @jev, root: @root)
+    assert_nil Hooks.call(event('write', input), jev: @jev, root: @root)
     assert_equal 1, @jev.calls
     assert_equal File.join(@project, 'notes.md'), @jev.state['tool_input']['file_path']
     refute_includes JSON.generate(@jev.state), 'private memory content'
@@ -311,7 +311,7 @@ class HooksTest < Minitest::Test
     frontend.define_singleton_method(:backend=) { |_name| nil }
     frontend.define_singleton_method(:decide) { |_state, _questions| { 'harmful' => { 'type' => 'noul' } } }
 
-    result = Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: frontend, root: @root)
+    result = Hooks.call(event('exec', 'command' => 'git status'), jev: frontend, root: @root)
 
     assert_equal 'block', result['decision']
   end
@@ -319,7 +319,7 @@ class HooksTest < Minitest::Test
   def test_policy_screening_is_skipped_when_the_workspace_turns_it_off
     write_coord(jev: false)
 
-    assert_nil Agent::Hooks.call(event('exec', 'command' => 'git status'), root: @root)
+    assert_nil Hooks.call(event('exec', 'command' => 'git status'), root: @root)
   end
 
   private
