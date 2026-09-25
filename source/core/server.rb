@@ -10,6 +10,9 @@ module Agent
     SOURCES = %w[room inbox pings].freeze
     DEFAULT_LIMIT = 50
     MAX_LIMIT = 500
+    DEFAULT_WAIT = 30
+    MAX_WAIT = 60
+    WAIT_INTERVAL = 0.5
 
     def initialize(root: Store::ROOT, project: Room.project_root)
       @root = root
@@ -116,8 +119,9 @@ module Agent
         },
         {
           'name' => 'read_messages',
-          'description' => 'Read chat messages. `source` picks the stream: `room` (recent room traffic, ' \
-                           'the default), `inbox` (recent DMs), or `pings` (unread pings; reading clears them).',
+          'description' => 'Read chat messages. `source` picks the stream: `room` (a room, default the team ' \
+                           'room), `inbox` (DMs), or `pings` (unread pings; reading clears them). Reading a ' \
+                           'stream clears what it returns.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
@@ -127,6 +131,26 @@ module Agent
               'session_id' => session
             }
           }
+        },
+        {
+          'name' => 'wait_for_message',
+          'description' => 'Block until something new arrives, then return it: `room` (a room, default the ' \
+                           'team room), `inbox` (DMs), or `pings`. Returns as soon as there is anything ' \
+                           'unread, and empty when the timeout runs out. Reading clears what it returns.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'source' => { 'type' => 'string', 'enum' => SOURCES, 'description' => 'Which stream to wait on.' },
+              'room' => { 'type' => 'string', 'description' => 'Room to wait on when source is room.' },
+              'timeout' => { 'type' => 'integer', 'description' => "Seconds to wait (default #{DEFAULT_WAIT}, max #{MAX_WAIT})." },
+              'session_id' => session
+            }
+          }
+        },
+        {
+          'name' => 'list_rooms',
+          'description' => 'List the workspace rooms: message count, unread count for this profile, and last activity.',
+          'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session } }
         }
       ]
     end
@@ -147,6 +171,10 @@ module Agent
         send_message(args, session)
       when 'read_messages'
         read_messages(args, session)
+      when 'wait_for_message'
+        wait_for_message(args, session)
+      when 'list_rooms'
+        list_rooms(session)
       else
         return tool_error('Unknown profile tool')
       end
@@ -181,18 +209,64 @@ module Agent
 
     def read_messages(args, session)
       name = registered_name(session)
-      source = args['source'].to_s
-      raise Store::Error, "Unknown source: #{source}" unless source.empty? || SOURCES.include?(source)
+      source, room = read_target(args)
+      read_stream(name, source, room, limit(args))
+    end
 
+    # The no-idle loop's bottom rung: block until something lands, so an agent
+    # that has nothing to say is reachable instead of dark.
+    def wait_for_message(args, session)
+      name = registered_name(session)
+      source, room = read_target(args)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait_timeout(args)
+      loop do
+        ret = read_stream(name, source, room, limit(args))
+        return ret unless ret['messages'].empty?
+        return ret if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        sleep WAIT_INTERVAL
+      end
+    end
+
+    def list_rooms(session)
+      name = registered_name(session)
+      (Room.names(root: @project) | [Room.default_name(root: @project)]).sort.map do |room|
+        entries = Room.messages(room, root: @project)
+        {
+          'name' => room,
+          'count' => entries.length,
+          'unread' => Profile.unread_room(room, name: name, rooms_root: @project, root: @root).length,
+          'lastTs' => entries.last&.fetch('ts', nil)
+        }
+      end
+    end
+
+    def read_target(args)
+      source = args['source'].to_s
+      source = 'room' if source.empty?
+      raise Store::Error, "Unknown source: #{source}" unless SOURCES.include?(source)
+
+      [source, Room.normalize(args['room'], root: @project)]
+    end
+
+    def read_stream(name, source, room, limit)
       case source
       when 'inbox'
-        { 'source' => 'inbox', 'messages' => Profile.inbox(name, root: @root).last(limit(args)) }
+        { 'source' => 'inbox', 'messages' => Profile.read_inbox(name, limit: limit, root: @root) }
       when 'pings'
         { 'source' => 'pings', 'messages' => Profile.read_pings(name, root: @root) }
       else
-        room = Room.normalize(args['room'], root: @project)
-        { 'source' => 'room', 'room' => room, 'messages' => Room.messages(room, root: @project).last(limit(args)) }
+        {
+          'source' => 'room',
+          'room' => room,
+          'messages' => Profile.read_room(room, name: name, limit: limit, rooms_root: @project, root: @root)
+        }
       end
+    end
+
+    def wait_timeout(args)
+      value = args['timeout']
+      value.is_a?(Integer) ? value.clamp(1, MAX_WAIT) : DEFAULT_WAIT
     end
 
     def registered_name(session)

@@ -101,31 +101,38 @@ function pingsFile(coordRoot, name)
     return path.join(profileDir(coordRoot, name), "pings.jsonl");
 }
 
-function pingsCursorFile(coordRoot, name)
+function cursorsFile(coordRoot, name)
 {
-    return path.join(profileDir(coordRoot, name), "pings.cursor");
+    return path.join(profileDir(coordRoot, name), "cursors.json");
 }
 
-// The same cursor the Ruby core keeps: pings up to this count have been
-// delivered. The human's pings are delivered here (notification + badge);
-// an agent's are delivered on its next tool call.
-function pingCursor(coordRoot, name)
+function readCursors(coordRoot, name)
 {
     try
     {
-        return parseInt(readFileSync(pingsCursorFile(coordRoot, name), "utf8"), 10) || 0;
+        const parsed = JSON.parse(readFileSync(cursorsFile(coordRoot, name), "utf8"));
+        return parsed && typeof parsed === "object" ? parsed : {};
     }
     catch
     {
-        return 0;
+        return {};
     }
+}
+
+// The same cursor file the Ruby core keeps: pings up to this count have been
+// delivered. The human's pings are delivered here (notification + badge); an
+// agent's are delivered on its next tool call.
+function pingCursor(coordRoot, name)
+{
+    const value = Math.floor(Number(readCursors(coordRoot, name).pings));
+    return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function advancePingCursor(coordRoot, name, count)
 {
-    const file = pingsCursorFile(coordRoot, name);
+    const file = cursorsFile(coordRoot, name);
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    writeFileSync(file, String(count), "utf8");
+    writeFileSync(file, `${JSON.stringify({ ...readCursors(coordRoot, name), pings: count })}\n`, "utf8");
 }
 
 // displayName + color from agents/<id>/identity.md — the room renders people by

@@ -17,6 +17,15 @@ module Room
     Agent::Store.read_jsonl(file(name, root: root))
   end
 
+  def names(root: project_root)
+    dir = rooms_dir(root)
+    return [] unless File.directory?(dir)
+
+    Dir.children(dir).filter_map do |entry|
+      entry.delete_suffix('.jsonl') if entry.end_with?('.jsonl')
+    end.sort
+  end
+
   def post(name, text, from:, root: project_root)
     entry = {
       'id' => SecureRandom.uuid,
@@ -52,8 +61,12 @@ module Room
 
   private
 
+  def rooms_dir(root)
+    File.join(root, '.devin', 'agent-coord', 'rooms')
+  end
+
   def file(name, root:)
-    dir = File.join(root, '.devin', 'agent-coord', 'rooms')
+    dir = rooms_dir(root)
     raise Error, 'Room directory must not be a symlink' if File.symlink?(dir)
 
     path = File.join(dir, "#{normalize(name, root: root)}.jsonl")

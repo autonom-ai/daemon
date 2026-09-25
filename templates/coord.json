@@ -1,9 +1,10 @@
 {
-  "comment": "Workspace coordination config — copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks, the Ruby MCP server, and the Team Room extension read this. `roster` is the expected team — agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: profiles, DMs, and pings live there; rooms live in this workspace.",
+  "comment": "Workspace coordination config — copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks, the Ruby MCP server, and the Team Room extension read this. `roster` is the expected team — agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: profiles, DMs, and pings live there; rooms live in this workspace. `jev: false` turns off the Jev policy check for this workspace.",
   "project": "{{PROJECT}}",
   "human": "{{HUMAN}}",
   "teamRoom": "general",
   "roster": [],
   "teamSkill": "{{PROJECT}}-team",
-  "coordRoot": "{{COORD_ROOT}}"
+  "coordRoot": "{{COORD_ROOT}}",
+  "jev": true
 }

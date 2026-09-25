@@ -1,5 +1,7 @@
+require_relative 'agent/identity'
 require_relative 'agent/jev'
 require_relative 'agent/profile'
+require_relative 'room'
 
 require 'json'
 
@@ -11,7 +13,12 @@ module Agent
       mcp__agent-coord__set_profile
       mcp__agent-coord__send_message
       mcp__agent-coord__read_messages
+      mcp__agent-coord__wait_for_message
+      mcp__agent-coord__list_rooms
     ].freeze
+
+    RECENT_ROOM = 6
+    MAX_ENTRY = 400
 
     extend self
 
@@ -19,14 +26,18 @@ module Agent
       case event['hook_event_name']
       when 'SessionStart'
         session_start(event, root: root)
+      when 'UserPromptSubmit'
+        prompt_submit(event, root: root)
       when 'PreToolUse'
         pre_tool_use(event, jev: jev, root: root)
       when 'PostToolUse'
         post_tool_use(event, root: root)
+      when 'Stop'
+        stop(event, root: root)
       end
     rescue Jev::Error
       block('OpenJEV policy check is unavailable; request blocked')
-    rescue Store::Error
+    rescue Store::Error, Room::Error
       case event['hook_event_name']
       when 'PreToolUse'
         block('Profile access could not be verified')
@@ -37,25 +48,78 @@ module Agent
 
     private
 
+    # SessionStart — hand the tab its own context: who it is, what it
+    # remembers, who else is here, and what the room has been saying.
     def session_start(event, root:)
       session = event['session_id']
       profile = Profile.get_profile(session, root: root)
+      config = workspace_config
       lines = []
       lines << "Your session ID is #{session}. Tell the user what it is." if session
+      lines.concat(identity_lines(profile, config, root: root))
+      lines.concat(team_lines(profile, config, root: root))
+      lines.concat(room_lines(config, root: root))
+      lines.concat(prior_lines(profile, root: root))
+      context('SessionStart', lines.join("\n"))
+    end
 
-      if profile
-        lines << "Your profile is #{profile['name']} at #{profile['directory']}."
-      else
-        lines << 'No profile is registered yet. Use get_profiles and set_profile with your assigned name.'
-        lines << 'If you were not given a profile name, ask the user before registering.'
+    def identity_lines(profile, config, root:)
+      unless profile
+        return [
+          'No profile is registered for this session yet. Claim your name with set_profile — get_profiles',
+          'lists the names already taken. If you were not given a profile name, ask the user before registering.'
+        ]
       end
 
-      {
-        'hookSpecificOutput' => {
-          'hookEventName' => 'SessionStart',
-          'additionalContext' => lines.join("\n")
-        }
-      }
+      name = profile['name']
+      identity = Identity.get(name, root: root)
+      lines = ["You are #{identity ? identity['display_name'] : name} (#{name}) — profile at #{profile['directory']}."]
+      lines << identity['personality'] if identity && !identity['personality'].empty?
+      memory = Identity.memory(name, config['project'], root: root)
+      lines.concat(['', 'Your memory:', memory]) unless memory.empty?
+      lines
+    end
+
+    def team_lines(profile, config, root:)
+      name = profile && profile['name']
+      teammates = config['roster'].empty? ? Profile.get_profiles(root: root).map { |entry| entry['name'] } : config['roster']
+      teammates = teammates.reject { |teammate| teammate.casecmp?(name.to_s) }
+      lines = [
+        '',
+        'This workspace is worked by a team. The room is where the team actually is: talk there, coordinate',
+        'there, post what you find.'
+      ]
+      lines << "Team room: ##{config['team_room']}."
+      lines << (teammates.empty? ? 'Nobody else is registered yet.' : "Teammates: #{teammates.join(', ')}.")
+      lines << "Start with the #{config['team_skill']} skill." if config['team_skill']
+      lines
+    end
+
+    def room_lines(config, root:)
+      entries = Room.messages(config['team_room'], root: config['project_dir'])
+      return ['', "##{config['team_room']} is empty so far — introducing yourself is a fine first move."] if entries.empty?
+
+      ['', "Recent ##{config['team_room']} traffic:", *format_entries(entries.last(RECENT_ROOM))]
+    end
+
+    def prior_lines(profile, root:)
+      priors = Identity.priors(root: root, skip: profile && profile['name'])
+      priors.empty? ? [] : ['', "Your teammates' stated leanings:", priors.join("\n\n")]
+    end
+
+    # UserPromptSubmit — a nudge, not a delivery: cursors stay where the agent
+    # left them, so the same traffic is still waiting in read_messages.
+    def prompt_submit(event, root:)
+      session = event['session_id']
+      return nil unless valid_session?(session)
+
+      profile = Profile.get_profile(session, root: root)
+      return nil unless profile
+
+      config = workspace_config
+      lines = ["You are #{profile['name']}. Team room: ##{config['team_room']}."]
+      lines.concat(waiting_lines(waiting_for(profile['name'], config, root: root)))
+      context('UserPromptSubmit', lines.join("\n"))
     end
 
     def pre_tool_use(event, jev:, root:)
@@ -66,7 +130,7 @@ module Agent
       return block(reason) if reason
 
       profile = Profile.get_profile(session, root: root)
-      if jev.harmful?(tool: tool, input: input, name: profile&.fetch('name', nil))
+      if workspace_config['jev'] && jev.harmful?(tool: tool, input: input, name: profile&.fetch('name', nil))
         return block('OpenJEV policy check denied this request')
       end
 
@@ -93,21 +157,78 @@ module Agent
       pings = Profile.read_pings(profile['name'], root: root)
       return nil if pings.empty?
 
-      {
-        'hookSpecificOutput' => {
-          'hookEventName' => 'PostToolUse',
-          'additionalContext' => ping_context(pings)
-        }
-      }
+      context('PostToolUse', ["Unread pings (#{pings.length}) — reply in the room when you get a turn:", *format_entries(pings)].join("\n"))
     end
 
-    def ping_context(pings)
-      lines = ["Unread pings (#{pings.length}) — reply in the room when you get a turn:"]
-      pings.each do |ping|
-        room = ping['room'] ? " in ##{ping['room']}" : ''
-        lines << "[#{Time.at(ping['ts'].to_i / 1000.0).strftime('%H:%M:%S')}] #{ping['from']}#{room}: #{ping['text']}"
+    # Stop — the team does not idle. A turn that ends is a teammate nobody can
+    # reach, so the hook refuses the stop and hands back what is waiting. The
+    # signals gathered here are the seam a salience layer grows into: what to
+    # weigh, not just what arrived. The stand-down marker is the release valve.
+    def stop(event, root:)
+      session = event['session_id']
+      return nil unless valid_session?(session)
+
+      profile = Profile.get_profile(session, root: root)
+      return nil unless profile
+
+      config = workspace_config
+      return nil if stand_down?(config['project_dir'])
+
+      lines = ['Do not end the turn yet — this team does not idle.']
+      lines.concat(waiting_lines(waiting_for(profile['name'], config, root: root)))
+      lines.concat(
+        [
+          '',
+          'Anything the room is waiting on from you — a question, a ping, a reply owed — answer it first.',
+          'Otherwise do real work and post what you find. Only when there is genuinely nothing to say or do,',
+          "call wait_for_message on the room (#{stagger_ms(profile['name'])} ms — your cadence), then look again."
+        ]
+      )
+      { 'decision' => 'block', 'reason' => lines.join("\n") }
+    end
+
+    def waiting_for(name, config, root:)
+      Profile.waiting(name, rooms: [config['team_room']], rooms_root: config['project_dir'], root: root)
+    end
+
+    def waiting_lines(waiting)
+      lines = []
+      pings = waiting['pings']
+      lines.concat(['', "Unread pings (#{pings.length}) — reply when you get a turn:", *format_entries(pings)]) unless pings.empty?
+      inbox = waiting['inbox']
+      lines.concat(['', "Unread direct messages (#{inbox.length}) — read_messages inbox:", *format_entries(inbox)]) unless inbox.empty?
+      waiting['rooms'].each do |room, entries|
+        lines.concat(['', "New ##{room} traffic (#{entries.length}):", *format_entries(entries)]) unless entries.empty?
       end
-      lines.join("\n")
+      lines << '' << 'Nothing new on the bus.' if lines.empty?
+      lines
+    end
+
+    def format_entries(entries)
+      entries.map do |entry|
+        room = entry['room'] ? " in ##{entry['room']}" : ''
+        "[#{clock(entry['ts'])}] #{entry['from']}#{room}: #{clip(entry['text'], MAX_ENTRY)}"
+      end
+    end
+
+    def clock(ts)
+      Time.at(ts.to_i / 1000.0).strftime('%H:%M:%S')
+    end
+
+    def clip(text, max)
+      text = text.to_s
+      text.length <= max ? text : "#{text[0, max - 1]}…"
+    end
+
+    # Identical cadences make a convoy, so each name gets a stable slot in the
+    # 10–25s range by hash. Nobody waits anywhere near 60s without a reason.
+    def stagger_ms(name)
+      hash = name.to_s.each_char.reduce(0) { |acc, char| ((acc * 31) + char.ord) & 0xffffffff }
+      10_000 + (hash % 4) * 5_000
+    end
+
+    def stand_down?(project_dir)
+      File.exist?(File.join(project_dir, '.devin', 'collaboration', 'stand-down'))
     end
 
     def denial(tool, input, session, root:)
@@ -178,12 +299,45 @@ module Agent
       patch.scan(/^\*\*\* (?:Update|Add|Delete) File:\s*(.+)$/).flatten
     end
 
+    # The workspace's .devin/coord.json, with the defaults a missing or partial
+    # file should not cost: the team room, the roster, and whether the Jev
+    # policy layer is on for this workspace.
+    def workspace_config
+      dir = project_dir
+      config = JSON.parse(File.read(File.join(dir, '.devin', 'coord.json')))
+      {
+        'project_dir' => dir,
+        'project' => config['project'],
+        'team_room' => team_room(config['teamRoom'], dir),
+        'team_skill' => config['teamSkill'],
+        'roster' => Array(config['roster']),
+        'jev' => config.fetch('jev', true)
+      }
+    rescue SystemCallError, JSON::ParserError
+      { 'project_dir' => dir, 'team_room' => Room::DEFAULT_ROOM, 'roster' => [], 'jev' => true }
+    end
+
+    def team_room(value, dir)
+      Room.normalize(value, root: dir)
+    rescue Room::Error
+      Room::DEFAULT_ROOM
+    end
+
     def project_dir
       ENV['DEVIN_PROJECT_DIR'] || Dir.pwd
     end
 
     def valid_session?(session)
       session.is_a?(String) && !session.empty?
+    end
+
+    def context(event_name, text)
+      {
+        'hookSpecificOutput' => {
+          'hookEventName' => event_name,
+          'additionalContext' => text
+        }
+      }
     end
 
     def block(reason)
