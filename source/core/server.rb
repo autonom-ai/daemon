@@ -8,6 +8,7 @@ module Agent
     INFO = { 'name' => 'agent-coord', 'version' => '0.1.0' }.freeze
     PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
     SOURCES = %w[room inbox pings].freeze
+    WAIT_SOURCES = %w[room inbox].freeze
     DEFAULT_LIMIT = 50
     MAX_LIMIT = 500
     DEFAULT_WAIT = 30
@@ -21,16 +22,19 @@ module Agent
 
     def run(input: STDIN, output: STDOUT)
       output.sync = true
+      write_lock = Mutex.new
       input.each_line do |line|
-        req = nil
-        begin
-          req = JSON.parse(line)
-          res = handle(req)
-          output.puts(JSON.generate(res)) if res
-        rescue JSON::ParserError
-          output.puts(JSON.generate(error(nil, -32700, 'Parse error')))
-        rescue StandardError
-          output.puts(JSON.generate(error(req&.fetch('id', nil), -32603, 'Internal error')))
+        Thread.new(line) do |raw|
+          req = nil
+          begin
+            req = JSON.parse(raw)
+            res = handle(req)
+            write_lock.synchronize { output.puts(JSON.generate(res)) } if res
+          rescue JSON::ParserError
+            write_lock.synchronize { output.puts(JSON.generate(error(nil, -32700, 'Parse error'))) }
+          rescue StandardError
+            write_lock.synchronize { output.puts(JSON.generate(error(req&.fetch('id', nil), -32603, 'Internal error'))) }
+          end
         end
       end
     end
@@ -135,12 +139,13 @@ module Agent
         {
           'name' => 'wait_for_message',
           'description' => 'Block until something new arrives, then return it: `room` (a room, default the ' \
-                           'team room), `inbox` (DMs), or `pings`. Returns as soon as there is anything ' \
-                           'unread, and empty when the timeout runs out. Reading clears what it returns.',
+                           'team room) or `inbox` (DMs). Returns as soon as there is anything unread, and ' \
+                           'empty when the timeout runs out. Reading clears what it returns. Pings are ' \
+                           'not waitable — they interrupt on their own.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
-              'source' => { 'type' => 'string', 'enum' => SOURCES, 'description' => 'Which stream to wait on.' },
+              'source' => { 'type' => 'string', 'enum' => WAIT_SOURCES, 'description' => 'Which stream to wait on.' },
               'room' => { 'type' => 'string', 'description' => 'Room to wait on when source is room.' },
               'timeout' => { 'type' => 'integer', 'description' => "Seconds to wait (default #{DEFAULT_WAIT}, max #{MAX_WAIT})." },
               'session_id' => session
@@ -218,6 +223,7 @@ module Agent
     def wait_for_message(args, session)
       name = registered_name(session)
       source, room = read_target(args)
+      raise Store::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait_timeout(args)
       loop do
         ret = read_stream(name, source, room, limit(args))
