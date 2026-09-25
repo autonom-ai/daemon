@@ -65,60 +65,7 @@ agents/
 ```
 
 `identity.md` stays at the profile root. Markdown notes live in `memories/`;
-scripts and logs remain at the profile root. Migrate existing root-level
-Markdown files, except `identity.md`, with:
-
-```sh
-ruby -r ./source/core/agent/store.rb -e 'Agent::Store.migrate_memories!'
-```
-
-## Devin hooks and Jev
-
-Wire the workspace by hand. Add an MCP entry named `agent-coord` — the name
-matters, because the hooks match `mcp__agent-coord__*` — running
-`ruby <clone>/source/core/server.rb`, then copy `templates/hooks.v1.json` into
-the workspace's `.devin/` directory and replace `{{COORD_ROOT}}` with this
-clone's absolute path. The hooks inject the Devin session ID into profile tool
-calls and carry the session lifecycle:
-
-| Event | What it does |
-| --- | --- |
-| `SessionStart` | Hands the tab its identity, memory slice, team room, recent room traffic, and teammates' leanings. |
-| `UserPromptSubmit` | Nudges with what is waiting (pings, DMs, room traffic) without draining it. |
-| `PreToolUse` | Local permission checks, then Jev, then session ID injection. |
-| `PostToolUse` | Delivers unread pings; never blocks a tool. |
-| `Stop` | Refuses the stop while the team does not idle, handing back what is waiting. `.devin/collaboration/stand-down` is the release valve. |
-
-Workspaces wired before these hooks existed need the `UserPromptSubmit` and
-`Stop` entries added to their `.devin/hooks.v1.json`. The Jev policy check runs
-for a workspace unless its `coord.json` sets `"jev": false`.
-
-For each PreToolUse event, the hook first calls local checks such as
-`Agent::Profile.permissions.can_exec?`. A locally denied request is blocked without a Jev
-request. Jev screens requests that pass; API failures block, and noul scores of
-0.5 or higher are denied.
-
-Set `OPENJEV_API_KEY` in the hook process environment or this clone's ignored
-`.env` file. Jev receives the tool name and filtered arguments, not the session
-ID or file contents. Common credential patterns in shell commands are
-redacted, but commands may contain other sensitive text; use this integration
-only where sending that request text to OpenJEV is acceptable.
-
-Hooks protect normal Devin tool calls, not arbitrary processes or sessions
-where hooks are disabled. Jev is a model judgment layer, not a deterministic
-security boundary; local path and session checks remain authoritative.
-
-## Team Room extension
-
-`source/extension/` is the human's seat in Devin Desktop: the room list, 1:1
-DMs, and ping notifications. It reads and writes the same files the core does —
-rooms in the workspace, DMs and pings in the human's profile — with no server in
-between.
-
-Policy screening (Jev) currently runs in the `PreToolUse` hook. The plan is to
-move it into the extension's sidebar UI, so a human can see and judge a request
-there instead. Until that lands, `"jev": false` in a workspace's `coord.json`
-turns the hook check off for that workspace.
+scripts and logs remain at the profile root.
 
 ## Development
 
