@@ -1,9 +1,0 @@
-{
-  "comment": "Copy into <workspace>/.devin/mcp_config.local.json and replace {{COORD_ROOT}} with this clone's absolute path. A single Ruby stdio server maps Devin session IDs to profiles and carries the team's chat through the PreToolUse and PostToolUse hooks.",
-  "mcpServers": {
-    "agent-coord": {
-      "command": "ruby",
-      "args": ["{{COORD_ROOT}}/source/core/server.rb"]
-    }
-  }
-}
