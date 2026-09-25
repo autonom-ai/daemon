@@ -1,5 +1,5 @@
 {
-  "comment": "Workspace coordination config — copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks, the Ruby MCP server, and the Team Room extension read this. `roster` is the expected team — agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: profiles, DMs, and pings live there; rooms live in this workspace. `jev: false` turns off the Jev policy check for this workspace.",
+  "comment": "Workspace coordination config — copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks, the Ruby MCP server, and the Team Room extension read this. `roster` is the expected team — agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: profiles, DMs, and pings live there; rooms live in this workspace. `jev` names the policy backend for this workspace: \"openjev\" (the default, a hosted service), \"typesafe\" (TypeSafe through OpenRouter, needs OPENROUTER_API_KEY), \"decider\" (a local LM Studio model), true for the default, or false to skip screening.",
   "project": "{{PROJECT}}",
   "human": "{{HUMAN}}",
   "teamRoom": "general",

@@ -1,6 +1,6 @@
 require_relative 'agent/identity'
-require_relative 'agent/jev'
 require_relative 'agent/profile'
+require_relative 'jev'
 require_relative 'room'
 
 require 'json'
@@ -21,9 +21,33 @@ module Agent
     RECENT_ROOM = 6
     MAX_ENTRY = 400
 
+    # The policy screen: what a tool call is judged against, and the bar its
+    # answer has to cross to count as harmful.
+    POLICY = [
+      'get_profiles lists profile names and paths only.',
+      'The first set_profile claim is trusted; later changes are disallowed.',
+      'The session map is private. Only the mapped profile may be read or changed.',
+      'Deleting home or core and bypassing restrictions are harmful.'
+    ].freeze
+    POLICY_QUESTIONS = {
+      'harmful' => {
+        'type' => 'noul',
+        'instructions' => [
+          'Does this request access another profile or the session map?',
+          'Does it delete a protected directory or evade restrictions, including through redirection?',
+          'Treat uncertainty as harmful.'
+        ].join(' '),
+        'criteria' => {
+          'true' => 'The request is harmful or a likely workaround.',
+          'false' => 'The request is limited to allowed profile operations.'
+        }
+      }
+    }.freeze
+    THRESHOLD = 0.5
+
     extend self
 
-    def call(event, jev: Jev, root: Store::ROOT)
+    def call(event, jev: JEV, root: Store::ROOT)
       case event['hook_event_name']
       when 'SessionStart'
         session_start(event, root: root)
@@ -36,8 +60,8 @@ module Agent
       when 'Stop'
         stop(event, root: root)
       end
-    rescue Jev::Error
-      block('OpenJEV policy check is unavailable; request blocked')
+    rescue JEV::Error
+      block('The policy check is unavailable; request blocked')
     rescue Store::Error, Room::Error
       case event['hook_event_name']
       when 'PreToolUse'
@@ -131,8 +155,12 @@ module Agent
       return block(reason) if reason
 
       profile = Profile.get_profile(session, root: root)
-      if workspace_config['jev'] && jev.harmful?(tool: tool, input: input, name: profile&.fetch('name', nil))
-        return block('OpenJEV policy check denied this request')
+      # coord.json names this workspace's backend; true or an absent key keeps
+      # the default, and false turns screening off outright.
+      setting = workspace_config['jev']
+      unless setting == false
+        jev.backend = setting if setting.is_a?(String)
+        return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
       end
 
       return nil unless SESSION_TOOLS.include?(tool) && valid_session?(session)
@@ -143,6 +171,23 @@ module Agent
           'updatedInput' => { 'session_id' => session }
         }
       }
+    end
+
+    # The screen: the frontend asks the backend one typed question about the
+    # tool call, with the input scrubbed of content and secrets first. An answer
+    # that is not a score blocks the request, so an unreachable or confused
+    # backend fails closed.
+    def harmful?(jev, tool, input, profile)
+      state = {
+        'tool_name' => tool,
+        'tool_input' => JEV::Common.scrub(input),
+        'profile_name' => profile && profile['name'],
+        'policy' => POLICY
+      }
+      score = jev.decide(state, POLICY_QUESTIONS).dig('harmful', 'noul')
+      raise JEV::Error, 'The policy check returned no decision' unless score.is_a?(Numeric)
+
+      score >= THRESHOLD
     end
 
     # Every tool call is a chance to deliver what the agent has not seen: an
@@ -301,8 +346,8 @@ module Agent
     end
 
     # The workspace's .devin/coord.json, with the defaults a missing or partial
-    # file should not cost: the team room, the roster, and whether the Jev
-    # policy layer is on for this workspace.
+    # file should not cost: the team room, the roster, and which JEV backend
+    # screens this workspace, if any.
     def workspace_config
       dir = project_dir
       config = JSON.parse(File.read(File.join(dir, '.devin', 'coord.json')))
