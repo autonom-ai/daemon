@@ -21,12 +21,12 @@ jobs:
 
       - name: Syntax-check Ruby core and tests
         run: |
-          for file in source/core/*.rb source/core/agent/*.rb test/*.rb; do
+          for file in source/core/*.rb source/core/*/*.rb tests/*.rb; do
             ruby -c "$file" || exit 1
           done
 
       - name: Test Ruby profile core
-        run: ruby -Itest -e 'Dir["test/*.rb"].sort.each { |file| require_relative file }'
+        run: ruby -Itests -e 'Dir["tests/*.rb"].sort.each { |file| require_relative file }'
 
       # Every JS file parses — catches missing imports and syntax slips,
       # the failure class this codebase actually produces.

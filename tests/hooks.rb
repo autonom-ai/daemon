@@ -6,16 +6,21 @@ require_relative '../source/core/hooks'
 
 class HooksTest < Minitest::Test
   class FakeJev
-    attr_reader :calls
+    attr_reader :calls, :backend_name, :state
 
     def initialize(harmful: false)
       @harmful = harmful
       @calls = 0
     end
 
-    def harmful?(**_arguments)
+    def backend=(name)
+      @backend_name = name
+    end
+
+    def decide(state, _questions)
       @calls += 1
-      @harmful
+      @state = state
+      { 'harmful' => { 'noul' => @harmful ? 1.0 : 0.0 } }
     end
   end
 
@@ -274,6 +279,47 @@ class HooksTest < Minitest::Test
 
     assert_nil Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
     assert_equal 0, @jev.calls
+  end
+
+  def test_the_workspace_names_the_backend_it_screens_with
+    write_coord(jev: 'typesafe')
+
+    assert_nil Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+    assert_equal 'typesafe', @jev.backend_name
+    assert_equal 1, @jev.calls
+  end
+
+  def test_an_unknown_backend_blocks_the_request
+    write_coord(jev: 'nope')
+
+    assert_equal 'block', Agent::Hooks.call(event('exec', 'command' => 'git status'), root: @root)['decision']
+  end
+
+  def test_the_screen_sends_a_scrubbed_state
+    write_coord
+    input = { 'file_path' => File.join(@project, 'notes.md'), 'content' => 'private memory content' }
+
+    assert_nil Agent::Hooks.call(event('write', input), jev: @jev, root: @root)
+    assert_equal 1, @jev.calls
+    assert_equal File.join(@project, 'notes.md'), @jev.state['tool_input']['file_path']
+    refute_includes JSON.generate(@jev.state), 'private memory content'
+  end
+
+  def test_a_backend_answer_that_is_not_a_score_blocks_the_request
+    write_coord
+    frontend = Object.new
+    frontend.define_singleton_method(:backend=) { |_name| nil }
+    frontend.define_singleton_method(:decide) { |_state, _questions| { 'harmful' => { 'type' => 'noul' } } }
+
+    result = Agent::Hooks.call(event('exec', 'command' => 'git status'), jev: frontend, root: @root)
+
+    assert_equal 'block', result['decision']
+  end
+
+  def test_policy_screening_is_skipped_when_the_workspace_turns_it_off
+    write_coord(jev: false)
+
+    assert_nil Agent::Hooks.call(event('exec', 'command' => 'git status'), root: @root)
   end
 
   private
