@@ -158,4 +158,34 @@ class ProfileTest < Minitest::Test
     assert_raises(Agent::Store::Error) { Agent::Profile.dm('../wren', 'hi', from: 'marlow', root: @root) }
     assert_raises(Agent::Store::Error) { Agent::Profile.ping('..', 'hi', from: 'marlow', root: @root) }
   end
+
+  def test_heartbeat_is_zero_until_stamped
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+
+    assert_equal 0, Agent::Profile.heartbeat('marlow', root: @root)
+
+    Agent::Profile.touch_heartbeat('marlow', root: @root)
+
+    assert Agent::Profile.heartbeat('marlow', root: @root).positive?
+  end
+
+  def test_a_dm_wakes_only_its_recipient
+    woken = Queue.new
+    Thread.new do
+      Agent::Profile.wait('wren', timeout: 5)
+      woken << 'wren'
+    end
+    other = Thread.new do
+      Agent::Profile.wait('marlow', timeout: 1)
+      woken << 'marlow'
+    end
+    sleep 0.2
+
+    Agent::Profile.dm('wren', 'psst', from: 'sable', root: @root)
+
+    assert_equal 'wren', woken.pop
+    assert woken.empty?
+  ensure
+    other&.join(2)
+  end
 end

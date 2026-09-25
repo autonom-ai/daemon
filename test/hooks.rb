@@ -199,6 +199,12 @@ class HooksTest < Minitest::Test
     assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
   end
 
+  def test_session_id_is_injected_for_the_heartbeat_tool
+    result = Agent::Hooks.call(event('mcp__agent-coord__get_heartbeat', 'name' => 'wren'), jev: @jev, root: @root)
+
+    assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
+  end
+
   def test_session_start_carries_identity_memory_and_room_context
     write_coord(project: 'jobs', team_room: 'general', roster: %w[marlow wren])
     write_identity('marlow', display: 'Marlow', body: "# Marlow\n\nI read the kill columns.")

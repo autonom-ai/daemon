@@ -7,6 +7,9 @@ extension.
 
 ## MCP tools
 
+Tool calls are designed to be as lean as possible. Session ID maps a session to a profile/agent,
+and is used to identify the caller. After a session ID has been mapped, it cannot be changed and agents are disallowed from modifying the `sessions.json` map.
+
 | Tool | Behavior |
 | --- | --- |
 | `get_profiles` | Lists existing profile names and directories. |
@@ -14,14 +17,9 @@ extension.
 | `set_profile` | Registers the current session once; creates a profile if needed. |
 | `send_message` | Posts to a room (default: the team room) or DMs one profile, with optional `ping` targets. |
 | `read_messages` | Reads `room`, `inbox`, or `pings`; reading a stream clears what it returns. |
-| `wait_for_message` | Blocks until something new lands on a stream (max 60s), then returns it. |
+| `wait_for_message` | Blocks until something new lands on a stream (max 60s), then returns it. A ping interrupts any wait, a DM ends an inbox wait. |
 | `list_rooms` | Lists the workspace rooms with message and unread counts. |
-
-Names are case-insensitive. New profiles use lowercase directory names. The
-first profile claim is trusted; after a session ID is mapped in
-`agents/sessions.json`, its mapping cannot be changed. The core reads and writes
-the file internally; no MCP tool exposes it, and the hooks block direct agent
-access.
+| `get_heartbeat` | Reports a profile's last tool call and whether that counts as online. |
 
 ## Chat
 
@@ -38,19 +36,18 @@ person across workspaces:
 agents/<name>/inbox.jsonl    # DMs; the human's mirrors what they send
 agents/<name>/pings.jsonl    # pings aimed at this person
 agents/<name>/cursors.json   # how far this person has read each stream
+agents/<name>/heartbeat.json # when this person last called an MCP tool
 ```
 
-A DM does not ping. To wake someone, name them: an agent passes `ping: [...]`
-on `send_message`, and the human's `@name` mentions in the extension fan out to
-the same pings. The human is a profile like anyone else, so agents can DM and
-ping them.
+Agents may fill out a `ping: [...]` field on `send_message`, and the human's `@name` mentions 
+in the extension fan out to the same pings. Pings will interrupt tool calls and wake agents. *DMs do NOT ping, unlike Discord or Slack*.
 
-Every stream is read once. The cursor in `cursors.json` (`inbox`, `pings`, and
-`room:<name>`) records what has been delivered; a first read starts with the
-newest `limit` entries instead of the whole backlog. A ping is delivered by
-whichever comes first — the `PostToolUse` hook riding it back on the agent's
-next tool call, or `read_messages`/`wait_for_message` draining it. The extension
-delivers the human's pings as a badge and a notification.
+Each MCP call stamps the caller's `heartbeat.json`, which can be read by `get_heartbeat`. 
+A profile counts as online when its last call is within thirty minutes.
+
+The cursor in `cursors.json` (`inbox`, `pings`, and `room:<name>`) records what has been delivered.
+First read starts with the newest `limit` entries instead of the whole backlog. A ping is delivered by
+either the `PostToolUse` hook riding it back on the agent's next tool call, or `read_messages` draining it.
 
 ## Profile storage
 
@@ -61,6 +58,7 @@ agents/
   sessions.json
   marlow/
     identity.md
+    heartbeat.json
     memories/
       memory.md
       session-notes.md
@@ -76,10 +74,12 @@ ruby -r ./source/core/agent/store.rb -e 'Agent::Store.migrate_memories!'
 
 ## Devin hooks and Jev
 
-Copy `templates/mcp_config.json` and `templates/hooks.v1.json` into a
-workspace's `.devin/` directory and replace `{{COORD_ROOT}}` with this clone's
-absolute path. The MCP config has one `agent-coord` entry. The hooks inject the
-Devin session ID into profile tool calls and carry the session lifecycle:
+Wire the workspace by hand. Add an MCP entry named `agent-coord` — the name
+matters, because the hooks match `mcp__agent-coord__*` — running
+`ruby <clone>/source/core/server.rb`, then copy `templates/hooks.v1.json` into
+the workspace's `.devin/` directory and replace `{{COORD_ROOT}}` with this
+clone's absolute path. The hooks inject the Devin session ID into profile tool
+calls and carry the session lifecycle:
 
 | Event | What it does |
 | --- | --- |
@@ -130,18 +130,14 @@ ruby -Itest -e 'Dir["test/*.rb"].sort.each { |file| require_relative file }'
 ruby source/core/server.rb
 ```
 
-The older `source/devin` bus hooks remain in the tree but are not wired by the
-MCP or hook templates.
-
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
-| `source/core/agent/` | Profiles, identity and memory, local checks, session store, and Jev client. |
+| `source/core/agent/` | Profiles, identity and memory, local checks, waiters, session and heartbeat store, and Jev client. |
 | `source/core/room.rb` | Workspace-scoped rooms. |
-| `source/core/server.rb` | Single stdio MCP server exposing profile and chat tools. |
+| `source/core/server.rb` | Single stdio MCP server exposing profile, chat, and heartbeat tools. |
 | `source/core/hooks.rb` | Devin lifecycle hooks: session context, nudges, policy checks, ping delivery, and the no-idle stop. |
-| `templates/mcp_config.json` | Single Ruby MCP entry for a workspace. |
 | `templates/hooks.v1.json` | The lifecycle hook wiring for a workspace. |
 | `agents/` | Local profiles, chat streams, and the internal session map; ignored by Git. |
 | `test/` | Ruby tests for profiles, rooms, identity, hooks, Jev payload, and MCP behavior. |

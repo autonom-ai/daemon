@@ -2,6 +2,7 @@ require 'json'
 require 'securerandom'
 
 require_relative 'agent/store'
+require_relative 'agent/waiters'
 
 module Room
   DEFAULT_ROOM = 'general'
@@ -10,6 +11,15 @@ module Room
   end
 
   extend self
+
+  # One registry per room, keyed by the people waiting in it. In-memory: a
+  # waiter is a fact about a live MCP process, not about the bus.
+  WAITERS = {}
+  WAITERS_LOCK = Mutex.new
+
+  def waiters
+    WAITERS
+  end
 
   # Rooms are workspace-scoped: they live under the project's .devin directory
   # and never follow a person anywhere.
@@ -27,14 +37,31 @@ module Room
   end
 
   def post(name, text, from:, root: project_root)
+    room = normalize(name, root: root)
     entry = {
       'id' => SecureRandom.uuid,
       'ts' => (Time.now.to_f * 1000).round,
       'from' => from.to_s,
       'text' => text.to_s
     }
-    Agent::Store.append_jsonl(file(name, root: root), entry)
+    Agent::Store.append_jsonl(file(room, root: root), entry)
+    wake(room)
     entry
+  end
+
+  def wait(name, agent, timeout:)
+    registry(normalize(name)).wait(agent, timeout)
+  end
+
+  def wake(name)
+    registry = WAITERS_LOCK.synchronize { WAITERS[name] }
+    registry&.wake_all
+  end
+
+  # A ping ends any room wait this person is parked in, wherever it is.
+  def wake_agent(agent)
+    registries = WAITERS_LOCK.synchronize { WAITERS.values }
+    registries.each { |registry| registry.wake(agent) }
   end
 
   def normalize(name, root: project_root)
@@ -60,6 +87,10 @@ module Room
   end
 
   private
+
+  def registry(name)
+    WAITERS_LOCK.synchronize { WAITERS[name] ||= Agent::Waiters::Registry.new }
+  end
 
   def rooms_dir(root)
     File.join(root, '.devin', 'agent-coord', 'rooms')

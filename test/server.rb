@@ -28,7 +28,7 @@ class ServerTest < Minitest::Test
     set_result = result(responses, 3)
     get_result = result(responses, 4)
 
-    assert_equal %w[get_profiles get_profile set_profile send_message read_messages wait_for_message list_rooms],
+    assert_equal %w[get_profiles get_profile set_profile send_message read_messages wait_for_message list_rooms get_heartbeat],
                  listed_tools.map { |tool| tool['name'] }
     assert_equal 'marlow', set_result['name']
     assert_equal set_result, get_result
@@ -70,9 +70,7 @@ class ServerTest < Minitest::Test
       call(4, 'read_messages', 'source' => 'room', 'session_id' => 'session-2'),
       call(5, 'send_message', 'text' => 'second', 'session_id' => 'session-1'),
       call(6, 'list_rooms', 'session_id' => 'session-2'),
-      call(7, 'list_rooms', 'session_id' => 'session-1'),
-      call(8, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-2'),
-      call(9, 'read_messages', 'source' => 'room', 'session_id' => 'session-2')
+      call(7, 'list_rooms', 'session_id' => 'session-1')
     )
 
     assert_equal ['first'], result(responses, 4)['messages'].map { |entry| entry['text'] }
@@ -82,8 +80,6 @@ class ServerTest < Minitest::Test
     assert_equal 2, rooms.first['count']
     assert_equal 1, rooms.first['unread']
     assert_equal 2, result(responses, 7).first['unread']
-    assert_equal ['second'], result(responses, 8)['messages'].map { |entry| entry['text'] }
-    assert_empty result(responses, 9)['messages']
   end
 
   def test_wait_for_message_wakes_on_a_new_room_line
@@ -97,6 +93,99 @@ class ServerTest < Minitest::Test
     writer.join
 
     assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
+  end
+
+  def test_wait_for_message_returns_what_is_already_unread
+    exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
+      call(3, 'send_message', 'text' => 'first', 'session_id' => 'session-1'),
+      call(4, 'read_messages', 'source' => 'room', 'session_id' => 'session-2'),
+      call(5, 'send_message', 'text' => 'second', 'session_id' => 'session-1')
+    )
+
+    responses = exchange(call(6, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-2'))
+
+    assert_equal ['second'], result(responses, 6)['messages'].map { |entry| entry['text'] }
+  end
+
+  def test_wait_for_message_returns_empty_when_the_timeout_runs_out
+    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+
+    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-2'))
+
+    assert_empty result(responses, 2)['messages']
+  end
+
+  def test_a_ping_interrupts_a_room_wait
+    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+    pinger = Thread.new do
+      sleep 0.3
+      Agent::Profile.ping('wren', 'look', from: 'marlow', room: 'general', root: @root)
+    end
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    pinger.join
+
+    assert_operator elapsed, :<, 3
+    assert_empty result(responses, 2)['messages']
+  end
+
+  def test_a_dm_wakes_an_inbox_wait
+    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+    sender = Thread.new do
+      sleep 0.3
+      Agent::Profile.dm('wren', 'psst', from: 'marlow', root: @root)
+    end
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    responses = exchange(call(2, 'wait_for_message', 'source' => 'inbox', 'timeout' => 5, 'session_id' => 'session-2'))
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    sender.join
+
+    assert_operator elapsed, :<, 3
+    assert_equal ['psst'], result(responses, 2)['messages'].map { |entry| entry['text'] }
+  end
+
+  def test_get_heartbeat_reports_another_profile
+    responses = exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
+      call(3, 'get_heartbeat', 'name' => 'wren', 'session_id' => 'session-1')
+    )
+
+    beat = result(responses, 3)
+
+    assert_equal 'wren', beat['name']
+    assert beat['lastHeartbeat'].positive?
+    assert beat['online']
+  end
+
+  def test_get_heartbeat_requires_a_known_profile
+    responses = exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'get_heartbeat', 'name' => 'nobody', 'session_id' => 'session-1')
+    )
+
+    assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')
+  end
+
+  def test_a_plain_call_refreshes_the_heartbeat
+    exchange(call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'))
+    file = File.join(@root, 'agents', 'marlow', 'heartbeat.json')
+    File.write(file, '{"ts":0}')
+
+    exchange(call(2, 'get_profiles', 'session_id' => 'session-1'))
+
+    assert JSON.parse(File.read(file))['ts'].positive?
+  end
+
+  def test_an_unregistered_session_stamps_nobody
+    exchange(call(1, 'get_profiles'))
+
+    assert_empty Dir.glob(File.join(@root, 'agents', '*', 'heartbeat.json'))
   end
 
   private

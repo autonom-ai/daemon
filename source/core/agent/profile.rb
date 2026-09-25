@@ -1,5 +1,6 @@
 require_relative 'store'
 require_relative 'permissions'
+require_relative 'waiters'
 require_relative '../room'
 
 require 'securerandom'
@@ -8,8 +9,15 @@ module Agent
   module Profile
     extend self
 
+    # One registry for inbox waits: a DM wakes the person it landed on.
+    WAITERS = Waiters::Registry.new
+
     def permissions
       Permissions
+    end
+
+    def waiters
+      WAITERS
     end
 
     def get_profiles(root: Store::ROOT)
@@ -71,13 +79,34 @@ module Agent
     def dm(name, text, from:, root: Store::ROOT)
       entry = chat_entry(from: from, text: text, to: name)
       Store.append_jsonl(Store.inbox_file(name, root: root), entry)
+      wake(name)
       entry
     end
 
     def ping(name, text, from:, room: nil, root: Store::ROOT)
       entry = chat_entry(from: from, text: text, room: room)
       Store.append_jsonl(Store.pings_file(name, root: root), entry)
+      # A ping interrupts anything: it ends an inbox wait and any room wait
+      # this person is parked in.
+      wake(name)
+      Room.wake_agent(name)
       entry
+    end
+
+    def wait(name, timeout:)
+      WAITERS.wait(name, timeout)
+    end
+
+    def wake(name)
+      WAITERS.wake(name)
+    end
+
+    def heartbeat(name, root: Store::ROOT)
+      Store.heartbeat(name, root: root)
+    end
+
+    def touch_heartbeat(name, root: Store::ROOT)
+      Store.touch_heartbeat(name, root: root)
     end
 
     private

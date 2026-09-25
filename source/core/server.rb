@@ -13,7 +13,7 @@ module Agent
     MAX_LIMIT = 500
     DEFAULT_WAIT = 30
     MAX_WAIT = 60
-    WAIT_INTERVAL = 0.5
+    ONLINE_MS = 30 * 60_000
 
     def initialize(root: Store::ROOT, project: Room.project_root)
       @root = root
@@ -23,23 +23,41 @@ module Agent
     def run(input: STDIN, output: STDOUT)
       output.sync = true
       write_lock = Mutex.new
+      blocking = []
       input.each_line do |line|
-        Thread.new(line) do |raw|
-          req = nil
-          begin
-            req = JSON.parse(raw)
-            res = handle(req)
-            write_lock.synchronize { output.puts(JSON.generate(res)) } if res
-          rescue JSON::ParserError
-            write_lock.synchronize { output.puts(JSON.generate(error(nil, -32700, 'Parse error'))) }
-          rescue StandardError
-            write_lock.synchronize { output.puts(JSON.generate(error(req&.fetch('id', nil), -32603, 'Internal error'))) }
-          end
+        req = parse(line)
+        # A blocking wait must not stall the requests behind it, so it runs on
+        # its own thread. Everything else is answered in arrival order — a
+        # client that sends set_profile then send_message must not see the two
+        # race — and no worker outlives the process with its response unwritten.
+        if waiting?(req)
+          blocking << Thread.new { respond(req, output, write_lock) }
+        else
+          respond(req, output, write_lock)
         end
       end
+      blocking.each(&:join)
     end
 
     private
+
+    def parse(raw)
+      JSON.parse(raw)
+    rescue JSON::ParserError
+      nil
+    end
+
+    def waiting?(req)
+      req.is_a?(Hash) && req['method'] == 'tools/call' && req.dig('params', 'name') == 'wait_for_message'
+    end
+
+    def respond(req, output, write_lock)
+      res = req ? handle(req) : error(nil, -32700, 'Parse error')
+      write_lock.synchronize { output.puts(JSON.generate(res)) } if res
+    rescue StandardError
+      id = req.is_a?(Hash) ? req['id'] : nil
+      write_lock.synchronize { output.puts(JSON.generate(error(id, -32603, 'Internal error'))) }
+    end
 
     def handle(req)
       return error(nil, -32600, 'Invalid request') unless req.is_a?(Hash)
@@ -140,8 +158,8 @@ module Agent
           'name' => 'wait_for_message',
           'description' => 'Block until something new arrives, then return it: `room` (a room, default the ' \
                            'team room) or `inbox` (DMs). Returns as soon as there is anything unread, and ' \
-                           'empty when the timeout runs out. Reading clears what it returns. Pings are ' \
-                           'not waitable — they interrupt on their own.',
+                           'empty when the timeout runs out. Reading clears what it returns. A ping ' \
+                           'interrupts any wait and a DM ends an inbox wait; pings are not waitable.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
@@ -156,6 +174,20 @@ module Agent
           'name' => 'list_rooms',
           'description' => 'List the workspace rooms: message count, unread count for this profile, and last activity.',
           'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session } }
+        },
+        {
+          'name' => 'get_heartbeat',
+          'description' => 'Get a profile\'s heartbeat: when it last called a tool, and whether that is recent ' \
+                           'enough to count as online. Every MCP call stamps the caller, so presence is a fact ' \
+                           'about use.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'name' => { 'type' => 'string', 'description' => 'Profile name to read the heartbeat for.' },
+              'session_id' => session
+            },
+            'required' => ['name']
+          }
         }
       ]
     end
@@ -180,9 +212,15 @@ module Agent
         wait_for_message(args, session)
       when 'list_rooms'
         list_rooms(session)
+      when 'get_heartbeat'
+        get_heartbeat(args)
       else
         return tool_error('Unknown profile tool')
       end
+
+      # Every call is a sign of life, stamped after the tool ran so a
+      # registration counts as the caller's first heartbeat.
+      stamp_heartbeat(session)
 
       {
         'content' => [{ 'type' => 'text', 'text' => JSON.generate(ret) }],
@@ -219,18 +257,23 @@ module Agent
     end
 
     # The no-idle loop's bottom rung: block until something lands, so an agent
-    # that has nothing to say is reachable instead of dark.
+    # that has nothing to say is reachable instead of dark. The wait is a
+    # registry entry in this process, not a poll — the sender that wakes it
+    # clears it — so a parked agent costs no reads at all.
     def wait_for_message(args, session)
       name = registered_name(session)
       source, room = read_target(args)
       raise Store::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
-      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait_timeout(args)
-      loop do
-        ret = read_stream(name, source, room, limit(args))
-        return ret unless ret['messages'].empty?
-        return ret if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
 
-        sleep WAIT_INTERVAL
+      wait_for(name, source, room, wait_timeout(args))
+      read_stream(name, source, room, limit(args))
+    end
+
+    def wait_for(name, source, room, timeout)
+      if source == 'inbox'
+        Profile.wait(name, timeout: timeout)
+      else
+        Room.wait(room, name, timeout: timeout)
       end
     end
 
@@ -245,6 +288,29 @@ module Agent
           'lastTs' => entries.last&.fetch('ts', nil)
         }
       end
+    end
+
+    def get_heartbeat(args)
+      name = Store.normalize_name(args['name'])
+      profile = Profile.get_profiles(root: @root).find { |entry| entry['name'].casecmp?(name) }
+      raise Store::Error, "Unknown profile: #{name}" unless profile
+
+      heartbeat = Profile.heartbeat(profile['name'], root: @root)
+      {
+        'name' => profile['name'],
+        'lastHeartbeat' => heartbeat,
+        'online' => heartbeat.positive? && (Time.now.to_f * 1000).round - heartbeat < ONLINE_MS
+      }
+    end
+
+    # Presence rides on ordinary use, so a heartbeat needs no timer: the
+    # caller's own profile is stamped by whatever tool it just called. A
+    # session that has not registered yet has nobody to stamp.
+    def stamp_heartbeat(session)
+      profile = Profile.get_profile(session, root: @root)
+      Profile.touch_heartbeat(profile['name'], root: @root) if profile
+    rescue Store::Error
+      nil
     end
 
     def read_target(args)

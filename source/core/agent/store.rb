@@ -9,6 +9,7 @@ module Agent
     INBOX_FILE = 'inbox.jsonl'
     PINGS_FILE = 'pings.jsonl'
     CURSORS_FILE = 'cursors.json'
+    HEARTBEAT_FILE = 'heartbeat.json'
 
     class Error < StandardError
     end
@@ -140,7 +141,40 @@ module Agent
       raise Error, "Could not update the read cursor: #{error.class}"
     end
 
+    # Presence is explicit, not inferred: a profile is as fresh as the last
+    # MCP call it made. Every tool call stamps this, so a heartbeat is a fact
+    # about use rather than a liveness probe the caller has to trust.
+    def heartbeat(name, root: ROOT)
+      path = chat_file(name, HEARTBEAT_FILE, root: root)
+      File.exist?(path) ? parse_heartbeat(File.read(path)) : 0
+    rescue SystemCallError => error
+      raise Error, "Could not read the heartbeat: #{error.class}"
+    end
+
+    def touch_heartbeat(name, root: ROOT)
+      path = chat_file(name, HEARTBEAT_FILE, root: root)
+      FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
+      File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
+        file.flock(File::LOCK_EX)
+        file.truncate(0)
+        file.rewind
+        file.write(JSON.generate('ts' => (Time.now.to_f * 1000).round))
+        file.flush
+      ensure
+        file.flock(File::LOCK_UN)
+      end
+    rescue SystemCallError => error
+      raise Error, "Could not update the heartbeat: #{error.class}"
+    end
+
     private
+
+    def parse_heartbeat(raw)
+      parsed = raw.strip.empty? ? {} : JSON.parse(raw)
+      parsed.is_a?(Hash) ? parsed['ts'].to_i : 0
+    rescue JSON::ParserError
+      0
+    end
 
     def parse_cursors(raw)
       parsed = raw.strip.empty? ? {} : JSON.parse(raw)

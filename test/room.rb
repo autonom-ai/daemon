@@ -3,6 +3,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 
 require_relative '../source/core/room'
+require_relative '../source/core/agent/profile'
 
 class RoomTest < Minitest::Test
   def setup
@@ -48,6 +49,44 @@ class RoomTest < Minitest::Test
 
     assert_raises(Room::Error) { Room.messages('general', root: @root) }
     assert_raises(Room::Error) { Room.post('general', 'hi', from: 'wren', root: @root) }
+  end
+
+  def test_a_room_post_wakes_every_waiter_in_the_room
+    woken = Queue.new
+    waiters = %w[marlow wren].map do |agent|
+      Thread.new do
+        Room.wait('general', agent, timeout: 5)
+        woken << agent
+      end
+    end
+    sleep 0.2
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Room.post('general', 'hello', from: 'sable', root: @root)
+    waiters.each { |waiter| waiter.join(3) }
+
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 2.5
+    assert_equal %w[marlow wren], [woken.pop, woken.pop].sort
+  end
+
+  def test_a_ping_wakes_only_the_pinged_waiter
+    woken = Queue.new
+    Thread.new do
+      Room.wait('general', 'wren', timeout: 5)
+      woken << 'wren'
+    end
+    other = Thread.new do
+      Room.wait('general', 'marlow', timeout: 1)
+      woken << 'marlow'
+    end
+    sleep 0.2
+
+    Agent::Profile.ping('wren', 'look', from: 'sable', room: 'general', root: @root)
+
+    assert_equal 'wren', woken.pop
+    assert woken.empty?
+  ensure
+    other&.join(2)
   end
 
   private

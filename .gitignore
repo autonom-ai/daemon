@@ -9,5 +9,5 @@ tools/
 .playwright-mcp/
 source/extension/*.vsix
 .env
-bin/
+bin/*
 !bin/.gitkeep
