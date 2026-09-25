@@ -28,7 +28,7 @@ class ServerTest < Minitest::Test
     set_result = result(responses, 3)
     get_result = result(responses, 4)
 
-    assert_equal %w[get_profiles get_profile set_profile send_message read_messages],
+    assert_equal %w[get_profiles get_profile set_profile send_message read_messages wait_for_message list_rooms],
                  listed_tools.map { |tool| tool['name'] }
     assert_equal 'marlow', set_result['name']
     assert_equal set_result, get_result
@@ -60,6 +60,43 @@ class ServerTest < Minitest::Test
     assert_empty result(responses, 8)['messages']
     assert responses.find { |response| response['id'] == 9 }.dig('result', 'isError')
     assert_empty result(responses, 10)['messages']
+  end
+
+  def test_reads_are_cursored_and_list_rooms_reports_unread
+    responses = exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
+      call(3, 'send_message', 'text' => 'first', 'session_id' => 'session-1'),
+      call(4, 'read_messages', 'source' => 'room', 'session_id' => 'session-2'),
+      call(5, 'send_message', 'text' => 'second', 'session_id' => 'session-1'),
+      call(6, 'list_rooms', 'session_id' => 'session-2'),
+      call(7, 'list_rooms', 'session_id' => 'session-1'),
+      call(8, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-2'),
+      call(9, 'read_messages', 'source' => 'room', 'session_id' => 'session-2')
+    )
+
+    assert_equal ['first'], result(responses, 4)['messages'].map { |entry| entry['text'] }
+    rooms = result(responses, 6)
+
+    assert_equal ['general'], rooms.map { |room| room['name'] }
+    assert_equal 2, rooms.first['count']
+    assert_equal 1, rooms.first['unread']
+    assert_equal 2, result(responses, 7).first['unread']
+    assert_equal ['second'], result(responses, 8)['messages'].map { |entry| entry['text'] }
+    assert_empty result(responses, 9)['messages']
+  end
+
+  def test_wait_for_message_wakes_on_a_new_room_line
+    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+    writer = Thread.new do
+      sleep 0.3
+      Room.post('general', 'late line', from: 'marlow', root: @root)
+    end
+
+    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    writer.join
+
+    assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
   end
 
   private

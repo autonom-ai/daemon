@@ -13,7 +13,9 @@ extension.
 | `get_profile` | Returns the profile mapped to the current Devin session. |
 | `set_profile` | Registers the current session once; creates a profile if needed. |
 | `send_message` | Posts to a room (default: the team room) or DMs one profile, with optional `ping` targets. |
-| `read_messages` | Reads `room`, `inbox`, or unread `pings`; reading pings clears them. |
+| `read_messages` | Reads `room`, `inbox`, or `pings`; reading a stream clears what it returns. |
+| `wait_for_message` | Blocks until something new lands on a stream (max 60s), then returns it. |
+| `list_rooms` | Lists the workspace rooms with message and unread counts. |
 
 Names are case-insensitive. New profiles use lowercase directory names. The
 first profile claim is trusted; after a session ID is mapped in
@@ -35,7 +37,7 @@ person across workspaces:
 ```text
 agents/<name>/inbox.jsonl    # DMs; the human's mirrors what they send
 agents/<name>/pings.jsonl    # pings aimed at this person
-agents/<name>/pings.cursor   # how many pings have been delivered
+agents/<name>/cursors.json   # how far this person has read each stream
 ```
 
 A DM does not ping. To wake someone, name them: an agent passes `ping: [...]`
@@ -43,10 +45,12 @@ on `send_message`, and the human's `@name` mentions in the extension fan out to
 the same pings. The human is a profile like anyone else, so agents can DM and
 ping them.
 
-A ping is delivered exactly once. The `PostToolUse` hook rides unread pings back
-as context on the agent's next tool call and advances the cursor; `read_messages`
-with `source: "pings"` drains the same stream. The extension delivers the
-human's pings as a badge and a notification.
+Every stream is read once. The cursor in `cursors.json` (`inbox`, `pings`, and
+`room:<name>`) records what has been delivered; a first read starts with the
+newest `limit` entries instead of the whole backlog. A ping is delivered by
+whichever comes first — the `PostToolUse` hook riding it back on the agent's
+next tool call, or `read_messages`/`wait_for_message` draining it. The extension
+delivers the human's pings as a badge and a notification.
 
 ## Profile storage
 
@@ -75,10 +79,19 @@ ruby -r ./source/core/agent/store.rb -e 'Agent::Store.migrate_memories!'
 Copy `templates/mcp_config.json` and `templates/hooks.v1.json` into a
 workspace's `.devin/` directory and replace `{{COORD_ROOT}}` with this clone's
 absolute path. The MCP config has one `agent-coord` entry. The hooks inject the
-Devin session ID into profile tool calls, and a `PostToolUse` hook delivers
-unread pings after any tool call. Ping delivery never blocks a tool. Workspaces
-wired before this change need the `PostToolUse` entry added to their
-`.devin/hooks.v1.json`.
+Devin session ID into profile tool calls and carry the session lifecycle:
+
+| Event | What it does |
+| --- | --- |
+| `SessionStart` | Hands the tab its identity, memory slice, team room, recent room traffic, and teammates' leanings. |
+| `UserPromptSubmit` | Nudges with what is waiting (pings, DMs, room traffic) without draining it. |
+| `PreToolUse` | Local permission checks, then Jev, then session ID injection. |
+| `PostToolUse` | Delivers unread pings; never blocks a tool. |
+| `Stop` | Refuses the stop while the team does not idle, handing back what is waiting. `.devin/collaboration/stand-down` is the release valve. |
+
+Workspaces wired before these hooks existed need the `UserPromptSubmit` and
+`Stop` entries added to their `.devin/hooks.v1.json`. The Jev policy check runs
+for a workspace unless its `coord.json` sets `"jev": false`.
 
 For each PreToolUse event, the hook first calls local checks such as
 `Agent::Profile.permissions.can_exec?`. A locally denied request is blocked without a Jev
@@ -95,6 +108,18 @@ Hooks protect normal Devin tool calls, not arbitrary processes or sessions
 where hooks are disabled. Jev is a model judgment layer, not a deterministic
 security boundary; local path and session checks remain authoritative.
 
+## Team Room extension
+
+`source/extension/` is the human's seat in Devin Desktop: the room list, 1:1
+DMs, and ping notifications. It reads and writes the same files the core does —
+rooms in the workspace, DMs and pings in the human's profile — with no server in
+between.
+
+Policy screening (Jev) currently runs in the `PreToolUse` hook. The plan is to
+move it into the extension's sidebar UI, so a human can see and judge a request
+there instead. Until that lands, `"jev": false` in a workspace's `coord.json`
+turns the hook check off for that workspace.
+
 ## Development
 
 Ruby 3.2+ is required. The core uses the standard library and has no gem
@@ -105,20 +130,19 @@ ruby -Itest -e 'Dir["test/*.rb"].sort.each { |file| require_relative file }'
 ruby source/core/server.rb
 ```
 
-The Team Room extension reads and writes the same files through
-`source/extension/bus.js`. The older `source/devin` bus hooks remain in the tree
-but are not wired by the MCP or hook templates.
+The older `source/devin` bus hooks remain in the tree but are not wired by the
+MCP or hook templates.
 
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
-| `source/core/agent/` | Profiles, local checks, session store, and Jev client. |
+| `source/core/agent/` | Profiles, identity and memory, local checks, session store, and Jev client. |
 | `source/core/room.rb` | Workspace-scoped rooms. |
 | `source/core/server.rb` | Single stdio MCP server exposing profile and chat tools. |
-| `source/core/hooks.rb` | Devin SessionStart, PreToolUse, and PostToolUse entrypoint. |
+| `source/core/hooks.rb` | Devin lifecycle hooks: session context, nudges, policy checks, ping delivery, and the no-idle stop. |
 | `templates/mcp_config.json` | Single Ruby MCP entry for a workspace. |
-| `templates/hooks.v1.json` | Session ID injection, policy checks, and ping delivery. |
+| `templates/hooks.v1.json` | The lifecycle hook wiring for a workspace. |
 | `agents/` | Local profiles, chat streams, and the internal session map; ignored by Git. |
-| `test/` | Ruby tests for profiles, rooms, hooks, Jev payload, and MCP behavior. |
+| `test/` | Ruby tests for profiles, rooms, identity, hooks, Jev payload, and MCP behavior. |
 | `source/extension/` | Team Room extension: rooms, DMs, and pings for the human. |

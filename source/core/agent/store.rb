@@ -8,7 +8,7 @@ module Agent
     NAME_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\z/
     INBOX_FILE = 'inbox.jsonl'
     PINGS_FILE = 'pings.jsonl'
-    PINGS_CURSOR_FILE = 'pings.cursor'
+    CURSORS_FILE = 'cursors.json'
 
     class Error < StandardError
     end
@@ -107,31 +107,47 @@ module Agent
       raise Error, "Could not append to chat stream: #{error.class}"
     end
 
-    def pings_cursor(name, root: ROOT)
-      path = chat_file(name, PINGS_CURSOR_FILE, root: root)
-      File.exist?(path) ? File.read(path).to_i : 0
+    # How far this profile has read each stream: "inbox", "pings", and
+    # "room:<name>" keys, each holding the entry count already delivered.
+    def cursors(name, root: ROOT)
+      path = chat_file(name, CURSORS_FILE, root: root)
+      File.exist?(path) ? parse_cursors(File.read(path)) : {}
+    rescue SystemCallError => error
+      raise Error, "Could not read the read cursor: #{error.class}"
     end
 
-    def advance_pings_cursor(name, count, root: ROOT)
-      path = chat_file(name, PINGS_CURSOR_FILE, root: root)
+    def cursor(name, key, root: ROOT)
+      cursors(name, root: root)[key.to_s].to_i
+    end
+
+    def advance_cursor(name, key, count, root: ROOT)
+      path = chat_file(name, CURSORS_FILE, root: root)
       FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
       File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
         file.flock(File::LOCK_EX)
-        current = file.read.to_i
-        next if current >= count
+        current = parse_cursors(file.read)
+        next if current[key.to_s].to_i >= count
 
+        current[key.to_s] = count
         file.rewind
         file.truncate(0)
-        file.write(count.to_s)
+        file.write(JSON.generate(current))
         file.flush
       ensure
         file.flock(File::LOCK_UN)
       end
     rescue SystemCallError => error
-      raise Error, "Could not update the ping cursor: #{error.class}"
+      raise Error, "Could not update the read cursor: #{error.class}"
     end
 
     private
+
+    def parse_cursors(raw)
+      parsed = raw.strip.empty? ? {} : JSON.parse(raw)
+      parsed.is_a?(Hash) ? parsed : {}
+    rescue JSON::ParserError
+      {}
+    end
 
     def agents_dir(root)
       File.join(File.expand_path(root), 'agents')

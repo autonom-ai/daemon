@@ -120,6 +120,40 @@ class ProfileTest < Minitest::Test
     assert_equal 2, Agent::Profile.pings('marlow', root: @root).length
   end
 
+  def test_reads_advance_cursors_and_a_first_read_starts_with_a_window
+    3.times { |index| Agent::Profile.dm('marlow', "dm #{index}", from: 'wren', root: @root) }
+
+    first = Agent::Profile.read_inbox('marlow', limit: 2, root: @root)
+
+    assert_equal ['dm 1', 'dm 2'], first.map { |entry| entry['text'] }
+    assert_empty Agent::Profile.read_inbox('marlow', root: @root)
+
+    Agent::Profile.dm('marlow', 'dm 3', from: 'wren', root: @root)
+    assert_equal ['dm 3'], Agent::Profile.read_inbox('marlow', root: @root).map { |entry| entry['text'] }
+  end
+
+  def test_unread_reads_do_not_advance_the_cursor
+    Agent::Profile.dm('marlow', 'dm', from: 'wren', root: @root)
+
+    assert_equal 1, Agent::Profile.unread_inbox('marlow', root: @root).length
+    assert_equal 1, Agent::Profile.unread_inbox('marlow', root: @root).length
+    assert_equal 1, Agent::Profile.read_inbox('marlow', root: @root).length
+    assert_empty Agent::Profile.unread_inbox('marlow', root: @root)
+  end
+
+  def test_waiting_gathers_undrained_signals
+    Agent::Profile.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
+    Agent::Profile.dm('marlow', 'dm text', from: 'wren', root: @root)
+    Room.post('general', 'room text', from: 'wren', root: @root)
+
+    waiting = Agent::Profile.waiting('marlow', rooms: ['general'], rooms_root: @root, root: @root)
+
+    assert_equal ['ping text'], waiting['pings'].map { |entry| entry['text'] }
+    assert_equal ['dm text'], waiting['inbox'].map { |entry| entry['text'] }
+    assert_equal ['room text'], waiting['rooms']['general'].map { |entry| entry['text'] }
+    assert_equal 1, Agent::Profile.unread_pings('marlow', root: @root).length
+  end
+
   def test_chat_names_are_validated
     assert_raises(Agent::Store::Error) { Agent::Profile.dm('../wren', 'hi', from: 'marlow', root: @root) }
     assert_raises(Agent::Store::Error) { Agent::Profile.ping('..', 'hi', from: 'marlow', root: @root) }
