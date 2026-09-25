@@ -15,6 +15,7 @@ module Agent
       mcp__agent-coord__read_messages
       mcp__agent-coord__wait_for_message
       mcp__agent-coord__list_rooms
+      mcp__agent-coord__get_heartbeat
     ].freeze
 
     RECENT_ROOM = 6

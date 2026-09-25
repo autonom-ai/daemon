@@ -8,3 +8,7 @@ Managing guardrails, agent permissions, and logs
 
 ## Tab
 
+## Planned
+
+Policy screening (Jev) currently runs in the agent-side `PreToolUse` hook. It moves here, where the sidebar
+can show a request and the human judges it — so the agent does not pay a network round trip per tool call.
