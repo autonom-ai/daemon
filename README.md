@@ -76,16 +76,3 @@ dependencies.
 ruby -Itest -e 'Dir["tests/*.rb"].sort.each { |file| require_relative file }'
 ruby source/core/server.rb
 ```
-
-## Layout
-
-| Path | Purpose |
-| --- | --- |
-| `source/core/agent/` | Profiles, identity and memory, local checks, waiters, session and heartbeat store, and Jev client. |
-| `source/core/room.rb` | Workspace-scoped rooms. |
-| `source/core/server.rb` | Single stdio MCP server exposing profile, chat, and heartbeat tools. |
-| `source/core/hooks.rb` | Devin lifecycle hooks: session context, nudges, policy checks, ping delivery, and the no-idle stop. |
-| `templates/hooks.v1.json` | The lifecycle hook wiring for a workspace. |
-| `agents/` | Local profiles, chat streams, and the internal session map; ignored by Git. |
-| `test/` | Ruby tests for profiles, rooms, identity, hooks, Jev payload, and MCP behavior. |
-| `source/extension/` | Team Room extension: rooms, DMs, and pings for the human. |
