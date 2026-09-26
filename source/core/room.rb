@@ -13,7 +13,8 @@ module Room
   extend self
 
   # One registry per room, keyed by the people waiting in it. In-memory: a
-  # waiter is a fact about a live MCP process, not about the bus.
+  # waiter is a fact about a live MCP process, not about the bus — and a signal
+  # only reaches this process, so a waiter watches the room file as well.
   WAITERS = {}
   WAITERS_LOCK = Mutex.new
 
@@ -49,8 +50,8 @@ module Room
     entry
   end
 
-  def wait(name, agent, timeout:)
-    registry(normalize(name)).wait(agent, timeout)
+  def wait(name, agent, timeout:, watch: [])
+    registry(normalize(name)).wait(agent, timeout, watch: watch)
   end
 
   def wake(name)
@@ -80,6 +81,12 @@ module Room
     Agent::Store.valid_name?(name) ? name : DEFAULT_ROOM
   rescue SystemCallError, JSON::ParserError
     DEFAULT_ROOM
+  end
+
+  # The file a room's lines live in: what a parked waiter watches so a line
+  # written by another process can still wake it.
+  def path(name, root: project_root)
+    file(name, root: root)
   end
 
   def project_root

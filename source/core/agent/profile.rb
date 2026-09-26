@@ -9,7 +9,9 @@ module Agent
   module Profile
     extend self
 
-    # One registry for inbox waits: a DM wakes the person it landed on.
+    # One registry for inbox waits: a DM wakes the person it landed on, and a
+    # ping wakes them wherever they are, so an inbox waiter watches the pings
+    # file as well.
     WAITERS = Waiters::Registry.new
 
     def permissions
@@ -93,8 +95,8 @@ module Agent
       entry
     end
 
-    def wait(name, timeout:)
-      WAITERS.wait(name, timeout)
+    def wait(name, timeout:, watch: [])
+      WAITERS.wait(name, timeout, watch: watch)
     end
 
     def wake(name)

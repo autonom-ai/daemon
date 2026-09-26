@@ -89,7 +89,45 @@ class RoomTest < Minitest::Test
     other&.join(2)
   end
 
+  # One process waits, another writes: a signal cannot cross the boundary, so
+  # the watched file is the only thing that can wake the waiter.
+  def test_a_waiter_in_another_process_is_woken_by_the_file
+    skip 'fork is unavailable' unless Process.respond_to?(:fork)
+    room = Room.path('general', root: @root)
+    reader, writer = IO.pipe
+    child = fork do
+      reader.close
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      Room.wait('general', 'wren', timeout: 5, watch: [room])
+      writer.puts(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started)
+      writer.close
+      exit!(0)
+    end
+    writer.close
+    sleep 0.3
+
+    Room.post('general', 'hello', from: 'sable', root: @root)
+
+    elapsed = IO.select([reader], nil, nil, 10) ? reader.gets.to_f : nil
+    kill_child(child)
+    Process.wait(child)
+
+    refute_nil elapsed, 'the waiter in the other process was never woken'
+    assert_operator elapsed, :<, 2
+  ensure
+    reader&.close
+    kill_child(child)
+  end
+
   private
+
+  # The child may already be gone by the time the test ends; a signal it cannot
+  # receive is not an error, and leaving it behind is.
+  def kill_child(child)
+    Process.kill('KILL', child) if child
+  rescue Errno::ESRCH
+    nil
+  end
 
   def write_coord(team_room:)
     FileUtils.mkdir_p(File.join(@root, '.devin'))

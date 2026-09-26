@@ -149,6 +149,62 @@ class ServerTest < Minitest::Test
     assert_equal ['psst'], result(responses, 2)['messages'].map { |entry| entry['text'] }
   end
 
+  # The real shape of the bus: another session's MCP process writes the line,
+  # so no signal can reach this one and only the file check can wake it.
+  def test_a_room_line_written_by_another_process_wakes_a_room_wait
+    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+    writer = Thread.new do
+      sleep 0.3
+      append_line(Room.path('general', root: @root), 'from' => 'marlow', 'text' => 'late line')
+    end
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    writer.join
+
+    assert_operator elapsed, :<, 1.5
+    assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
+  end
+
+  def test_a_dm_written_by_another_process_wakes_an_inbox_wait
+    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+    writer = Thread.new do
+      sleep 0.3
+      append_line(
+        Agent::Store.inbox_file('wren', root: @root),
+        'from' => 'marlow', 'to' => 'wren', 'text' => 'psst'
+      )
+    end
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    responses = exchange(call(2, 'wait_for_message', 'source' => 'inbox', 'timeout' => 5, 'session_id' => 'session-2'))
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    writer.join
+
+    assert_operator elapsed, :<, 1.5
+    assert_equal ['psst'], result(responses, 2)['messages'].map { |entry| entry['text'] }
+  end
+
+  def test_a_ping_written_by_another_process_interrupts_a_room_wait
+    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+    writer = Thread.new do
+      sleep 0.3
+      append_line(
+        Agent::Store.pings_file('wren', root: @root),
+        'from' => 'marlow', 'room' => 'general', 'text' => 'look'
+      )
+    end
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    writer.join
+
+    assert_operator elapsed, :<, 1.5
+    assert_empty result(responses, 2)['messages']
+  end
+
   def test_get_heartbeat_reports_another_profile
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
@@ -207,5 +263,15 @@ class ServerTest < Minitest::Test
 
   def result(responses, id)
     responses.find { |response| response['id'] == id }.dig('result', 'structuredContent')
+  end
+
+  # A line appended with no wake at all — what a different session's process,
+  # or the human's extension, does.
+  def append_line(path, entry)
+    FileUtils.mkdir_p(File.dirname(path))
+    line = { 'id' => SecureRandom.uuid, 'ts' => (Time.now.to_f * 1000).round, **entry }
+    File.open(path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
+      file.write("#{JSON.generate(line)}\n")
+    end
   end
 end
