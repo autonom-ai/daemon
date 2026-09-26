@@ -258,8 +258,10 @@ module Agent
 
     # The no-idle loop's bottom rung: block until something lands, so an agent
     # that has nothing to say is reachable instead of dark. The wait is a
-    # registry entry in this process, not a poll — the sender that wakes it
-    # clears it — so a parked agent costs no reads at all.
+    # registry entry in this process, not a poll — and since the signal that
+    # would clear it cannot cross a process boundary, it also watches the files
+    # a line would land in, which costs a couple of stats a second and no reads
+    # at all.
     def wait_for_message(args, session)
       name = registered_name(session)
       source, room = read_target(args)
@@ -271,10 +273,22 @@ module Agent
 
     def wait_for(name, source, room, timeout)
       if source == 'inbox'
-        Profile.wait(name, timeout: timeout)
+        Profile.wait(name, timeout: timeout, watch: inbox_watch(name))
       else
-        Room.wait(room, name, timeout: timeout)
+        Room.wait(room, name, timeout: timeout, watch: room_watch(room, name))
       end
+    end
+
+    # A signal only reaches the waiters in the sender's own process and every
+    # session runs its own, so a waiter is handed the files its wake would have
+    # written: the stream it is parked on, and its own pings — which interrupt
+    # any wait, wherever they land.
+    def room_watch(room, name)
+      [Room.path(room, root: @project), Agent::Store.pings_file(name, root: @root)]
+    end
+
+    def inbox_watch(name)
+      [Agent::Store.inbox_file(name, root: @root), Agent::Store.pings_file(name, root: @root)]
     end
 
     def list_rooms(session)
