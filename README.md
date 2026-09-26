@@ -73,7 +73,7 @@ Ruby 3.2+ is required. The core uses the standard library and has no gem
 dependencies.
 
 ```sh
-ruby -Itest -e 'Dir["test/*.rb"].sort.each { |file| require_relative file }'
+ruby -Itest -e 'Dir["tests/*.rb"].sort.each { |file| require_relative file }'
 ruby source/core/server.rb
 ```
 
