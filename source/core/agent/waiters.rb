@@ -1,12 +1,4 @@
 module Agent
-  # Waiters are in-memory only: a waiter is a fact about a live MCP process,
-  # not about the bus. A process that dies leaves nobody to wake, so nothing is
-  # persisted and nothing needs cleaning up.
-  #
-  # Nor can anyone else wake it: every session runs its own MCP process, so a
-  # sender's signal reaches the waiters in the sender's process and no others —
-  # never the process it is talking to. A waiter therefore also watches the
-  # files the wake would have written, and returns as soon as one of them grows.
   module Waiters
     extend self
 
