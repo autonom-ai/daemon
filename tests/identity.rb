@@ -1,7 +1,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../source/core/agent/identity'
+require_relative '../source/agent/identity'
 
 class IdentityTest < Minitest::Test
   def setup

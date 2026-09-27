@@ -21,7 +21,7 @@ jobs:
 
       - name: Syntax-check Ruby core and tests
         run: |
-          for file in source/core/*.rb source/core/*/*.rb tests/*.rb; do
+          for file in source/*.rb source/*/*.rb tests/*.rb; do
             ruby -c "$file" || exit 1
           done
 
@@ -49,7 +49,7 @@ jobs:
           printf '{"project":"ci-room","human":"ci","teamRoom":"general","coordRoot":"%s"}\n' "$ROOT" > "$WS/.devin/coord.json"
           node -e '
             const { readFileSync } = require("node:fs");
-            const { openBus } = require("./source/extension/bus.js");
+            const { openBus } = require("./extension/bus.js");
             (async () => {
               const bus = await openBus({ projectDir: "/tmp/ci-room", coordRoot: "/tmp/ci-root" });
               const before = await bus.state();

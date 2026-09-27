@@ -1,7 +1,7 @@
 require 'json'
 require 'minitest/autorun'
 
-require_relative '../source/core/jev'
+require_relative '../source/jev'
 
 class JevTest < Minitest::Test
   def test_backends_carry_their_own_transport_and_model

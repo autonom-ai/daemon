@@ -3,7 +3,7 @@ require 'minitest/autorun'
 require 'stringio'
 require 'tmpdir'
 
-require_relative '../source/core/server'
+require_relative '../source/server'
 
 class ServerTest < Minitest::Test
   def setup

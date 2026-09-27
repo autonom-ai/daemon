@@ -2,8 +2,8 @@ require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../source/core/room'
-require_relative '../source/core/agent/profile'
+require_relative '../source/room'
+require_relative '../source/agent/profile'
 
 class RoomTest < Minitest::Test
   def setup

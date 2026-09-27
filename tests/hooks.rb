@@ -2,7 +2,7 @@ require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../source/core/hooks'
+require_relative '../source/hooks'
 
 class HooksTest < Minitest::Test
   class FakeJev
@@ -272,6 +272,19 @@ class HooksTest < Minitest::Test
     File.write(File.join(@project, '.devin', 'collaboration', 'stand-down'), '')
 
     assert_nil Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+  end
+
+  def test_a_subagent_stop_is_never_blocked
+    write_coord
+    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Agent::Profile.ping('marlow', '@marlow the pricer moved', from: 'wren', room: 'general', root: @root)
+    Room.post('general', 'anyone around?', from: 'wren', root: @project)
+
+    result = Hooks.call({ 'hook_event_name' => 'SubagentStop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+
+    assert_nil result
+    assert_equal 0, @jev.calls
+    assert_equal 1, Agent::Profile.unread_pings('marlow', root: @root).length
   end
 
   def test_jev_can_be_turned_off_per_workspace

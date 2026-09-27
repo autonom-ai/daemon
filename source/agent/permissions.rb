@@ -130,7 +130,7 @@ module Agent
         paths = shell_paths(cmd).map { |path| resolve(path, dir) }
         paths.any? do |path|
           path == resolve(Dir.home) ||
-            path == resolve(File.join(root, 'source', 'core')) ||
+            path == resolve(File.join(root, 'source')) ||
             path == resolve(File::SEPARATOR)
         end
       end

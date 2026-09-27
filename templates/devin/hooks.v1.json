@@ -5,7 +5,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "ruby \"{{COORD_ROOT}}/source/core/hooks.rb\"",
+          "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
           "timeout": 5
         }
       ]
@@ -17,7 +17,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "ruby \"{{COORD_ROOT}}/source/core/hooks.rb\"",
+          "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
           "timeout": 15
         }
       ]
@@ -29,7 +29,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "ruby \"{{COORD_ROOT}}/source/core/hooks.rb\"",
+          "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
           "timeout": 5
         }
       ]
@@ -41,7 +41,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "ruby \"{{COORD_ROOT}}/source/core/hooks.rb\"",
+          "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
           "timeout": 5
         }
       ]
@@ -53,7 +53,19 @@
       "hooks": [
         {
           "type": "command",
-          "command": "ruby \"{{COORD_ROOT}}/source/core/hooks.rb\"",
+          "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "SubagentStop": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
           "timeout": 5
         }
       ]

@@ -2,7 +2,7 @@ require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../source/core/agent/profile'
+require_relative '../source/agent/profile'
 
 class ProfileTest < Minitest::Test
   def setup
@@ -80,6 +80,7 @@ class ProfileTest < Minitest::Test
       dir: @root
     )
     refute Agent::Profile.permissions.can_exec?("rm -rf #{Dir.home}", root: @root, dir: @root)
+    refute Agent::Profile.permissions.can_exec?("rm -rf #{File.join(@root, 'source')}", root: @root, dir: @root)
     refute Agent::Profile.permissions.can_exec?('rm -rf /', root: @root, dir: @root)
     assert Agent::Profile.permissions.can_exec?('git status', session: 'session-1', root: @root)
   end
