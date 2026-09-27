@@ -5,7 +5,7 @@ module JEV
   # Decider: a local model behind LM Studio's OpenAI-compatible server, asked in
   # the plain layout it was trained on. The answer is the letter at the prompt's
   # answer slot, so a question goes one per request, and only noul questions are
-  # answered — a choice or score question needs a readout this transport does not
+  # answered - a choice or score question needs a readout this transport does not
   # expose.
   module Decider
     ENDPOINT = URI('http://127.0.0.1:1234/v1/completions')

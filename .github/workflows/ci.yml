@@ -28,7 +28,7 @@ jobs:
       - name: Test Ruby profile core
         run: ruby -Itests -e 'Dir["tests/*.rb"].sort.each { |file| require_relative file }'
 
-      # Every JS file parses — catches missing imports and syntax slips,
+      # Every JS file parses - catches missing imports and syntax slips,
       # the failure class this codebase actually produces.
       - name: Syntax-check all JS
         run: |
@@ -37,8 +37,8 @@ jobs:
           done
 
       # The extension host's bus client is plain Node (no vscode import), so the
-      # product contract — a wired workspace's rooms and profiles read and write
-      # the same files the Ruby core does — is testable here without an editor.
+      # product contract - a wired workspace's rooms and profiles read and write
+      # the same files the Ruby core does - is testable here without an editor.
       - name: Smoke-test the room bus client
         run: |
           WS=/tmp/ci-room

@@ -1,17 +1,15 @@
-require_relative 'store'
+require_relative '../profile_store'
 
 module Agent
   # Who a person is when they wake up: the identity file's frontmatter and
-  # body, the memory slice a session starts from, and the leanings their
-  # teammates have stated. Identity files are clone content, so they follow
-  # the person across workspaces.
+  # body, and the leanings their teammates have stated. Identity files are
+  # clone content, so they follow the person across workspaces.
   module Identity
-    MAX_MEMORY = 4000
     MAX_PRIOR = 800
 
     extend self
 
-    def get(name, root: Store::ROOT)
+    def get(name, root: ProfileStore::ROOT)
       dir = directory(name, root: root)
       return nil unless dir
 
@@ -27,31 +25,10 @@ module Agent
       }
     end
 
-    # The whole file while it is small, otherwise the sections that matter:
-    # who the person is, project-tagged entries, then the newest dated ones.
-    def memory(name, project, max_chars: MAX_MEMORY, root: Store::ROOT)
-      dir = directory(name, root: root)
-      return '' unless dir
-
-      path = File.join(dir, 'memories', 'memory.md')
-      return '' unless File.file?(path)
-
-      raw = File.read(path).strip
-      return raw if raw.length <= max_chars
-
-      blocks = raw.split(/\n(?=\#{1,3}\s)/)
-      picked = [
-        blocks.select { |block| block.match?(/^\#{1,3}\s*(who i am|self|now)\b/i) },
-        blocks.select { |block| project && block.include?("[project:#{project}]") },
-        blocks.select { |block| block.match?(/^\#{1,3}\s*\d{4}-\d{2}-\d{2}/) }.last(8)
-      ].flatten.uniq.join("\n\n")
-      picked.empty? ? raw[-max_chars..] : picked[0, max_chars]
-    end
-
     # Teammate priors: what the others reach for and avoid, from the sections
     # the identity scaffold writes.
-    def priors(root: Store::ROOT, skip: nil)
-      Store.get_profiles(root: root).filter_map do |profile|
+    def priors(root: ProfileStore::ROOT, skip: nil)
+      ProfileStore.get_profiles(root: root).filter_map do |profile|
         next if skip && profile['name'].casecmp?(skip.to_s)
 
         identity = get(profile['name'], root: root)
@@ -69,7 +46,7 @@ module Agent
     private
 
     def directory(name, root:)
-      profile = Store.get_profiles(root: root).find { |candidate| candidate['name'].casecmp?(name.to_s) }
+      profile = ProfileStore.get_profiles(root: root).find { |candidate| candidate['name'].casecmp?(name.to_s) }
       profile&.fetch('directory', nil)
     end
 

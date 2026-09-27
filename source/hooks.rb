@@ -1,5 +1,7 @@
 require_relative 'agent/identity'
+require_relative 'agent/memory'
 require_relative 'agent/profile'
+require_relative 'agent/salience'
 require_relative 'jev'
 require_relative 'room'
 
@@ -18,7 +20,6 @@ module Hooks
   ].freeze
 
   RECENT_ROOM = 6
-  MAX_ENTRY = 400
 
   # The policy screen: what a tool call is judged against, and the bar its
   # answer has to cross to count as harmful.
@@ -46,7 +47,7 @@ module Hooks
 
   extend self
 
-  def call(event, jev: JEV, root: Agent::Store::ROOT)
+  def call(event, jev: JEV, root: ProfileStore::ROOT)
     case event['hook_event_name']
     when 'SessionStart'
       session_start(event, root: root)
@@ -64,7 +65,7 @@ module Hooks
     end
   rescue JEV::Error
     block('The policy check is unavailable; request blocked')
-  rescue Agent::Store::Error, Room::Error
+  rescue ProfileStore::Error, Room::Error
     case event['hook_event_name']
     when 'PreToolUse'
       block('Profile access could not be verified')
@@ -75,7 +76,7 @@ module Hooks
 
   private
 
-  # SessionStart — hand the tab its own context: who it is, what it
+  # SessionStart - hand the tab its own context: who it is, what it
   # remembers, who else is here, and what the room has been saying.
   def session_start(event, root:)
     session = event['session_id']
@@ -93,16 +94,16 @@ module Hooks
   def identity_lines(profile, config, root:)
     unless profile
       return [
-        'No profile is registered for this session yet. Claim your name with set_profile — get_profiles',
+        'No profile is registered for this session yet. Claim your name with set_profile - get_profiles',
         'lists the names already taken. If you were not given a profile name, ask the user before registering.'
       ]
     end
 
     name = profile['name']
     identity = Agent::Identity.get(name, root: root)
-    lines = ["You are #{identity ? identity['display_name'] : name} (#{name}) — profile at #{profile['directory']}."]
+    lines = ["You are #{identity ? identity['display_name'] : name} (#{name}) - profile at #{profile['directory']}."]
     lines << identity['personality'] if identity && !identity['personality'].empty?
-    memory = Agent::Identity.memory(name, config['project'], root: root)
+    memory = Agent::Memory.get(name, config['project'], root: root)
     lines.concat(['', 'Your memory:', memory]) unless memory.empty?
     lines
   end
@@ -124,9 +125,13 @@ module Hooks
 
   def room_lines(config, root:)
     entries = Room.messages(config['team_room'], root: config['project_dir'])
-    return ['', "##{config['team_room']} is empty so far — introducing yourself is a fine first move."] if entries.empty?
+    return ['', "##{config['team_room']} is empty so far - introducing yourself is a fine first move."] if entries.empty?
 
-    ['', "Recent ##{config['team_room']} traffic:", *format_entries(entries.last(RECENT_ROOM))]
+    [
+      '',
+      "Recent ##{config['team_room']} traffic:",
+      *Agent::Salience.format_entries(entries.last(RECENT_ROOM))
+    ]
   end
 
   def prior_lines(profile, root:)
@@ -134,7 +139,7 @@ module Hooks
     priors.empty? ? [] : ['', "Your teammates' stated leanings:", priors.join("\n\n")]
   end
 
-  # UserPromptSubmit — a nudge, not a delivery: cursors stay where the agent
+  # UserPromptSubmit - a nudge, not a delivery: cursors stay where the agent
   # left them, so the same traffic is still waiting in read_messages.
   def prompt_submit(event, root:)
     session = event['session_id']
@@ -144,8 +149,14 @@ module Hooks
     return nil unless profile
 
     config = workspace_config
+    unread = Agent::Profile.get_unread(
+      profile['name'],
+      rooms: [config['team_room']],
+      rooms_root: config['project_dir'],
+      root: root
+    )
     lines = ["You are #{profile['name']}. Team room: ##{config['team_room']}."]
-    lines.concat(waiting_lines(waiting_for(profile['name'], config, root: root)))
+    lines.concat(Agent::Salience.unread_lines(unread))
     context('UserPromptSubmit', lines.join("\n"))
   end
 
@@ -205,13 +216,19 @@ module Hooks
     pings = Agent::Profile.read_pings(profile['name'], root: root)
     return nil if pings.empty?
 
-    context('PostToolUse', ["Unread pings (#{pings.length}) — reply in the room when you get a turn:", *format_entries(pings)].join("\n"))
+    context(
+      'PostToolUse',
+      [
+        "Unread pings (#{pings.length}) - reply in the room when you get a turn:",
+        *Agent::Salience.format_entries(pings)
+      ].join("\n")
+    )
   end
 
-  # Stop — the team does not idle. A turn that ends is a teammate nobody can
+  # Stop - the team does not idle. A turn that ends is a teammate nobody can
   # reach, so the hook refuses the stop and hands back what is waiting. The
-  # signals gathered here are the seam a salience layer grows into: what to
-  # weigh, not just what arrived. The stand-down marker is the release valve.
+  # signals gathered by Salience are what it has to weigh, not just what
+  # arrived. The stand-down marker is the release valve.
   def stop(event, root:)
     session = event['session_id']
     return nil unless valid_session?(session)
@@ -222,57 +239,13 @@ module Hooks
     config = workspace_config
     return nil if stand_down?(config['project_dir'])
 
-    lines = ['Do not end the turn yet — this team does not idle.']
-    lines.concat(waiting_lines(waiting_for(profile['name'], config, root: root)))
-    lines.concat(
-      [
-        '',
-        'Anything the room is waiting on from you — a question, a ping, a reply owed — answer it first.',
-        'Otherwise do real work and post what you find. Only when there is genuinely nothing to say or do,',
-        "call wait_for_message on the room (#{stagger_ms(profile['name'])} ms — your cadence), then look again."
-      ]
+    unread = Agent::Profile.get_unread(
+      profile['name'],
+      rooms: [config['team_room']],
+      rooms_root: config['project_dir'],
+      root: root
     )
-    { 'decision' => 'block', 'reason' => lines.join("\n") }
-  end
-
-  def waiting_for(name, config, root:)
-    Agent::Profile.waiting(name, rooms: [config['team_room']], rooms_root: config['project_dir'], root: root)
-  end
-
-  def waiting_lines(waiting)
-    lines = []
-    pings = waiting['pings']
-    lines.concat(['', "Unread pings (#{pings.length}) — reply when you get a turn:", *format_entries(pings)]) unless pings.empty?
-    inbox = waiting['inbox']
-    lines.concat(['', "Unread direct messages (#{inbox.length}) — read_messages inbox:", *format_entries(inbox)]) unless inbox.empty?
-    waiting['rooms'].each do |room, entries|
-      lines.concat(['', "New ##{room} traffic (#{entries.length}):", *format_entries(entries)]) unless entries.empty?
-    end
-    lines << '' << 'Nothing new on the bus.' if lines.empty?
-    lines
-  end
-
-  def format_entries(entries)
-    entries.map do |entry|
-      room = entry['room'] ? " in ##{entry['room']}" : ''
-      "[#{clock(entry['ts'])}] #{entry['from']}#{room}: #{clip(entry['text'], MAX_ENTRY)}"
-    end
-  end
-
-  def clock(ts)
-    Time.at(ts.to_i / 1000.0).strftime('%H:%M:%S')
-  end
-
-  def clip(text, max)
-    text = text.to_s
-    text.length <= max ? text : "#{text[0, max - 1]}…"
-  end
-
-  # Identical cadences make a convoy, so each name gets a stable slot in the
-  # 10–25s range by hash. Nobody waits anywhere near 60s without a reason.
-  def stagger_ms(name)
-    hash = name.to_s.each_char.reduce(0) { |acc, char| ((acc * 31) + char.ord) & 0xffffffff }
-    10_000 + (hash % 4) * 5_000
+    { 'decision' => 'block', 'reason' => Agent::Salience.stop_text(unread) }
   end
 
   def stand_down?(project_dir)

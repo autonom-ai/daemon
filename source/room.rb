@@ -1,8 +1,8 @@
 require 'json'
 require 'securerandom'
 
-require_relative 'agent/store'
-require_relative 'agent/waiters'
+require_relative 'profile_store'
+require_relative 'waiters'
 
 module Room
   DEFAULT_ROOM = 'general'
@@ -13,7 +13,7 @@ module Room
   extend self
 
   # One registry per room, keyed by the people waiting in it. In-memory: a
-  # waiter is a fact about a live MCP process, not about the bus — and a signal
+  # waiter is a fact about a live MCP process, not about the bus - and a signal
   # only reaches this process, so a waiter watches the room file as well.
   WAITERS = {}
   WAITERS_LOCK = Mutex.new
@@ -25,7 +25,7 @@ module Room
   # Rooms are workspace-scoped: they live under the project's .devin directory
   # and never follow a person anywhere.
   def messages(name, root: project_root)
-    Agent::Store.read_jsonl(file(name, root: root))
+    ProfileStore.read_jsonl(file(name, root: root))
   end
 
   def names(root: project_root)
@@ -45,7 +45,7 @@ module Room
       'from' => from.to_s,
       'text' => text.to_s
     }
-    Agent::Store.append_jsonl(file(room, root: root), entry)
+    ProfileStore.append_jsonl(file(room, root: root), entry)
     wake(room)
     entry
   end
@@ -68,7 +68,7 @@ module Room
   def normalize(name, root: project_root)
     name = name.to_s.strip.sub(/\A#/, '').downcase
     name = default_name(root: root) if name.empty?
-    raise Error, 'Invalid room name' unless Agent::Store.valid_name?(name)
+    raise Error, 'Invalid room name' unless ProfileStore.valid_name?(name)
 
     name
   end
@@ -78,7 +78,7 @@ module Room
   def default_name(root: project_root)
     config = JSON.parse(File.read(File.join(root, '.devin', 'coord.json')))
     name = config['teamRoom'].to_s.strip.sub(/\A#/, '').downcase
-    Agent::Store.valid_name?(name) ? name : DEFAULT_ROOM
+    ProfileStore.valid_name?(name) ? name : DEFAULT_ROOM
   rescue SystemCallError, JSON::ParserError
     DEFAULT_ROOM
   end
@@ -96,7 +96,7 @@ module Room
   private
 
   def registry(name)
-    WAITERS_LOCK.synchronize { WAITERS[name] ||= Agent::Waiters::Registry.new }
+    WAITERS_LOCK.synchronize { WAITERS[name] ||= Waiters::Registry.new }
   end
 
   def rooms_dir(root)

@@ -1,4 +1,4 @@
-require_relative '../agent/store'
+require_relative '../profile_store'
 
 require 'json'
 require 'net/http'
@@ -68,7 +68,7 @@ module JEV
 
     # The clone's .env is where a key lives when the environment does not carry it.
     def dotenv(name)
-      file = File.join(Agent::Store::ROOT, '.env')
+      file = File.join(ProfileStore::ROOT, '.env')
       return nil unless File.file?(file)
 
       File.foreach(file) do |line|

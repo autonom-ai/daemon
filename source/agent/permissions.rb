@@ -1,4 +1,4 @@
-require_relative 'store'
+require_relative '../profile_store'
 
 require 'shellwords'
 
@@ -7,25 +7,25 @@ module Agent
     module Permissions
       extend self
 
-      def can_set_profile?(name, session:, root: Store::ROOT)
-        name = Store.normalize_name(name)
-        profile = Store.get_profile(session, root: root)
+      def can_set_profile?(name, session:, root: ProfileStore::ROOT)
+        name = ProfileStore.normalize_name(name)
+        profile = ProfileStore.get_profile(session, root: root)
         return true unless profile
 
         profile['name'].casecmp?(name)
-      rescue Store::Error
+      rescue ProfileStore::Error
         false
       end
 
-      def can_read?(path, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      def can_read?(path, session: nil, root: ProfileStore::ROOT, dir: Dir.pwd)
         can_access?(path, session: session, root: root, dir: dir)
       end
 
-      def can_write?(path, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      def can_write?(path, session: nil, root: ProfileStore::ROOT, dir: Dir.pwd)
         can_access?(path, session: session, root: root, dir: dir)
       end
 
-      def can_search?(path, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      def can_search?(path, session: nil, root: ProfileStore::ROOT, dir: Dir.pwd)
         return false unless can_read?(path, session: session, root: root, dir: dir)
 
         path = resolve(path, dir)
@@ -34,7 +34,7 @@ module Agent
         !agents.start_with?(prefix)
       end
 
-      def can_glob?(pattern, path:, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      def can_glob?(pattern, path:, session: nil, root: ProfileStore::ROOT, dir: Dir.pwd)
         return false unless pattern.is_a?(String) && !pattern.empty?
         return false unless can_read?(path, session: session, root: root, dir: dir)
 
@@ -47,8 +47,8 @@ module Agent
           File.join(agents, 'sessions.json.lock'),
           *Dir.glob(File.join(agents, '.sessions-*'))
         ]
-        current = Store.get_profile(session, root: root)
-        Store.get_profiles(root: root).each do |profile|
+        current = ProfileStore.get_profile(session, root: root)
+        ProfileStore.get_profiles(root: root).each do |profile|
           next if current && profile['name'].casecmp?(current['name'])
 
           restricted.concat(Dir.glob(File.join(profile['directory'], '**', '*'), File::FNM_DOTMATCH))
@@ -64,7 +64,7 @@ module Agent
         false
       end
 
-      def can_exec?(cmd, session: nil, root: Store::ROOT, dir: Dir.pwd)
+      def can_exec?(cmd, session: nil, root: ProfileStore::ROOT, dir: Dir.pwd)
         return false unless cmd.is_a?(String)
         return false unless can_read?(dir, session: session, root: root)
         return false if deletes_protected?(cmd, root: root, dir: dir)
@@ -91,7 +91,7 @@ module Agent
           return false if relative.empty? || store_file?(relative)
 
           name = relative.split(File::SEPARATOR).first
-          profile = Store.get_profile(session, root: root)
+          profile = ProfileStore.get_profile(session, root: root)
           return profile && profile['name'].casecmp?(name)
         end
 
@@ -99,7 +99,7 @@ module Agent
         return true unless name
         return false if store_file?(name)
 
-        profile = Store.get_profile(session, root: root)
+        profile = ProfileStore.get_profile(session, root: root)
         profile && profile['name'].casecmp?(name)
       end
 
