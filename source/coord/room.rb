@@ -1,43 +1,43 @@
-# One room: the workspace-scoped side of the bus. A room holds the bus, so its
-# methods take a profile and nothing else.
 class Room
-  def initialize(bus, name)
-    @bus = bus
-    @name = bus.normalize(name)
+  DESCRIPTION_KEY = 'description'
+
+  def initialize(name, description)
+    @name = name
+    @description = description
   end
 
-  attr_reader :name
+  attr_reader :name, :description
 
   def path
-    @bus.stream_path(@bus.config.rooms_dir, "#{@name}.jsonl")
+    Bus.room_path(@name)
   end
 
   def messages
-    @bus.read(path)
+    entries = Bus.read(path)
+    entries.first&.key?(DESCRIPTION_KEY) ? entries.drop(1) : entries
   end
 
   def unread(profile)
-    messages.drop(@bus.cursor(profile, source))
+    messages.drop(Bus.cursor(profile, source))
   end
 
   def read(profile, limit: nil)
-    @bus.read_stream(profile, source, messages, limit: limit)
+    Bus.read_stream(profile, source, messages, limit: limit)
   end
 
   def post(text, from:)
-    entry = @bus.entry(from: from, text: text)
-    @bus.append(path, entry)
-    @bus.wake_source(source)
+    entry = Bus.entry(from: from, text: text)
+    Bus.append(path, entry)
+    ProfileStore.wake_source(source)
     entry
   end
 
   def wait(profile, timeout:)
-    @bus.wait(profile, source, timeout: timeout, watch: [path])
+    ProfileStore.wait(profile, source, timeout: timeout, watch: [path])
   end
 
   private
 
-  # The stream key a room's read cursor lives under.
   def source
     "room:#{@name}"
   end

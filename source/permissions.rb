@@ -1,8 +1,8 @@
 require 'shellwords'
 
-# Access control for the profile it is mixed into: which paths, profiles, and
-# shell commands this person may touch. The store and the workspace come from
-# the bus the profile holds, so only the tool's own input varies.
+require_relative 'config'
+require_relative 'profile_store'
+
 module Permissions
   def can_read?(path)
     can_access?(path)
@@ -15,8 +15,8 @@ module Permissions
   def can_search?(path)
     return false unless can_read?(path)
 
-    path = resolve(path, @bus.config.project_dir)
-    agents = resolve(File.join(@bus.store.root, 'agents'), @bus.config.project_dir)
+    path = resolve(path, Config.project_dir)
+    agents = resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
     prefix = path.end_with?(File::SEPARATOR) ? path : "#{path}#{File::SEPARATOR}"
     !agents.start_with?(prefix)
   end
@@ -25,16 +25,16 @@ module Permissions
     return false unless pattern.is_a?(String) && !pattern.empty?
     return false unless can_read?(path)
 
-    base = resolve(path, @bus.config.project_dir)
+    base = resolve(path, Config.project_dir)
     glob = File.expand_path(pattern, base)
-    agents = resolve(File.join(@bus.store.root, 'agents'), @bus.config.project_dir)
+    agents = resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
     restricted = [
       agents,
       File.join(agents, 'sessions.json'),
       File.join(agents, 'sessions.json.lock'),
       *Dir.glob(File.join(agents, '.sessions-*'))
     ]
-    @bus.store.records.each do |record|
+    ProfileStore.records.each do |record|
       next if @name && record.name.casecmp?(@name)
 
       restricted.concat(Dir.glob(File.join(record.directory, '**', '*'), File::FNM_DOTMATCH))
@@ -49,7 +49,7 @@ module Permissions
   end
 
   def can_exec?(cmd, dir: nil)
-    dir ||= @bus.config.project_dir
+    dir ||= Config.project_dir
     return false unless cmd.is_a?(String)
     return false unless can_read?(dir)
     return false if deletes_protected?(cmd, dir: dir)
@@ -62,12 +62,12 @@ module Permissions
   def can_access?(path)
     return false unless path.is_a?(String) && !path.empty?
 
-    path = resolve(path, @bus.config.project_dir)
-    root = resolve(@bus.store.root, @bus.config.project_dir)
+    path = resolve(path, Config.project_dir)
+    root = resolve(ProfileStore.root, Config.project_dir)
     name = File.basename(path)
     return false if name == '.env' || name.start_with?('.env.')
 
-    agents = resolve(File.join(root, 'agents'), @bus.config.project_dir)
+    agents = resolve(File.join(root, 'agents'), Config.project_dir)
     if path == agents || path.start_with?("#{agents}#{File::SEPARATOR}")
       relative = path.delete_prefix("#{agents}#{File::SEPARATOR}")
       return false if relative.empty? || store_file?(relative)
@@ -110,7 +110,7 @@ module Permissions
     paths = shell_paths(cmd).map { |path| resolve(path, dir) }
     paths.any? do |path|
       path == resolve(Dir.home, dir) ||
-        path == resolve(File.join(@bus.store.root, 'source'), dir) ||
+        path == resolve(File.join(ProfileStore.root, 'source'), dir) ||
         path == resolve(File::SEPARATOR, dir)
     end
   end
@@ -137,13 +137,10 @@ module Permissions
   end
 end
 
-# The permissions of a session that has not claimed a profile: it may touch
-# the workspace, but nothing that belongs to a profile.
 class Unclaimed
   include Permissions
 
-  def initialize(bus)
-    @bus = bus
+  def initialize()
     @name = nil
   end
 end

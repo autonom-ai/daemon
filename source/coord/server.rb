@@ -5,7 +5,6 @@ require_relative 'bus'
 require 'json'
 
 module Coord
-  # The MCP server: JSON-RPC over stdio, one bus per workspace.
   class Server
     INFO = { 'name' => 'autonom-coord-mcp', 'version' => '0.1.0' }.freeze
     PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
@@ -16,10 +15,6 @@ module Coord
     DEFAULT_WAIT = 30
     MAX_WAIT = 60
     ONLINE_MS = 30 * 60_000
-
-    def initialize(bus)
-      @bus = bus
-    end
 
     def run(input: STDIN, output: STDOUT)
       output.sync = true
@@ -200,11 +195,11 @@ module Coord
 
       ret = case tool
       when 'get_profiles'
-        @bus.profiles.map { |profile| profile_entry(profile) }
+        ProfileStore.profiles.map { |profile| profile_entry(profile) }
       when 'get_profile'
-        profile_entry(@bus.profile(session))
+        profile_entry(ProfileStore.profile(session))
       when 'set_profile'
-        profile_entry(@bus.register(session, args['name']))
+        profile_entry(ProfileStore.register(session, args['name']))
       when 'send_message'
         send_message(args, session)
       when 'read_messages'
@@ -239,12 +234,12 @@ module Coord
 
       targets = ping_targets(args['ping'], from)
       if args['to'].to_s.empty?
-        room = @bus.room(args['room'])
+        room = room_named(args['room'])
         entry = room.post(text, from: from)
         targets.each { |target| target.inbox.ping(text, from: from, room: room) }
         { 'room' => room.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
       else
-        to = @bus.profile_named(args['to'])
+        to = ProfileStore.profile_named(args['to'])
         raise ProfileStore::Error, "Unknown profile: #{args['to']}" unless to
 
         entry = to.inbox.dm(text, from: from)
@@ -280,10 +275,11 @@ module Coord
 
     def list_rooms(session)
       profile = registered_profile(session)
-      @bus.rooms.map do |room|
+      Bus.rooms.map do |room|
         entries = room.messages
         {
           'name' => room.name,
+          'description' => room.description,
           'count' => entries.length,
           'unread' => room.unread(profile).length,
           'lastTs' => entries.last&.fetch('ts', nil)
@@ -292,7 +288,7 @@ module Coord
     end
 
     def get_heartbeat(args)
-      profile = @bus.profile_named(args['name'])
+      profile = ProfileStore.profile_named(args['name'])
       raise ProfileStore::Error, "Unknown profile: #{args['name']}" unless profile
 
       heartbeat = profile.heartbeat
@@ -307,7 +303,7 @@ module Coord
     # caller's own profile is stamped by whatever tool it just called. A
     # session that has not registered yet has nobody to stamp.
     def stamp_heartbeat(session)
-      profile = @bus.profile(session)
+      profile = ProfileStore.profile(session)
       profile&.touch_heartbeat()
     rescue ProfileStore::Error
       nil
@@ -321,8 +317,17 @@ module Coord
       source = args['source'].to_s
       source = 'room' if source.empty?
       raise ProfileStore::Error, "Unknown source: #{source}" unless SOURCES.include?(source)
+      return [source, nil] unless source == 'room'
 
-      [source, @bus.room(args['room'])]
+      [source, room_named(args['room'])]
+    end
+
+    def room_named(name)
+      wanted = Bus.room_name(name)
+      room = Bus.rooms.find { |candidate| candidate.name == wanted }
+      raise ProfileStore::Error, "Unknown room: #{wanted}" unless room
+
+      room
     end
 
     def read_stream(profile, source, room, limit)
@@ -346,7 +351,7 @@ module Coord
     end
 
     def registered_profile(session)
-      profile = @bus.profile(session)
+      profile = ProfileStore.profile(session)
       raise ProfileStore::Error, 'No profile is registered for this session; register one first' unless profile
 
       profile
@@ -356,7 +361,7 @@ module Coord
       return [] unless names.is_a?(Array)
 
       targets = names.map do |name|
-        target = @bus.profile_named(name)
+        target = ProfileStore.profile_named(name)
         raise ProfileStore::Error, "Unknown profile to ping: #{name}" unless target
 
         target
@@ -383,6 +388,4 @@ module Coord
   end
 end
 
-Coord::Server.new(
-  Bus.new(config: Config.load(), store: ProfileStore.new())
-).run if $PROGRAM_NAME == __FILE__
+Coord::Server.new.run if $PROGRAM_NAME == __FILE__

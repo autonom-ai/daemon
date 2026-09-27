@@ -6,25 +6,17 @@ require_relative 'memory/memory'
 require_relative 'permissions'
 require_relative 'profile_store'
 
-# A profile as the bus sees it: who it is, where it lives, and everything
-# waiting for them across the inbox and the rooms. Profile-dependent things
-# hang off the profile itself.
 class Profile
   include Permissions
 
   HEARTBEAT_FILE = 'heartbeat.json'
 
-  def initialize(bus, name, directory)
-    @bus = bus
+  def initialize(name, directory)
     @name = name
     @directory = directory
   end
 
-  attr_reader :bus, :name, :directory
-
-  def inbox
-    @bus.inbox(self)
-  end
+  attr_reader :name, :directory
 
   def identity
     @identity ||= Identity.new(self)
@@ -32,17 +24,6 @@ class Profile
 
   def memory
     @memory ||= Memory.new(self)
-  end
-
-  # Everything waiting for this profile: unread pings, unread DMs, and the
-  # unread lines of the team room, keyed by room name.
-  def unread
-    room = @bus.room(@bus.team_room)
-    {
-      'pings' => inbox.unread_pings,
-      'inbox' => inbox.unread,
-      'rooms' => { room.name => room.unread(self) }
-    }
   end
 
   # Profile heartbeat is determined by last MCP call.
@@ -72,7 +53,10 @@ class Profile
   private
 
   def heartbeat_path
-    @bus.stream_path(@bus.store.directory(@name), HEARTBEAT_FILE)
+    path = File.join(@directory, HEARTBEAT_FILE)
+    raise ProfileStore::Error, 'Heartbeat must not be a symlink' if File.symlink?(path)
+
+    path
   end
 
   def parse_heartbeat(raw)
