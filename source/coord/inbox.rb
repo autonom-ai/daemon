@@ -42,7 +42,7 @@ class Inbox
   def dm(text, from:)
     entry = Bus.entry(from: from, text: text, to: @profile)
     Bus.append(path, entry)
-    ProfileStore.wake(@profile, SOURCE)
+    Bus.wake(@profile, SOURCE)
     entry
   end
 
@@ -51,11 +51,11 @@ class Inbox
     Bus.append(pings_path, entry)
     # A ping interrupts anything: it ends an inbox wait and any room wait
     # this person is parked in.
-    ProfileStore.wake_agent(@profile)
+    Bus.wake_agent(@profile)
     entry
   end
 
   def wait(timeout:)
-    ProfileStore.wait(@profile, SOURCE, timeout: timeout, watch: [path, pings_path])
+    Bus.wait(@profile, SOURCE, timeout: timeout, watch: [path, pings_path])
   end
 end

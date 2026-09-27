@@ -14,6 +14,93 @@ module Bus
   class Error < StandardError
   end
 
+  class WaitRegistry
+    FIRST_SLICE = 0.05
+    MAX_SLICE = 0.5
+
+    Ticket = Struct.new(:woken)
+
+    def initialize()
+      @lock = Mutex.new
+      @condition = ConditionVariable.new
+      @entries = {}
+    end
+
+    def wait(agent, source, timeout:, watch: [])
+      # The files are read before the waiter is registered: a line that lands
+      # in the gap is a change the waiter can still see on its next slice, and
+      # one that lands after registration is a change too.
+      baseline = fingerprint(watch)
+      ticket = Ticket.new(false)
+      @lock.synchronize { ((@entries[source] ||= {})[agent] ||= []) << ticket }
+      park(ticket, timeout, watch, baseline)
+    ensure
+      @lock.synchronize do
+        parked = @entries.dig(source, agent)
+        parked&.delete(ticket)
+        @entries[source]&.delete(agent) if parked&.empty?
+        @entries.delete(source) if @entries[source]&.empty?
+      end
+    end
+
+    def wake(agent, source)
+      signal() { Array(@entries.dig(source, agent)) }
+    end
+
+    def wake_agent(agent)
+      signal() { @entries.values.flat_map { |agents| Array(agents[agent]) } }
+    end
+
+    def wake_source(source)
+      signal() { Array(@entries[source]&.values&.flatten) }
+    end
+
+    private
+
+    def signal()
+      @lock.synchronize do
+        yield.each { |ticket| ticket.woken = true }
+        @condition.broadcast
+      end
+    end
+
+    # A wake that lands before the wait is not lost: the flag is already set
+    # when the wait starts, so it returns without sleeping. A wait with files
+    # to watch sleeps in slices and looks at them in between, so a write from
+    # another process lands within a slice; a wait with nothing to watch
+    # sleeps the whole timeout in one go.
+    def park(ticket, timeout, watch, baseline)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      slice = FIRST_SLICE
+      loop do
+        remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        return if remaining <= 0
+
+        @lock.synchronize do
+          @condition.wait(@lock, watch.empty? ? remaining : [slice, remaining].min) unless ticket.woken
+          return if ticket.woken
+        end
+        return if fingerprint(watch) != baseline
+
+        slice = [slice * 2, MAX_SLICE].min
+      end
+    end
+
+    # What the watched files looked like when the wait began: size catches an
+    # append, mtime and inode catch a rewrite or a replaced file, and a file
+    # that is not there yet is a state like any other - its arrival is a change.
+    def fingerprint(paths)
+      paths.map do |path|
+        stat = File.stat(path)
+        [stat.size, stat.mtime.to_f, stat.ino]
+      rescue SystemCallError
+        nil
+      end
+    end
+  end
+
+  WAITERS = WaitRegistry.new
+
   extend self
 
   def rooms
@@ -138,6 +225,22 @@ module Bus
     unread = seen.zero? && limit ? entries.last(limit) : entries.drop(seen)
     advance_cursor(profile, key, entries.length)
     unread
+  end
+
+  def wait(profile, source, timeout:, watch: [])
+    WAITERS.wait(profile.name, source, timeout: timeout, watch: watch)
+  end
+
+  def wake(profile, source)
+    WAITERS.wake(profile.name, source)
+  end
+
+  def wake_agent(profile)
+    WAITERS.wake_agent(profile.name)
+  end
+
+  def wake_source(source)
+    WAITERS.wake_source(source)
   end
 
   private

@@ -28,12 +28,12 @@ class Room
   def post(text, from:)
     entry = Bus.entry(from: from, text: text)
     Bus.append(path, entry)
-    ProfileStore.wake_source(source)
+    Bus.wake_source(source)
     entry
   end
 
   def wait(profile, timeout:)
-    ProfileStore.wait(profile, source, timeout: timeout, watch: [path])
+    Bus.wait(profile, source, timeout: timeout, watch: [path])
   end
 
   private
