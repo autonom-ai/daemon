@@ -3,68 +3,56 @@ require 'json'
 require 'securerandom'
 
 require_relative '../config'
-require_relative '../profile'
 require_relative '../profile_store'
 require_relative 'inbox'
 require_relative 'room'
 
-# The workspace's bus: stream mechanics plus the handles over it. It owns the
-# workspace config and the profile store, so a room, an inbox, and a profile
-# hold the bus rather than being handed a root on every call.
-class Bus
+module Bus
   CURSORS_FILE = 'cursors.json'
+  DESCRIPTION_KEY = 'description'
 
   class Error < StandardError
   end
 
-  def initialize(config:, store:)
-    @config = config
-    @store = store
-  end
-
-  attr_reader :config, :store
-
-  def profiles
-    @store.records.map { |record| profile_from(record) }
-  end
-
-  def profile(session)
-    record = @store.session(session)
-    record && profile_from(record)
-  end
-
-  def register(session, name)
-    profile_from(@store.register(session, name))
-  end
-
-  def profile_named(name)
-    record = @store.record(name)
-    record && profile_from(record)
-  end
-
-  def room(name)
-    Room.new(self, name)
-  end
+  extend self
 
   def rooms
-    (room_names | [team_room]).sort.map { |name| Room.new(self, name) }
+    dir = Config.rooms_dir
+    return [] unless File.directory?(dir)
+
+    Dir.children(dir).filter_map do |entry|
+      entry.delete_suffix('.jsonl') if entry.end_with?('.jsonl')
+    end.sort.map { |name| Room.new(name, description(room_path(name))) }
   end
 
   def inbox(profile)
-    Inbox.new(self, profile)
+    Inbox.new(profile)
   end
 
-  def team_room
-    name = @config.team_room.to_s.strip.sub(/\A#/, '').downcase
-    @store.valid_name?(name) ? name : Config::DEFAULT_TEAM_ROOM
+  def unread(profile)
+    mailbox = inbox(profile)
+    {
+      'pings' => mailbox.unread_pings,
+      'inbox' => mailbox.unread,
+      'rooms' => rooms.to_h { |room| [room.name, room.unread(profile)] }
+    }
   end
 
-  def normalize(name)
+  def room_name(name)
     name = name.to_s.strip.sub(/\A#/, '').downcase
-    name = team_room if name.empty?
-    raise Error, 'Invalid room name' unless @store.valid_name?(name)
+    name = default_room if name.empty?
+    raise Error, 'Invalid room name' unless ProfileStore.valid_name?(name)
 
     name
+  end
+
+  def default_room
+    name = Config.default_room.to_s.strip.sub(/\A#/, '').downcase
+    ProfileStore.valid_name?(name) ? name : nil
+  end
+
+  def room_path(name)
+    stream_path(Config.rooms_dir, "#{room_name(name)}.jsonl")
   end
 
   def read(path)
@@ -77,6 +65,13 @@ class Bus
     end
   rescue SystemCallError => error
     raise Error, "Could not read chat stream: #{error.class}"
+  end
+
+  def head(path)
+    line = File.exist?(path) ? File.open(path) { |file| file.gets } : nil
+    line ? JSON.parse(line) : nil
+  rescue JSON::ParserError, SystemCallError
+    nil
   end
 
   def append(path, entry)
@@ -111,8 +106,6 @@ class Bus
     path
   end
 
-  # How far a profile has read each stream: "inbox", "pings", and
-  # "room:<name>" keys, each holding the entry count already delivered.
   def cursor(profile, key)
     cursors(profile)[key.to_s].to_i
   end
@@ -147,35 +140,11 @@ class Bus
     unread
   end
 
-  def wait(profile, source, timeout:, watch: [])
-    @store.wait(profile.name, source, timeout: timeout, watch: watch)
-  end
-
-  def wake(profile, source)
-    @store.wake(profile.name, source)
-  end
-
-  def wake_agent(profile)
-    @store.wake_agent(profile.name)
-  end
-
-  def wake_source(source)
-    @store.wake_source(source)
-  end
-
   private
 
-  def profile_from(record)
-    Profile.new(self, record.name, record.directory)
-  end
-
-  def room_names
-    dir = @config.rooms_dir
-    return [] unless File.directory?(dir)
-
-    Dir.children(dir).filter_map do |entry|
-      entry.delete_suffix('.jsonl') if entry.end_with?('.jsonl')
-    end.sort
+  def description(path)
+    head = head(path)
+    head && head[DESCRIPTION_KEY]
   end
 
   def cursors(profile)
@@ -186,7 +155,7 @@ class Bus
   end
 
   def cursors_path(profile)
-    stream_path(@store.directory(profile.name), CURSORS_FILE)
+    stream_path(ProfileStore.directory(profile.name), CURSORS_FILE)
   end
 
   def parse_cursors(raw)

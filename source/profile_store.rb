@@ -2,11 +2,9 @@ require 'fileutils'
 require 'json'
 require 'securerandom'
 
-# The gateway to profile information: who the profiles are, which session
-# belongs to which profile, and where a profile's directory lives. It is also
-# the single waiter source for the bus, so a wake names a profile, a source,
-# or both without either source knowing about the other.
-class ProfileStore
+require_relative 'profile'
+
+module ProfileStore
   ROOT = File.expand_path('..', __dir__)
   NAME_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\z/
   SESSIONS_FILE = 'sessions.json'
@@ -14,12 +12,8 @@ class ProfileStore
   class Error < StandardError
   end
 
-  # A profile as the store knows it: a name and the directory it lives in.
   Record = Struct.new(:name, :directory)
 
-  # Waiters are parked by source ("inbox", "pings", "room:<name>") and by the
-  # profile parked on it, so one wake can name a profile on a source, every
-  # source a profile is parked on, or every profile on a source.
   class WaitRegistry
     FIRST_SLICE = 0.05
     MAX_SLICE = 0.5
@@ -105,12 +99,17 @@ class ProfileStore
     end
   end
 
-  def initialize(root = ROOT)
-    @root = File.expand_path(root)
-    @waiters = WaitRegistry.new
+  WAITERS = WaitRegistry.new
+
+  extend self
+
+  def root
+    @root ||= ROOT
   end
 
-  attr_reader :root
+  def root=(path)
+    @root = File.expand_path(path)
+  end
 
   def records
     dir = agents_dir
@@ -137,36 +136,38 @@ class ProfileStore
   def session(session)
     return nil if session.nil? || session.to_s.empty?
 
-    name = with_lock(File::LOCK_SH) { read_sessions()[validate_session(session)] }
+    name = with_lock(File::LOCK_SH) { read_sessions[validate_session(session)] }
     return nil unless name
 
-    record = record(name)
-    raise Error, 'The registered profile no longer exists' unless record
+    stored = record(name)
+    raise Error, 'The registered profile no longer exists' unless stored
 
-    record
+    stored
   end
 
   def register(session, name)
     session = validate_session(session)
     name = normalize_name(name)
 
-    with_lock(File::LOCK_EX) do
-      sessions = read_sessions()
+    stored = with_lock(File::LOCK_EX) do
+      sessions = read_sessions
       current = sessions[session]
 
       if current
-        record = record(current)
-        raise Error, 'The registered profile no longer exists' unless record
-        raise Error, 'A session profile cannot be changed after registration' unless record.name.casecmp?(name)
+        existing = record(current)
+        raise Error, 'The registered profile no longer exists' unless existing
+        raise Error, 'A session profile cannot be changed after registration' unless existing.name.casecmp?(name)
 
-        next record
+        next existing
       end
 
-      record = record(name) || create(name.downcase)
-      sessions[session] = record.name
+      existing = record(name) || create(name.downcase)
+      sessions[session] = existing.name
       write_sessions(sessions)
-      record
+      existing
     end
+
+    profile_from(stored)
   end
 
   def directory(name)
@@ -177,6 +178,20 @@ class ProfileStore
     raise Error, 'Profile directory must not be a symlink' if File.symlink?(profile)
 
     profile
+  end
+
+  def profiles
+    records.map { |record| profile_from(record) }
+  end
+
+  def profile(session)
+    stored = session(session)
+    stored && profile_from(stored)
+  end
+
+  def profile_named(name)
+    stored = record(name)
+    stored && profile_from(stored)
   end
 
   def valid_name?(name)
@@ -190,26 +205,30 @@ class ProfileStore
     name
   end
 
-  def wait(agent, source, timeout:, watch: [])
-    @waiters.wait(agent, source, timeout: timeout, watch: watch)
+  def wait(profile, source, timeout:, watch: [])
+    WAITERS.wait(profile.name, source, timeout: timeout, watch: watch)
   end
 
-  def wake(agent, source)
-    @waiters.wake(agent, source)
+  def wake(profile, source)
+    WAITERS.wake(profile.name, source)
   end
 
-  def wake_agent(agent)
-    @waiters.wake_agent(agent)
+  def wake_agent(profile)
+    WAITERS.wake_agent(profile.name)
   end
 
   def wake_source(source)
-    @waiters.wake_source(source)
+    WAITERS.wake_source(source)
   end
 
   private
 
   def agents_dir
-    File.join(@root, 'agents')
+    File.join(root, 'agents')
+  end
+
+  def profile_from(record)
+    Profile.new(record.name, record.directory)
   end
 
   def create(name)

@@ -51,18 +51,18 @@ module Hooks
 
   extend self
 
-  def call(event, jev: JEV, bus: default_bus())
+  def call(event, jev: JEV)
     case event['hook_event_name']
     when 'SessionStart'
-      session_start(event, bus: bus)
+      session_start(event)
     when 'UserPromptSubmit'
-      prompt_submit(event, bus: bus)
+      prompt_submit(event)
     when 'PreToolUse'
-      pre_tool_use(event, jev: jev, bus: bus)
+      pre_tool_use(event, jev: jev)
     when 'PostToolUse'
-      post_tool_use(event, bus: bus)
+      post_tool_use(event)
     when 'Stop'
-      stop(event, bus: bus)
+      stop(event)
     when 'SubagentStop'
       # Avoid subagents waiting forever.
       nil
@@ -80,25 +80,19 @@ module Hooks
 
   private
 
-  def default_bus()
-    Bus.new(config: Config.load(), store: ProfileStore.new())
-  end
-
   # SessionStart - hand the tab its own context: who it is, what it
   # remembers, who else is here, and what the room has been saying.
-  def session_start(event, bus:)
-    session = event['session_id']
-    profile = bus.profile(session)
+  def session_start(event)
+    profile = ProfileStore.profile(event['session_id'])
     lines = []
-    lines << "Your session ID is #{session}. Tell the user what it is." if session
-    lines.concat(identity_lines(profile, bus))
-    lines.concat(team_lines(profile, bus))
-    lines.concat(room_lines(bus))
-    lines.concat(prior_lines(profile, bus))
+    lines.concat(identity_lines(profile))
+    lines.concat(team_lines(profile))
+    lines.concat(room_lines)
+    lines.concat(prior_lines(profile))
     context('SessionStart', lines.join("\n"))
   end
 
-  def identity_lines(profile, bus)
+  def identity_lines(profile)
     unless profile
       return [
         'No profile is registered for this session yet. Claim your name with set_profile - get_profiles',
@@ -109,68 +103,63 @@ module Hooks
     identity = profile.identity.get()
     lines = ["You are #{identity ? identity['display_name'] : profile.name} (#{profile.name}) - profile at #{profile.directory}."]
     lines << identity['personality'] if identity && !identity['personality'].empty?
-    if bus.config.memory.enabled?
+    if Config.memory.enabled?
       memory = profile.memory.get()
       lines.concat(['', 'Your memory:', memory]) unless memory.empty?
     end
     lines
   end
 
-  def team_lines(profile, bus)
-    teammates = bus.profiles.map(&:name)
+  def team_lines(profile)
+    teammates = ProfileStore.profiles.map(&:name)
     teammates = teammates.reject { |name| name.casecmp?(profile ? profile.name : '') }
+    rooms = Bus.rooms.map { |room| room.description ? "##{room.name} (#{room.description})" : "##{room.name}" }
     lines = [
       '',
-      'This workspace is worked by a team. The room is where the team actually is: talk there, coordinate',
-      'there, post what you find.'
+      'This workspace is worked by a team. The rooms are where the team actually is: talk there,',
+      'coordinate there, post what you find.'
     ]
-    lines << "Team room: ##{bus.team_room}."
+    lines << (rooms.empty? ? 'No rooms yet.' : "Rooms: #{rooms.join(', ')}.")
+    lines << "Default room: ##{Bus.default_room}." if Bus.default_room
     lines << (teammates.empty? ? 'Nobody else is registered yet.' : "Teammates: #{teammates.join(', ')}.")
     lines
   end
 
-  def room_lines(bus)
-    room = bus.room(bus.team_room)
-    entries = room.messages
-    return ['', "##{room.name} is empty so far - introducing yourself is a fine first move."] if entries.empty?
+  def room_lines
+    entries = Bus.rooms.flat_map(&:messages).sort_by { |entry| entry['ts'].to_i }.last(RECENT_ROOM)
+    return ['', 'No room has traffic yet - introducing yourself is a fine first move.'] if entries.empty?
 
-    [
-      '',
-      "Recent ##{room.name} traffic:",
-      *Salience.format_entries(entries.last(RECENT_ROOM))
-    ]
+    ['', 'Recent traffic:', *Salience.format_entries(entries)]
   end
 
-  def prior_lines(profile, bus)
-    priors = Identity.priors(bus.profiles, skip: profile && profile.name)
+  def prior_lines(profile)
+    priors = Identity.priors(ProfileStore.profiles, skip: profile && profile.name)
     priors.empty? ? [] : ['', "Your teammates' stated leanings:", priors.join("\n\n")]
   end
 
   # UserPromptSubmit - a nudge, not a delivery: cursors stay where the agent
   # left them, so the same traffic is still waiting in read_messages.
-  def prompt_submit(event, bus:)
+  def prompt_submit(event)
     session = event['session_id']
     return nil unless valid_session?(session)
 
-    profile = bus.profile(session)
+    profile = ProfileStore.profile(session)
     return nil unless profile
 
-    lines = ["You are #{profile.name}. Team room: ##{bus.team_room}."]
-    lines.concat(Salience.unread_lines(profile.unread))
+    lines = ["You are #{profile.name}."]
+    lines.concat(Salience.unread_lines(Bus.unread(profile)))
     context('UserPromptSubmit', lines.join("\n"))
   end
 
-  def pre_tool_use(event, jev:, bus:)
+  def pre_tool_use(event, jev:)
     tool = event['tool_name'].to_s
     input = event['tool_input'].is_a?(Hash) ? event['tool_input'] : {}
     session = event['session_id']
-    profile = bus.profile(session)
-    reason = denial(tool, input, session, profile, bus)
+    profile = ProfileStore.profile(session)
+    reason = denial(tool, input, session, profile)
     return block(reason) if reason
 
-    # The workspace's config names the backend; an absent key keeps the
-    # default, and false turns screening off outright.
-    policy = bus.config.policy
+    policy = Config.policy
     if policy.enabled?
       jev.backend = policy.backend if policy.backend.is_a?(String)
       return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
@@ -206,14 +195,14 @@ module Hooks
   # Every tool call is a chance to deliver what the agent has not seen: an
   # unread ping rides back as context, and reading it advances the cursor so
   # it is delivered exactly once. A failure here must never break the tool.
-  def post_tool_use(event, bus:)
+  def post_tool_use(event)
     session = event['session_id']
     return nil unless valid_session?(session)
 
-    profile = bus.profile(session)
+    profile = ProfileStore.profile(session)
     return nil unless profile
 
-    pings = profile.inbox.read_pings()
+    pings = Bus.inbox(profile).read_pings()
     return nil if pings.empty?
 
     context(
@@ -229,18 +218,18 @@ module Hooks
   # reach, so the hook refuses the stop and hands back what is waiting. An
   # unread message is the only thing that blocks: an agent with nothing owed
   # is allowed to stop and wait. The stand-down marker is the release valve.
-  def stop(event, bus:)
+  def stop(event)
     session = event['session_id']
     return nil unless valid_session?(session)
     # A stop hook that keeps blocking re-enters itself; one re-prompt is the
     # point, a loop is not.
     return nil if event['stop_hook_active']
 
-    profile = bus.profile(session)
+    profile = ProfileStore.profile(session)
     return nil unless profile
 
-    return nil if stand_down?(bus)
-    return nil unless bus.config.salience.enabled?
+    return nil if stand_down?
+    return nil unless Config.salience.enabled?
 
     reason = Salience.stop_text(profile)
     return nil unless reason
@@ -248,12 +237,12 @@ module Hooks
     { 'decision' => 'block', 'reason' => reason }
   end
 
-  def stand_down?(bus)
-    File.exist?(File.join(bus.config.dir, 'collaboration', 'stand-down'))
+  def stand_down?
+    File.exist?(File.join(Config.dir, 'collaboration', 'stand-down'))
   end
 
-  def denial(tool, input, session, profile, bus)
-    actor = profile || Unclaimed.new(bus)
+  def denial(tool, input, session, profile)
+    actor = profile || Unclaimed.new()
     case tool
     when 'mcp__autonom-coord-mcp__get_profile'
       'A Devin session ID is required' unless valid_session?(session)
@@ -261,16 +250,16 @@ module Hooks
       return 'A Devin session ID is required' unless valid_session?(session)
 
       name = input['name'].to_s
-      return 'A valid profile name is required' unless bus.store.valid_name?(name)
+      return 'A valid profile name is required' unless ProfileStore.valid_name?(name)
       return 'A session profile cannot be changed after registration' if profile && !profile.name.casecmp?(name)
     when 'read', 'notebook_read'
       paths(tool, input).each do |path|
         return DENIED unless actor.can_read?(path)
       end
     when 'grep'
-      return DENIED unless actor.can_search?(input['path'] || bus.config.project_dir)
+      return DENIED unless actor.can_search?(input['path'] || Config.project_dir)
     when 'glob'
-      return DENIED unless actor.can_glob?(input['pattern'], path: input['path'] || bus.config.project_dir)
+      return DENIED unless actor.can_glob?(input['pattern'], path: input['path'] || Config.project_dir)
     when 'write', 'edit', 'notebook_edit', 'apply_patch'
       paths(tool, input).each do |path|
         return DENIED unless actor.can_write?(path)

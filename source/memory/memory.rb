@@ -1,3 +1,5 @@
+require_relative '../config'
+
 # Memory is intentionally inert. The layer exists so the hooks and the
 # profile boundary are already in the right place, but nothing here recalls
 # or writes automatically yet - the evals branch decides what context
@@ -21,7 +23,7 @@ class Memory
     raw = File.read(path).strip
     return raw if raw.length <= max_chars
 
-    project = @profile.bus.config.project
+    project = Config.project
     blocks = raw.split(/\n(?=\#{1,3}\s)/)
     picked = [
       blocks.select { |block| block.match?(/^\#{1,3}\s*(who i am|self|now)\b/i) },
