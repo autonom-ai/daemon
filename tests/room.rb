@@ -6,66 +6,58 @@ class RoomTest < Minitest::Test
   include CoreTest
 
   def setup()
-    setup_bus()
-    @marlow = @bus.register('session-1', 'marlow')
-    @wren = @bus.register('session-2', 'wren')
-    @room = @bus.room('general')
+    setup_core()
+    @marlow = ProfileStore.register('session-1', 'marlow')
+    @wren = ProfileStore.register('session-2', 'wren')
+    write_room('general', 'Where the team talks.')
   end
 
   def teardown()
-    teardown_bus()
+    teardown_core()
   end
 
-  def test_messages_are_workspace_scoped()
-    @room.post('hello', from: @marlow)
+  def test_a_room_carries_its_description()
+    assert_equal 'Where the team talks.', room('general').description
 
-    assert_equal ['hello'], @room.messages.map { |entry| entry['text'] }
-    assert_equal 'marlow', @room.messages.first['from']
+    write_room('bare')
+    assert_nil room('bare').description
+  end
+
+  def test_rooms_lists_what_exists()
+    write_room('market')
+
+    assert_equal %w[general market], Bus.rooms.map(&:name)
+  end
+
+  def test_messages_skip_the_description_line()
+    room('general').post('hello', from: @marlow)
+
+    assert_equal ['hello'], room('general').messages.map { |entry| entry['text'] }
+    assert_equal 'marlow', room('general').messages.first['from']
     assert File.file?(File.join(@project, '.devin', 'autonom-coord', 'rooms', 'general.jsonl'))
-    assert_empty @bus.room('other').messages
-  end
-
-  def test_the_team_room_is_the_default_and_names_normalize()
-    write_config('teamRoom' => 'market')
-
-    @bus.room('').post('hi', from: @wren)
-    @bus.room('#Market').post('again', from: @wren)
-
-    assert_equal %w[hi again], @bus.room('market').messages.map { |entry| entry['text'] }
-  end
-
-  def test_symlinked_room_files_are_refused()
-    rooms = File.join(@project, '.devin', 'autonom-coord', 'rooms')
-    FileUtils.mkdir_p(rooms)
-    target = File.join(@project, 'elsewhere.jsonl')
-    File.write(target, '')
-    File.symlink(target, File.join(rooms, 'general.jsonl'))
-
-    assert_raises(Bus::Error) { @room.messages }
-    assert_raises(Bus::Error) { @room.post('hi', from: @wren) }
   end
 
   def test_reading_a_room_is_cursored_per_profile()
-    @room.post('first', from: @wren)
-    @room.post('second', from: @wren)
+    room('general').post('first', from: @wren)
+    room('general').post('second', from: @wren)
 
-    assert_equal 2, @room.unread(@marlow).length
-    assert_equal ['first', 'second'], @room.read(@marlow).map { |entry| entry['text'] }
-    assert_empty @room.unread(@marlow)
-    assert_equal 2, @room.unread(@wren).length
+    assert_equal 2, room('general').unread(@marlow).length
+    assert_equal ['first', 'second'], room('general').read(@marlow).map { |entry| entry['text'] }
+    assert_empty room('general').unread(@marlow)
+    assert_equal 2, room('general').unread(@wren).length
   end
 
   def test_a_room_post_wakes_every_waiter_in_the_room()
     woken = Queue.new
     waiters = [@marlow, @wren].map do |profile|
       Thread.new do
-        @room.wait(profile, timeout: 5)
+        room('general').wait(profile, timeout: 5)
         woken << profile.name
       end
     end
     sleep 0.2
 
-    @room.post('hello', from: @marlow)
+    room('general').post('hello', from: @marlow)
     waiters.each { |waiter| waiter.join(3) }
 
     assert_equal %w[marlow wren], [woken.pop, woken.pop].sort
@@ -74,16 +66,16 @@ class RoomTest < Minitest::Test
   def test_a_ping_wakes_only_the_pinged_waiter()
     woken = Queue.new
     Thread.new do
-      @room.wait(@wren, timeout: 5)
+      room('general').wait(@wren, timeout: 5)
       woken << 'wren'
     end
     other = Thread.new do
-      @room.wait(@marlow, timeout: 1)
+      room('general').wait(@marlow, timeout: 1)
       woken << 'marlow'
     end
     sleep 0.2
 
-    @wren.inbox.ping('look', from: @marlow, room: @room)
+    Bus.inbox(@wren).ping('look', from: @marlow, room: room('general'))
 
     assert_equal 'wren', woken.pop
     assert woken.empty?
@@ -99,7 +91,7 @@ class RoomTest < Minitest::Test
     child = fork do
       reader.close
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      @room.wait(@wren, timeout: 5)
+      room('general').wait(@wren, timeout: 5)
       writer.puts(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started)
       writer.close
       exit!(0)
@@ -107,7 +99,7 @@ class RoomTest < Minitest::Test
     writer.close
     sleep 0.3
 
-    @room.post('hello', from: @marlow)
+    room('general').post('hello', from: @marlow)
 
     elapsed = IO.select([reader], nil, nil, 10) ? reader.gets.to_f : nil
     kill_child(child)

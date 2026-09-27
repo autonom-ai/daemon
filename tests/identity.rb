@@ -7,12 +7,12 @@ class IdentityTest < Minitest::Test
   include CoreTest
 
   def setup()
-    setup_bus()
-    @marlow = @bus.register('session-1', 'marlow')
+    setup_core()
+    @marlow = ProfileStore.register('session-1', 'marlow')
   end
 
   def teardown()
-    teardown_bus()
+    teardown_core()
   end
 
   def test_frontmatter_is_metadata_and_the_body_is_the_person()
@@ -38,11 +38,11 @@ class IdentityTest < Minitest::Test
   end
 
   def test_priors_digest_interests_and_skip_self()
-    wren = @bus.register('session-2', 'wren')
+    wren = ProfileStore.register('session-2', 'wren')
     write_identity(wren, "---\ndisplayName: Wren\n---\n\n## Interests\n\nembeddings, search quality\n\n## Disinterests\n\nresume formatting\n")
     write_identity(@marlow, "---\ndisplayName: Marlow\n---\n\n## Voice\n\nblunt\n")
 
-    priors = Identity.priors(@bus.profiles, skip: 'marlow')
+    priors = Identity.priors(ProfileStore.profiles, skip: 'marlow')
 
     assert_equal 1, priors.length
     assert_includes priors.first, 'Wren:'

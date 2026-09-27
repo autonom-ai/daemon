@@ -9,12 +9,13 @@ class ServerTest < Minitest::Test
   include CoreTest
 
   def setup()
-    setup_bus()
-    @server = Coord::Server.new(@bus)
+    setup_core()
+    write_room('general')
+    @server = Coord::Server.new
   end
 
   def teardown()
-    teardown_bus()
+    teardown_core()
   end
 
   def test_profile_tools_share_session_mapping()
@@ -57,6 +58,15 @@ class ServerTest < Minitest::Test
     assert_equal %w[wren marlow], result(responses, 6)['entry'].values_at('from', 'to')
     assert_equal ['psst'], result(responses, 7)['messages'].map { |entry| entry['text'] }
     assert responses.find { |response| response['id'] == 8 }.dig('result', 'isError')
+  end
+
+  def test_an_unknown_room_is_refused()
+    responses = exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'send_message', 'text' => 'hello', 'room' => 'nowhere', 'session_id' => 'session-1')
+    )
+
+    assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')
   end
 
   def test_reads_are_cursored_and_list_rooms_reports_unread()
@@ -108,13 +118,13 @@ class ServerTest < Minitest::Test
     )
     writer = Thread.new do
       sleep 0.3
-      @bus.room('general').post('late line', from: profile('marlow'))
+      room('general').post('late line', from: profile('marlow'))
     end
 
-    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    responses = exchange(call(3, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
     writer.join
 
-    assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
+    assert_equal ['late line'], result(responses, 3)['messages'].map { |entry| entry['text'] }
   end
 
   def test_a_ping_interrupts_a_room_wait()
@@ -124,16 +134,16 @@ class ServerTest < Minitest::Test
     )
     pinger = Thread.new do
       sleep 0.3
-      profile('wren').inbox.ping('look', from: profile('marlow'), room: @bus.room('general'))
+      Bus.inbox(profile('wren')).ping('look', from: profile('marlow'), room: room('general'))
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    responses = exchange(call(3, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     pinger.join
 
     assert_operator elapsed, :<, 3
-    assert_empty result(responses, 2)['messages']
+    assert_empty result(responses, 3)['messages']
   end
 
   def test_a_dm_wakes_an_inbox_wait()
@@ -143,16 +153,16 @@ class ServerTest < Minitest::Test
     )
     sender = Thread.new do
       sleep 0.3
-      profile('wren').inbox.dm('psst', from: profile('marlow'))
+      Bus.inbox(profile('wren')).dm('psst', from: profile('marlow'))
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    responses = exchange(call(2, 'wait_for_message', 'source' => 'inbox', 'timeout' => 5, 'session_id' => 'session-2'))
+    responses = exchange(call(3, 'wait_for_message', 'source' => 'inbox', 'timeout' => 5, 'session_id' => 'session-2'))
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     sender.join
 
     assert_operator elapsed, :<, 3
-    assert_equal ['psst'], result(responses, 2)['messages'].map { |entry| entry['text'] }
+    assert_equal ['psst'], result(responses, 3)['messages'].map { |entry| entry['text'] }
   end
 
   # The real shape of the bus: another session's MCP process writes the line,
@@ -161,7 +171,7 @@ class ServerTest < Minitest::Test
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
     writer = Thread.new do
       sleep 0.3
-      append_line(@bus.room('general').path, 'from' => 'marlow', 'text' => 'late line')
+      append_line(room('general').path, 'from' => 'marlow', 'text' => 'late line')
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -208,10 +218,6 @@ class ServerTest < Minitest::Test
   end
 
   private
-
-  def profile(name)
-    @bus.profile_named(name)
-  end
 
   def exchange(*requests)
     input = StringIO.new(requests.map { |request| JSON.generate(request) }.join("\n"))

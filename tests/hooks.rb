@@ -27,12 +27,13 @@ class HooksTest < Minitest::Test
   end
 
   def setup()
-    setup_bus()
+    setup_core()
+    write_room('general')
     @jev = FakeJev.new
   end
 
   def teardown()
-    teardown_bus()
+    teardown_core()
   end
 
   def test_direct_profile_access_is_denied_before_jev()
@@ -107,7 +108,7 @@ class HooksTest < Minitest::Test
   def test_an_unknown_backend_blocks_the_request()
     write_config('policy' => 'nope')
 
-    assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'), bus: @bus)['decision']
+    assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'))['decision']
   end
 
   def test_the_hook_session_id_is_injected_into_profile_tools()
@@ -120,7 +121,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_a_profile_cannot_be_reassigned()
-    @bus.register('session-1', 'marlow')
+    ProfileStore.register('session-1', 'marlow')
 
     result = hook(event('mcp__autonom-coord-mcp__set_profile', 'name' => 'wren'))
 
@@ -135,8 +136,7 @@ class HooksTest < Minitest::Test
         'tool_name' => 'mcp__autonom-coord-mcp__set_profile',
         'tool_input' => { 'name' => 'marlow' }
       },
-      jev: @jev,
-      bus: @bus
+      jev: @jev
     )
 
     assert_equal 'block', result['decision']
@@ -144,9 +144,9 @@ class HooksTest < Minitest::Test
   end
 
   def test_unread_pings_ride_back_once_after_a_tool_call()
-    marlow = @bus.register('session-1', 'marlow')
-    wren = @bus.register('session-2', 'wren')
-    marlow.inbox.ping('@marlow check the pricer', from: wren, room: @bus.room('general'))
+    marlow = ProfileStore.register('session-1', 'marlow')
+    wren = ProfileStore.register('session-2', 'wren')
+    Bus.inbox(marlow).ping('@marlow check the pricer', from: wren, room: room('general'))
 
     context = hook(post_event).dig('hookSpecificOutput', 'additionalContext')
 
@@ -157,36 +157,36 @@ class HooksTest < Minitest::Test
   end
 
   def test_post_tool_use_never_blocks_a_tool()
-    marlow = @bus.register('session-1', 'marlow')
-    File.symlink(File.join(marlow.directory, 'identity.md'), marlow.inbox.pings_path)
+    marlow = ProfileStore.register('session-1', 'marlow')
+    File.symlink(File.join(marlow.directory, 'identity.md'), Bus.inbox(marlow).pings_path)
 
     assert_nil hook(post_event)
   end
 
   def test_pings_wait_for_a_tool_to_finish()
-    marlow = @bus.register('session-1', 'marlow')
-    marlow.inbox.ping('look', from: @bus.register('session-2', 'wren'))
+    marlow = ProfileStore.register('session-1', 'marlow')
+    Bus.inbox(marlow).ping('look', from: ProfileStore.register('session-2', 'wren'))
 
     assert_nil hook(event('exec', 'command' => 'git status'))
-    assert_equal 1, marlow.inbox.read_pings().length
+    assert_equal 1, Bus.inbox(marlow).read_pings().length
   end
 
-  def test_session_start_carries_identity_memory_room_and_session_id()
-    write_config('project' => 'jobs', 'teamRoom' => 'general', 'memory' => true)
-    marlow = @bus.register('session-1', 'marlow')
-    wren = @bus.register('session-2', 'wren')
+  def test_session_start_carries_identity_memory_and_rooms()
+    write_config('project' => 'jobs', 'memory' => true)
+    marlow = ProfileStore.register('session-1', 'marlow')
+    wren = ProfileStore.register('session-2', 'wren')
     File.write(File.join(marlow.directory, 'identity.md'), "---\ndisplayName: Marlow\n---\n\nI read the kill columns.\n")
     FileUtils.mkdir_p(File.join(marlow.directory, 'memories'))
     File.write(File.join(marlow.directory, 'memories', 'memory.md'), "# marlow - memory\n\n## Now\n\nChecking the pricer.\n")
-    @bus.room('general').post('hello team', from: wren)
+    room('general').post('hello team', from: wren)
 
     context = hook({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' })
       .dig('hookSpecificOutput', 'additionalContext')
 
-    assert_includes context, 'session-1'
     assert_includes context, 'You are Marlow (marlow)'
     assert_includes context, 'I read the kill columns.'
     assert_includes context, 'Checking the pricer.'
+    assert_includes context, 'Rooms: #general'
     assert_includes context, 'Teammates: wren'
     assert_includes context, 'hello team'
     assert_equal 0, @jev.calls
@@ -200,21 +200,21 @@ class HooksTest < Minitest::Test
   end
 
   def test_the_prompt_nudge_lists_waiting_without_draining()
-    marlow = @bus.register('session-1', 'marlow')
-    marlow.inbox.ping('ping text', from: @bus.register('session-2', 'wren'), room: @bus.room('general'))
+    marlow = ProfileStore.register('session-1', 'marlow')
+    Bus.inbox(marlow).ping('ping text', from: ProfileStore.register('session-2', 'wren'), room: room('general'))
 
     context = hook({ 'hook_event_name' => 'UserPromptSubmit', 'session_id' => 'session-1' })
       .dig('hookSpecificOutput', 'additionalContext')
 
     assert_includes context, 'Unread pings (1)'
-    assert_equal 1, marlow.inbox.unread_pings.length
+    assert_equal 1, Bus.inbox(marlow).unread_pings.length
   end
 
   def test_stop_blocks_once_with_what_is_waiting()
-    marlow = @bus.register('session-1', 'marlow')
-    wren = @bus.register('session-2', 'wren')
-    marlow.inbox.ping('@marlow the pricer moved', from: wren, room: @bus.room('general'))
-    @bus.room('general').post('anyone around?', from: wren)
+    marlow = ProfileStore.register('session-1', 'marlow')
+    wren = ProfileStore.register('session-2', 'wren')
+    Bus.inbox(marlow).ping('@marlow the pricer moved', from: wren, room: room('general'))
+    room('general').post('anyone around?', from: wren)
 
     result = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
     reason = result['reason']
@@ -229,18 +229,18 @@ class HooksTest < Minitest::Test
     re_entered = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1', 'stop_hook_active' => true })
 
     assert_nil re_entered
-    assert_equal 1, marlow.inbox.unread_pings.length
+    assert_equal 1, Bus.inbox(marlow).unread_pings.length
   end
 
   def test_stop_lets_the_turn_end_when_nothing_is_owed()
-    @bus.register('session-1', 'marlow')
+    ProfileStore.register('session-1', 'marlow')
 
     assert_nil hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
   end
 
   def test_stand_down_lets_a_session_stop()
-    marlow = @bus.register('session-1', 'marlow')
-    marlow.inbox.ping('ping text', from: @bus.register('session-2', 'wren'), room: @bus.room('general'))
+    marlow = ProfileStore.register('session-1', 'marlow')
+    Bus.inbox(marlow).ping('ping text', from: ProfileStore.register('session-2', 'wren'), room: room('general'))
     FileUtils.mkdir_p(File.join(@project, '.devin', 'collaboration'))
     File.write(File.join(@project, '.devin', 'collaboration', 'stand-down'), '')
 
@@ -248,17 +248,17 @@ class HooksTest < Minitest::Test
   end
 
   def test_a_subagent_stop_is_never_blocked()
-    marlow = @bus.register('session-1', 'marlow')
-    marlow.inbox.ping('ping text', from: @bus.register('session-2', 'wren'), room: @bus.room('general'))
+    marlow = ProfileStore.register('session-1', 'marlow')
+    Bus.inbox(marlow).ping('ping text', from: ProfileStore.register('session-2', 'wren'), room: room('general'))
 
     assert_nil hook({ 'hook_event_name' => 'SubagentStop', 'session_id' => 'session-1' })
-    assert_equal 1, marlow.inbox.unread_pings.length
+    assert_equal 1, Bus.inbox(marlow).unread_pings.length
   end
 
   private
 
   def hook(event, jev: @jev)
-    Hooks.call(event, jev: jev, bus: @bus)
+    Hooks.call(event, jev: jev)
   end
 
   def event(tool_name, tool_input)

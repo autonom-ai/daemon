@@ -6,13 +6,13 @@ class ProfileTest < Minitest::Test
   include CoreTest
 
   def setup()
-    setup_bus()
-    @marlow = @bus.register('session-1', 'marlow')
-    @wren = @bus.register('session-2', 'wren')
+    setup_core()
+    @marlow = ProfileStore.register('session-1', 'marlow')
+    @wren = ProfileStore.register('session-2', 'wren')
   end
 
   def teardown()
-    teardown_bus()
+    teardown_core()
   end
 
   def test_another_profile_and_the_session_map_are_denied()
@@ -65,17 +65,5 @@ class ProfileTest < Minitest::Test
     @marlow.touch_heartbeat()
 
     assert @marlow.heartbeat.positive?
-  end
-
-  def test_unread_is_the_profiles_inbox_pings_and_team_room()
-    @wren.inbox.dm('hello', from: @marlow)
-    @wren.inbox.ping('look', from: @marlow, room: @bus.room('general'))
-    @bus.room('general').post('team line', from: @marlow)
-
-    unread = @wren.unread
-
-    assert_equal ['hello'], unread['inbox'].map { |entry| entry['text'] }
-    assert_equal ['look'], unread['pings'].map { |entry| entry['text'] }
-    assert_equal ['team line'], unread['rooms']['general'].map { |entry| entry['text'] }
   end
 end

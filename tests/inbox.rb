@@ -6,29 +6,30 @@ class InboxTest < Minitest::Test
   include CoreTest
 
   def setup()
-    setup_bus()
-    @marlow = @bus.register('session-1', 'marlow')
-    @wren = @bus.register('session-2', 'wren')
-    @inbox = @wren.inbox
+    setup_core()
+    @marlow = ProfileStore.register('session-1', 'marlow')
+    @wren = ProfileStore.register('session-2', 'wren')
+    @inbox = Bus.inbox(@wren)
+    write_room('general')
   end
 
   def teardown()
-    teardown_bus()
+    teardown_core()
   end
 
   def test_dms_and_pings_are_profile_scoped()
     @inbox.dm('first', from: @marlow)
-    @inbox.ping('look here', from: @marlow, room: @bus.room('general'))
+    @inbox.ping('look here', from: @marlow, room: room('general'))
 
     assert_equal ['first'], @inbox.messages.map { |entry| entry['text'] }
     assert_equal 'wren', @inbox.messages.first['to']
     assert_equal ['look here'], @inbox.pings.map { |entry| entry['text'] }
     assert_equal 'general', @inbox.pings.first['room']
-    assert_empty @marlow.inbox.messages
+    assert_empty Bus.inbox(@marlow).messages
   end
 
   def test_reading_a_stream_delivers_each_entry_once()
-    @inbox.ping('look here', from: @marlow, room: @bus.room('general'))
+    @inbox.ping('look here', from: @marlow, room: room('general'))
     @inbox.ping('and here', from: @marlow)
 
     assert_equal ['look here', 'and here'], @inbox.read_pings().map { |ping| ping['text'] }
@@ -53,7 +54,7 @@ class InboxTest < Minitest::Test
       woken << 'wren'
     end
     other = Thread.new do
-      @marlow.inbox.wait(timeout: 1)
+      Bus.inbox(@marlow).wait(timeout: 1)
       woken << 'marlow'
     end
     sleep 0.2
@@ -73,12 +74,12 @@ class InboxTest < Minitest::Test
       woken << 'wren'
     end
     other = Thread.new do
-      @marlow.inbox.wait(timeout: 1)
+      Bus.inbox(@marlow).wait(timeout: 1)
       woken << 'marlow'
     end
     sleep 0.2
 
-    @inbox.ping('look', from: @marlow, room: @bus.room('general'))
+    @inbox.ping('look', from: @marlow, room: room('general'))
 
     assert_equal 'wren', woken.pop
     assert woken.empty?

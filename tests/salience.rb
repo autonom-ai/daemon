@@ -7,21 +7,22 @@ class SalienceTest < Minitest::Test
   include CoreTest
 
   def setup()
-    setup_bus()
-    @marlow = @bus.register('session-1', 'marlow')
-    @wren = @bus.register('session-2', 'wren')
+    setup_core()
+    @marlow = ProfileStore.register('session-1', 'marlow')
+    @wren = ProfileStore.register('session-2', 'wren')
+    write_room('general')
   end
 
   def teardown()
-    teardown_bus()
+    teardown_core()
   end
 
   def test_unread_lines_reports_undrained_signals()
-    @marlow.inbox.ping('ping text', from: @wren, room: @bus.room('general'))
-    @marlow.inbox.dm('dm text', from: @wren)
-    @bus.room('general').post('room text', from: @wren)
+    Bus.inbox(@marlow).ping('ping text', from: @wren, room: room('general'))
+    Bus.inbox(@marlow).dm('dm text', from: @wren)
+    room('general').post('room text', from: @wren)
 
-    lines = Salience.unread_lines(@marlow.unread)
+    lines = Salience.unread_lines(Bus.unread(@marlow))
 
     assert lines.any? { |line| line.include?('Unread pings (1)') }
     assert lines.any? { |line| line.include?('Unread direct messages (1)') }
@@ -29,15 +30,15 @@ class SalienceTest < Minitest::Test
     assert lines.any? { |line| line.include?('ping text') }
     assert lines.any? { |line| line.include?('dm text') }
     assert lines.any? { |line| line.include?('room text') }
-    assert_equal 1, @marlow.inbox.unread_pings.length
+    assert_equal 1, Bus.inbox(@marlow).unread_pings.length
   end
 
   def test_a_direct_message_outranks_room_traffic()
-    @marlow.inbox.ping('ping text', from: @wren, room: @bus.room('general'))
-    @marlow.inbox.dm('dm text', from: @wren)
-    @bus.room('general').post('room text', from: @wren)
+    Bus.inbox(@marlow).ping('ping text', from: @wren, room: room('general'))
+    Bus.inbox(@marlow).dm('dm text', from: @wren)
+    room('general').post('room text', from: @wren)
 
-    focus = Salience.focus(Salience.impulses(@marlow.unread))
+    focus = Salience.focus(Salience.impulses(Bus.unread(@marlow)))
 
     assert_equal 'Respond', focus.kind
     assert focus.required?
@@ -47,16 +48,16 @@ class SalienceTest < Minitest::Test
   end
 
   def test_room_traffic_alone_is_a_coordinate_impulse()
-    @bus.room('general').post('anyone around?', from: @wren)
+    room('general').post('anyone around?', from: @wren)
 
-    focus = Salience.focus(Salience.impulses(@marlow.unread))
+    focus = Salience.focus(Salience.impulses(Bus.unread(@marlow)))
 
     assert_equal 'Coordinate', focus.kind
     refute focus.required?
   end
 
   def test_stop_text_is_one_complete_message()
-    @marlow.inbox.ping('ping text', from: @wren, room: @bus.room('general'))
+    Bus.inbox(@marlow).ping('ping text', from: @wren, room: room('general'))
 
     text = Salience.stop_text(@marlow)
 
