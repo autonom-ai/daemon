@@ -140,6 +140,16 @@ module ProfileStore
     raise Error, "Could not update the read cursor: #{error.class}"
   end
 
+  # Unread entries, and reading advances the cursor: a stream is delivered
+  # once. A first read starts with the newest `limit` entries instead of the
+  # whole backlog.
+  def read_stream(name, key, entries, limit: nil, root: ROOT)
+    seen = cursor(name, key, root: root)
+    unread = seen.zero? && limit ? entries.last(limit) : entries.drop(seen)
+    advance_cursor(name, key, entries.length, root: root)
+    unread
+  end
+
   # Presence is explicit, not inferred: a profile is as fresh as the last
   # MCP call it made. Every tool call stamps this, so a heartbeat is a fact
   # about use rather than a liveness probe the caller has to trust.

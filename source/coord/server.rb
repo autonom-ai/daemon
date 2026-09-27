@@ -1,4 +1,5 @@
 require_relative '../profile'
+require_relative 'inbox'
 require_relative 'room'
 
 require 'json'
@@ -240,12 +241,12 @@ module Coord
       if args['to'].to_s.empty?
         room = Room.normalize(args['room'], root: @project)
         entry = Room.post(room, text, from: from, root: @project)
-        targets.each { |target| Profile.ping(target, text, from: from, room: room, root: @root) }
+        targets.each { |target| Inbox.ping(target, text, from: from, room: room, root: @root) }
         { 'room' => room, 'entry' => entry, 'pinged' => targets }
       else
         to = ProfileStore.normalize_name(args['to'])
-        entry = Profile.dm(to, text, from: from, root: @root)
-        targets.each { |target| Profile.ping(target, text, from: from, root: @root) }
+        entry = Inbox.dm(to, text, from: from, root: @root)
+        targets.each { |target| Inbox.ping(target, text, from: from, root: @root) }
         { 'to' => to, 'entry' => entry, 'pinged' => targets }
       end
     end
@@ -273,7 +274,7 @@ module Coord
 
     def wait_for(name, source, room, timeout)
       if source == 'inbox'
-        Profile.wait(name, timeout: timeout, watch: inbox_watch(name))
+        Inbox.wait(name, timeout: timeout, watch: inbox_watch(name))
       else
         Room.wait(room, name, timeout: timeout, watch: room_watch(room, name))
       end
@@ -284,11 +285,11 @@ module Coord
     # written: the stream it is parked on, and its own pings - which interrupt
     # any wait, wherever they land.
     def room_watch(room, name)
-      [Room.path(room, root: @project), ProfileStore.pings_file(name, root: @root)]
+      [Room.path(room, root: @project), Inbox.pings_path(name, root: @root)]
     end
 
     def inbox_watch(name)
-      [ProfileStore.inbox_file(name, root: @root), ProfileStore.pings_file(name, root: @root)]
+      [Inbox.inbox_path(name, root: @root), Inbox.pings_path(name, root: @root)]
     end
 
     def list_rooms(session)
@@ -338,9 +339,9 @@ module Coord
     def read_stream(name, source, room, limit)
       case source
       when 'inbox'
-        { 'source' => 'inbox', 'messages' => Profile.read_inbox(name, limit: limit, root: @root) }
+        { 'source' => 'inbox', 'messages' => Inbox.read(name, limit: limit, root: @root) }
       when 'pings'
-        { 'source' => 'pings', 'messages' => Profile.read_pings(name, root: @root) }
+        { 'source' => 'pings', 'messages' => Inbox.read_pings(name, root: @root) }
       else
         {
           'source' => 'room',

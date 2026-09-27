@@ -1,3 +1,5 @@
+require_relative '../profile'
+
 # Salience is the arbiter of what an agent should be told about before it
 # acts. Today the only signals are the ones it has not read yet, so the
 # arbiter is deliberately deterministic: an unread ping, DM, or room line
@@ -98,7 +100,11 @@ module Salience
     lines
   end
 
-  def stop_text(unread, focus:)
+  def stop_text(name, rooms:, rooms_root:, root:)
+    unread = Profile.get_unread(name, rooms: rooms, rooms_root: rooms_root, root: root)
+    focus = focus(impulses(unread))
+    return nil unless focus
+
     lines = [
       'Do not end the turn yet - this team does not idle.',
       '',
