@@ -1,21 +1,23 @@
 require 'json'
 require 'minitest/autorun'
 require 'stringio'
-require 'tmpdir'
 
+require_relative 'common'
 require_relative '../source/coord/server'
 
 class ServerTest < Minitest::Test
-  def setup
-    @root = Dir.mktmpdir('autonom')
-    @server = Coord::Server.new(root: @root, project: @root)
+  include CoreTest
+
+  def setup()
+    setup_bus()
+    @server = Coord::Server.new(@bus)
   end
 
-  def teardown
-    FileUtils.remove_entry(@root) if @root && File.directory?(@root)
+  def teardown()
+    teardown_bus()
   end
 
-  def test_profile_tools_share_session_mapping
+  def test_profile_tools_share_session_mapping()
     responses = exchange(
       request(1, 'initialize', 'protocolVersion' => '2025-03-26'),
       { 'jsonrpc' => '2.0', 'method' => 'notifications/initialized' },
@@ -33,7 +35,7 @@ class ServerTest < Minitest::Test
     assert_equal set_result, result(responses, 4)
   end
 
-  def test_chat_tools_route_rooms_dms_and_pings
+  def test_chat_tools_route_rooms_dms_and_pings()
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
@@ -57,7 +59,7 @@ class ServerTest < Minitest::Test
     assert responses.find { |response| response['id'] == 8 }.dig('result', 'isError')
   end
 
-  def test_reads_are_cursored_and_list_rooms_reports_unread
+  def test_reads_are_cursored_and_list_rooms_reports_unread()
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
@@ -77,7 +79,7 @@ class ServerTest < Minitest::Test
     assert_equal 2, result(responses, 7).first['unread']
   end
 
-  def test_wait_for_message_returns_what_is_already_unread
+  def test_wait_for_message_returns_what_is_already_unread()
     exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
@@ -91,7 +93,7 @@ class ServerTest < Minitest::Test
     assert_equal ['second'], result(responses, 6)['messages'].map { |entry| entry['text'] }
   end
 
-  def test_wait_for_message_returns_empty_when_the_timeout_runs_out
+  def test_wait_for_message_returns_empty_when_the_timeout_runs_out()
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
 
     responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-2'))
@@ -99,11 +101,14 @@ class ServerTest < Minitest::Test
     assert_empty result(responses, 2)['messages']
   end
 
-  def test_a_room_post_wakes_a_room_wait
-    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+  def test_a_room_post_wakes_a_room_wait()
+    exchange(
+      call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
+      call(2, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1')
+    )
     writer = Thread.new do
       sleep 0.3
-      Room.post('general', 'late line', from: 'marlow', project: @root)
+      @bus.room('general').post('late line', from: profile('marlow'))
     end
 
     responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
@@ -112,11 +117,14 @@ class ServerTest < Minitest::Test
     assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
   end
 
-  def test_a_ping_interrupts_a_room_wait
-    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+  def test_a_ping_interrupts_a_room_wait()
+    exchange(
+      call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
+      call(2, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1')
+    )
     pinger = Thread.new do
       sleep 0.3
-      Inbox.ping('wren', 'look', from: 'marlow', room: 'general', root: @root)
+      profile('wren').inbox.ping('look', from: profile('marlow'), room: @bus.room('general'))
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -128,11 +136,14 @@ class ServerTest < Minitest::Test
     assert_empty result(responses, 2)['messages']
   end
 
-  def test_a_dm_wakes_an_inbox_wait
-    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+  def test_a_dm_wakes_an_inbox_wait()
+    exchange(
+      call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
+      call(2, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1')
+    )
     sender = Thread.new do
       sleep 0.3
-      Inbox.dm('wren', 'psst', from: 'marlow', root: @root)
+      profile('wren').inbox.dm('psst', from: profile('marlow'))
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -146,11 +157,11 @@ class ServerTest < Minitest::Test
 
   # The real shape of the bus: another session's MCP process writes the line,
   # so no signal can reach this one and only the file check can wake it.
-  def test_a_room_line_written_by_another_process_wakes_a_room_wait
+  def test_a_room_line_written_by_another_process_wakes_a_room_wait()
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
     writer = Thread.new do
       sleep 0.3
-      append_line(Room.path('general', project: @root), 'from' => 'marlow', 'text' => 'late line')
+      append_line(@bus.room('general').path, 'from' => 'marlow', 'text' => 'late line')
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -162,7 +173,7 @@ class ServerTest < Minitest::Test
     assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
   end
 
-  def test_heartbeats_report_presence_and_are_stamped_by_calls
+  def test_heartbeats_report_presence_and_are_stamped_by_calls()
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
@@ -181,13 +192,13 @@ class ServerTest < Minitest::Test
     assert JSON.parse(File.read(file))['ts'].positive?
   end
 
-  def test_an_unregistered_session_stamps_nobody
+  def test_an_unregistered_session_stamps_nobody()
     exchange(call(1, 'get_profiles'))
 
     assert_empty Dir.glob(File.join(@root, 'agents', '*', 'heartbeat.json'))
   end
 
-  def test_get_heartbeat_requires_a_known_profile
+  def test_get_heartbeat_requires_a_known_profile()
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'get_heartbeat', 'name' => 'nobody', 'session_id' => 'session-1')
@@ -197,6 +208,10 @@ class ServerTest < Minitest::Test
   end
 
   private
+
+  def profile(name)
+    @bus.profile_named(name)
+  end
 
   def exchange(*requests)
     input = StringIO.new(requests.map { |request| JSON.generate(request) }.join("\n"))

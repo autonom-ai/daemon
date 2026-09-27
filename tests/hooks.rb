@@ -1,10 +1,12 @@
 require 'json'
 require 'minitest/autorun'
-require 'tmpdir'
 
+require_relative 'common'
 require_relative '../source/hooks'
 
 class HooksTest < Minitest::Test
+  include CoreTest
+
   class FakeJev
     attr_reader :calls, :backend_name, :state
 
@@ -24,21 +26,16 @@ class HooksTest < Minitest::Test
     end
   end
 
-  def setup
-    @root = Dir.mktmpdir('autonom')
-    @project = Dir.mktmpdir('agent-project')
-    @previous_project = ENV['DEVIN_PROJECT_DIR']
-    ENV['DEVIN_PROJECT_DIR'] = @project
+  def setup()
+    setup_bus()
     @jev = FakeJev.new
   end
 
-  def teardown
-    ENV['DEVIN_PROJECT_DIR'] = @previous_project
-    FileUtils.remove_entry(@root) if @root && File.directory?(@root)
-    FileUtils.remove_entry(@project) if @project && File.directory?(@project)
+  def teardown()
+    teardown_bus()
   end
 
-  def test_direct_profile_access_is_denied_before_jev
+  def test_direct_profile_access_is_denied_before_jev()
     path = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
     patch = ['*** Begin Patch', "*** Update File: #{path}", '+note', '*** End Patch'].join("\n")
 
@@ -47,12 +44,12 @@ class HooksTest < Minitest::Test
       event('write', 'file_path' => File.join(@root, 'agents', 'sessions.json')),
       event('apply_patch', 'patch' => patch)
     ].each do |payload|
-      assert_equal 'block', Hooks.call(payload, jev: @jev, root: @root)['decision']
+      assert_equal 'block', hook(payload)['decision']
     end
     assert_equal 0, @jev.calls
   end
 
-  def test_search_and_shell_redirection_are_denied_before_jev
+  def test_search_and_shell_redirection_are_denied_before_jev()
     FileUtils.mkdir_p(File.join(@root, 'agents', 'wren', 'memories'))
     path = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
 
@@ -61,77 +58,77 @@ class HooksTest < Minitest::Test
       event('glob', 'pattern' => '**/*', 'path' => File::SEPARATOR),
       event('exec', 'command' => "printf note > #{path}")
     ].each do |payload|
-      assert_equal 'block', Hooks.call(payload, jev: @jev, root: @root)['decision']
+      assert_equal 'block', hook(payload)['decision']
     end
     assert_equal 0, @jev.calls
   end
 
-  def test_an_allowed_request_reaches_jev
-    assert_nil Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+  def test_an_allowed_request_reaches_jev()
+    assert_nil hook(event('exec', 'command' => 'git status'))
     assert_equal 1, @jev.calls
   end
 
-  def test_a_jev_denial_blocks_the_request
+  def test_a_jev_denial_blocks_the_request()
     @jev = FakeJev.new(harmful: true)
 
-    assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)['decision']
+    assert_equal 'block', hook(event('exec', 'command' => 'git status'))['decision']
     assert_equal 1, @jev.calls
   end
 
-  def test_the_screen_sends_a_scrubbed_state
+  def test_the_screen_sends_a_scrubbed_state()
     input = { 'file_path' => File.join(@project, 'notes.md'), 'content' => 'private memory content' }
 
-    assert_nil Hooks.call(event('write', input), jev: @jev, root: @root)
+    assert_nil hook(event('write', input))
     assert_equal File.join(@project, 'notes.md'), @jev.state['tool_input']['file_path']
     refute_includes JSON.generate(@jev.state), 'private memory content'
   end
 
-  def test_a_backend_answer_that_is_not_a_score_blocks_the_request
+  def test_a_backend_answer_that_is_not_a_score_blocks_the_request()
     frontend = Object.new
     frontend.define_singleton_method(:backend=) { |_name| nil }
     frontend.define_singleton_method(:decide) { |_state, _questions| { 'harmful' => { 'type' => 'noul' } } }
 
-    assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'), jev: frontend, root: @root)['decision']
+    assert_equal 'block', hook(event('exec', 'command' => 'git status'), jev: frontend)['decision']
   end
 
-  def test_the_workspace_names_the_backend_and_false_skips_screening
-    write_config(policy: 'typesafe')
+  def test_the_workspace_names_the_backend_and_false_skips_screening()
+    write_config('policy' => 'typesafe')
 
-    assert_nil Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
+    assert_nil hook(event('exec', 'command' => 'git status'))
     assert_equal 'typesafe', @jev.backend_name
 
-    write_config(policy: false)
+    write_config('policy' => false)
     other = FakeJev.new
 
-    assert_nil Hooks.call(event('exec', 'command' => 'git status'), jev: other, root: @root)
+    assert_nil hook(event('exec', 'command' => 'git status'), jev: other)
     assert_equal 0, other.calls
   end
 
-  def test_an_unknown_backend_blocks_the_request
-    write_config(policy: 'nope')
+  def test_an_unknown_backend_blocks_the_request()
+    write_config('policy' => 'nope')
 
-    assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'), root: @root)['decision']
+    assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'), bus: @bus)['decision']
   end
 
-  def test_the_hook_session_id_is_injected_into_profile_tools
+  def test_the_hook_session_id_is_injected_into_profile_tools()
     %w[set_profile send_message get_heartbeat].each do |tool|
       payload = event("mcp__autonom-coord-mcp__#{tool}", 'name' => 'marlow', 'session_id' => 'forged')
-      result = Hooks.call(payload, jev: @jev, root: @root)
+      result = hook(payload)
 
       assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
     end
   end
 
-  def test_a_profile_cannot_be_reassigned
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
+  def test_a_profile_cannot_be_reassigned()
+    @bus.register('session-1', 'marlow')
 
-    result = Hooks.call(event('mcp__autonom-coord-mcp__set_profile', 'name' => 'wren'), jev: @jev, root: @root)
+    result = hook(event('mcp__autonom-coord-mcp__set_profile', 'name' => 'wren'))
 
     assert_equal 'block', result['decision']
     assert_equal 0, @jev.calls
   end
 
-  def test_registration_requires_a_hook_session_id
+  def test_registration_requires_a_hook_session_id()
     result = Hooks.call(
       {
         'hook_event_name' => 'PreToolUse',
@@ -139,53 +136,52 @@ class HooksTest < Minitest::Test
         'tool_input' => { 'name' => 'marlow' }
       },
       jev: @jev,
-      root: @root
+      bus: @bus
     )
 
     assert_equal 'block', result['decision']
     assert_equal 0, @jev.calls
   end
 
-  def test_unread_pings_ride_back_once_after_a_tool_call
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Inbox.ping('marlow', '@marlow check the pricer', from: 'wren', room: 'general', root: @root)
+  def test_unread_pings_ride_back_once_after_a_tool_call()
+    marlow = @bus.register('session-1', 'marlow')
+    wren = @bus.register('session-2', 'wren')
+    marlow.inbox.ping('@marlow check the pricer', from: wren, room: @bus.room('general'))
 
-    context = Hooks.call(post_event, jev: @jev, root: @root).dig('hookSpecificOutput', 'additionalContext')
+    context = hook(post_event).dig('hookSpecificOutput', 'additionalContext')
 
     assert_includes context, 'Unread pings (1)'
     assert_includes context, 'wren in #general'
     assert_includes context, '@marlow check the pricer'
-    assert_nil Hooks.call(post_event, jev: @jev, root: @root)
+    assert_nil hook(post_event)
   end
 
-  def test_post_tool_use_never_blocks_a_tool
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    File.symlink(File.join(@root, 'agents', 'marlow', 'identity.md'), Inbox.pings_path('marlow', root: @root))
+  def test_post_tool_use_never_blocks_a_tool()
+    marlow = @bus.register('session-1', 'marlow')
+    File.symlink(File.join(marlow.directory, 'identity.md'), marlow.inbox.pings_path)
 
-    assert_nil Hooks.call(post_event, jev: @jev, root: @root)
+    assert_nil hook(post_event)
   end
 
-  def test_pings_wait_for_a_tool_to_finish
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Inbox.ping('marlow', 'look', from: 'wren', root: @root)
+  def test_pings_wait_for_a_tool_to_finish()
+    marlow = @bus.register('session-1', 'marlow')
+    marlow.inbox.ping('look', from: @bus.register('session-2', 'wren'))
 
-    assert_nil Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
-    assert_equal 1, Inbox.read_pings('marlow', root: @root).length
+    assert_nil hook(event('exec', 'command' => 'git status'))
+    assert_equal 1, marlow.inbox.read_pings().length
   end
 
-  def test_session_start_carries_identity_memory_room_and_session_id
-    write_config(project: 'jobs', team_room: 'general', memory: true)
-    write_identity('marlow', display: 'Marlow', body: "# Marlow\n\nI read the kill columns.")
-    write_memory('marlow', "# marlow - memory\n\n## Now\n\nChecking the pricer.")
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Profile.set_profile('wren', session: 'session-2', root: @root)
-    Room.post('general', 'hello team', from: 'wren', project: @project)
+  def test_session_start_carries_identity_memory_room_and_session_id()
+    write_config('project' => 'jobs', 'teamRoom' => 'general', 'memory' => true)
+    marlow = @bus.register('session-1', 'marlow')
+    wren = @bus.register('session-2', 'wren')
+    File.write(File.join(marlow.directory, 'identity.md'), "---\ndisplayName: Marlow\n---\n\nI read the kill columns.\n")
+    FileUtils.mkdir_p(File.join(marlow.directory, 'memories'))
+    File.write(File.join(marlow.directory, 'memories', 'memory.md'), "# marlow - memory\n\n## Now\n\nChecking the pricer.\n")
+    @bus.room('general').post('hello team', from: wren)
 
-    context = Hooks.call(
-      { 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' },
-      jev: @jev,
-      root: @root
-    ).dig('hookSpecificOutput', 'additionalContext')
+    context = hook({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' })
+      .dig('hookSpecificOutput', 'additionalContext')
 
     assert_includes context, 'session-1'
     assert_includes context, 'You are Marlow (marlow)'
@@ -196,28 +192,31 @@ class HooksTest < Minitest::Test
     assert_equal 0, @jev.calls
   end
 
-  def test_an_unclaimed_tab_is_asked_to_claim_a_name
-    result = Hooks.call({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+  def test_an_unclaimed_tab_is_asked_to_claim_a_name()
+    context = hook({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' })
+      .dig('hookSpecificOutput', 'additionalContext')
 
-    assert_includes result.dig('hookSpecificOutput', 'additionalContext'), 'Claim your name with set_profile'
+    assert_includes context, 'Claim your name with set_profile'
   end
 
-  def test_the_prompt_nudge_lists_waiting_without_draining
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Inbox.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
+  def test_the_prompt_nudge_lists_waiting_without_draining()
+    marlow = @bus.register('session-1', 'marlow')
+    marlow.inbox.ping('ping text', from: @bus.register('session-2', 'wren'), room: @bus.room('general'))
 
-    result = Hooks.call({ 'hook_event_name' => 'UserPromptSubmit', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    context = hook({ 'hook_event_name' => 'UserPromptSubmit', 'session_id' => 'session-1' })
+      .dig('hookSpecificOutput', 'additionalContext')
 
-    assert_includes result.dig('hookSpecificOutput', 'additionalContext'), 'Unread pings (1)'
-    assert_equal 1, Inbox.unread_pings('marlow', root: @root).length
+    assert_includes context, 'Unread pings (1)'
+    assert_equal 1, marlow.inbox.unread_pings.length
   end
 
-  def test_stop_blocks_once_with_what_is_waiting
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Inbox.ping('marlow', '@marlow the pricer moved', from: 'wren', room: 'general', root: @root)
-    Room.post('general', 'anyone around?', from: 'wren', project: @project)
+  def test_stop_blocks_once_with_what_is_waiting()
+    marlow = @bus.register('session-1', 'marlow')
+    wren = @bus.register('session-2', 'wren')
+    marlow.inbox.ping('@marlow the pricer moved', from: wren, room: @bus.room('general'))
+    @bus.room('general').post('anyone around?', from: wren)
 
-    result = Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    result = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
     reason = result['reason']
 
     assert_equal 'block', result['decision']
@@ -227,40 +226,40 @@ class HooksTest < Minitest::Test
     assert_includes reason, 'New #general traffic (1)'
     assert_includes reason, 'wait_for_message'
 
-    re_entered = Hooks.call(
-      { 'hook_event_name' => 'Stop', 'session_id' => 'session-1', 'stop_hook_active' => true },
-      jev: @jev,
-      root: @root
-    )
+    re_entered = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1', 'stop_hook_active' => true })
 
     assert_nil re_entered
-    assert_equal 1, Inbox.unread_pings('marlow', root: @root).length
+    assert_equal 1, marlow.inbox.unread_pings.length
   end
 
-  def test_stop_lets_the_turn_end_when_nothing_is_owed
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
+  def test_stop_lets_the_turn_end_when_nothing_is_owed()
+    @bus.register('session-1', 'marlow')
 
-    assert_nil Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    assert_nil hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
   end
 
-  def test_stand_down_lets_a_session_stop
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Inbox.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
+  def test_stand_down_lets_a_session_stop()
+    marlow = @bus.register('session-1', 'marlow')
+    marlow.inbox.ping('ping text', from: @bus.register('session-2', 'wren'), room: @bus.room('general'))
     FileUtils.mkdir_p(File.join(@project, '.devin', 'collaboration'))
     File.write(File.join(@project, '.devin', 'collaboration', 'stand-down'), '')
 
-    assert_nil Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+    assert_nil hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
   end
 
-  def test_a_subagent_stop_is_never_blocked
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Inbox.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
+  def test_a_subagent_stop_is_never_blocked()
+    marlow = @bus.register('session-1', 'marlow')
+    marlow.inbox.ping('ping text', from: @bus.register('session-2', 'wren'), room: @bus.room('general'))
 
-    assert_nil Hooks.call({ 'hook_event_name' => 'SubagentStop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
-    assert_equal 1, Inbox.unread_pings('marlow', root: @root).length
+    assert_nil hook({ 'hook_event_name' => 'SubagentStop', 'session_id' => 'session-1' })
+    assert_equal 1, marlow.inbox.unread_pings.length
   end
 
   private
+
+  def hook(event, jev: @jev)
+    Hooks.call(event, jev: jev, bus: @bus)
+  end
 
   def event(tool_name, tool_input)
     {
@@ -271,7 +270,7 @@ class HooksTest < Minitest::Test
     }
   end
 
-  def post_event
+  def post_event()
     {
       'hook_event_name' => 'PostToolUse',
       'session_id' => 'session-1',
@@ -279,25 +278,5 @@ class HooksTest < Minitest::Test
       'tool_input' => { 'command' => 'git status' },
       'tool_response' => { 'success' => true, 'output' => '' }
     }
-  end
-
-  def write_config(project: 'demo', team_room: 'general', policy: nil, memory: nil)
-    FileUtils.mkdir_p(File.join(@project, '.devin'))
-    config = { 'project' => project, 'teamRoom' => team_room }
-    config['policy'] = policy unless policy.nil?
-    config['memory'] = memory unless memory.nil?
-    File.write(File.join(@project, '.devin', 'autonom-config.json'), JSON.generate(config))
-  end
-
-  def write_identity(name, display:, body: '')
-    dir = File.join(@root, 'agents', name)
-    FileUtils.mkdir_p(dir)
-    File.write(File.join(dir, 'identity.md'), "---\nname: #{name}\ndisplayName: #{display}\n---\n\n#{body}\n")
-  end
-
-  def write_memory(name, text)
-    dir = File.join(@root, 'agents', name, 'memories')
-    FileUtils.mkdir_p(dir)
-    File.write(File.join(dir, 'memory.md'), text)
   end
 end

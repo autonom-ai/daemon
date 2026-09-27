@@ -1,12 +1,11 @@
 require_relative '../config'
-require_relative '../profile'
+require_relative '../profile_store'
 require_relative 'bus'
-require_relative 'inbox'
-require_relative 'room'
 
 require 'json'
 
 module Coord
+  # The MCP server: JSON-RPC over stdio, one bus per workspace.
   class Server
     INFO = { 'name' => 'autonom-coord-mcp', 'version' => '0.1.0' }.freeze
     PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
@@ -18,9 +17,8 @@ module Coord
     MAX_WAIT = 60
     ONLINE_MS = 30 * 60_000
 
-    def initialize(root: ProfileStore::ROOT, project: Config.project_dir)
-      @root = root
-      @project = project
+    def initialize(bus)
+      @bus = bus
     end
 
     def run(input: STDIN, output: STDOUT)
@@ -202,11 +200,11 @@ module Coord
 
       ret = case tool
       when 'get_profiles'
-        Profile.get_profiles(root: @root)
+        @bus.profiles.map { |profile| profile_entry(profile) }
       when 'get_profile'
-        Profile.get_profile(session, root: @root)
+        profile_entry(@bus.profile(session))
       when 'set_profile'
-        Profile.set_profile(args['name'], session: session, root: @root)
+        profile_entry(@bus.register(session, args['name']))
       when 'send_message'
         send_message(args, session)
       when 'read_messages'
@@ -230,33 +228,35 @@ module Coord
         'structuredContent' => ret,
         'isError' => false
       }
-    rescue ProfileStore::Error, Room::Error => error
+    rescue ProfileStore::Error, Bus::Error => error
       tool_error(error.message)
     end
 
     def send_message(args, session)
-      from = registered_name(session)
+      from = registered_profile(session)
       text = args['text'].to_s
       raise ProfileStore::Error, 'A message needs text' if text.strip.empty?
 
       targets = ping_targets(args['ping'], from)
       if args['to'].to_s.empty?
-        room = Bus.normalize(args['room'], project: @project)
-        entry = Room.post(room, text, from: from, project: @project)
-        targets.each { |target| Inbox.ping(target, text, from: from, room: room, root: @root) }
-        { 'room' => room, 'entry' => entry, 'pinged' => targets }
+        room = @bus.room(args['room'])
+        entry = room.post(text, from: from)
+        targets.each { |target| target.inbox.ping(text, from: from, room: room) }
+        { 'room' => room.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
       else
-        to = ProfileStore.normalize_name(args['to'])
-        entry = Inbox.dm(to, text, from: from, root: @root)
-        targets.each { |target| Inbox.ping(target, text, from: from, root: @root) }
-        { 'to' => to, 'entry' => entry, 'pinged' => targets }
+        to = @bus.profile_named(args['to'])
+        raise ProfileStore::Error, "Unknown profile: #{args['to']}" unless to
+
+        entry = to.inbox.dm(text, from: from)
+        targets.each { |target| target.inbox.ping(text, from: from) }
+        { 'to' => to.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
       end
     end
 
     def read_messages(args, session)
-      name = registered_name(session)
+      profile = registered_profile(session)
       source, room = read_target(args)
-      read_stream(name, source, room, limit(args))
+      read_stream(profile, source, room, limit(args))
     end
 
     # The no-idle loop's bottom rung: block until something lands, so an agent
@@ -266,43 +266,38 @@ module Coord
     # a line would land in, which costs a couple of stats a second and no reads
     # at all.
     def wait_for_message(args, session)
-      name = registered_name(session)
+      profile = registered_profile(session)
       source, room = read_target(args)
       raise ProfileStore::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
 
-      wait_for(name, source, room, wait_timeout(args))
-      read_stream(name, source, room, limit(args))
-    end
-
-    def wait_for(name, source, room, timeout)
       if source == 'inbox'
-        Inbox.wait(name, timeout: timeout, root: @root)
+        profile.inbox.wait(timeout: wait_timeout(args))
       else
-        Room.wait(room, name, timeout: timeout, project: @project)
+        room.wait(profile, timeout: wait_timeout(args))
       end
+      read_stream(profile, source, room, limit(args))
     end
 
     def list_rooms(session)
-      name = registered_name(session)
-      (Room.names(project: @project) | [Bus.team_room(project: @project)]).sort.map do |room|
-        entries = Room.messages(room, project: @project)
+      profile = registered_profile(session)
+      @bus.rooms.map do |room|
+        entries = room.messages
         {
-          'name' => room,
+          'name' => room.name,
           'count' => entries.length,
-          'unread' => Room.unread(room, agent: name, project: @project, root: @root).length,
+          'unread' => room.unread(profile).length,
           'lastTs' => entries.last&.fetch('ts', nil)
         }
       end
     end
 
     def get_heartbeat(args)
-      name = ProfileStore.normalize_name(args['name'])
-      profile = Profile.get_profiles(root: @root).find { |entry| entry['name'].casecmp?(name) }
-      raise ProfileStore::Error, "Unknown profile: #{name}" unless profile
+      profile = @bus.profile_named(args['name'])
+      raise ProfileStore::Error, "Unknown profile: #{args['name']}" unless profile
 
-      heartbeat = Profile.heartbeat(profile['name'], root: @root)
+      heartbeat = profile.heartbeat
       {
-        'name' => profile['name'],
+        'name' => profile.name,
         'lastHeartbeat' => heartbeat,
         'online' => heartbeat.positive? && (Time.now.to_f * 1000).round - heartbeat < ONLINE_MS
       }
@@ -312,10 +307,14 @@ module Coord
     # caller's own profile is stamped by whatever tool it just called. A
     # session that has not registered yet has nobody to stamp.
     def stamp_heartbeat(session)
-      profile = Profile.get_profile(session, root: @root)
-      Profile.touch_heartbeat(profile['name'], root: @root) if profile
+      profile = @bus.profile(session)
+      profile&.touch_heartbeat()
     rescue ProfileStore::Error
       nil
+    end
+
+    def profile_entry(profile)
+      profile && { 'name' => profile.name, 'directory' => profile.directory }
     end
 
     def read_target(args)
@@ -323,20 +322,20 @@ module Coord
       source = 'room' if source.empty?
       raise ProfileStore::Error, "Unknown source: #{source}" unless SOURCES.include?(source)
 
-      [source, Bus.normalize(args['room'], project: @project)]
+      [source, @bus.room(args['room'])]
     end
 
-    def read_stream(name, source, room, limit)
+    def read_stream(profile, source, room, limit)
       case source
       when 'inbox'
-        { 'source' => 'inbox', 'messages' => Inbox.read(name, limit: limit, root: @root) }
+        { 'source' => 'inbox', 'messages' => profile.inbox.read(limit: limit) }
       when 'pings'
-        { 'source' => 'pings', 'messages' => Inbox.read_pings(name, root: @root) }
+        { 'source' => 'pings', 'messages' => profile.inbox.read_pings() }
       else
         {
           'source' => 'room',
-          'room' => room,
-          'messages' => Room.read(room, agent: name, limit: limit, project: @project, root: @root)
+          'room' => room.name,
+          'messages' => room.read(profile, limit: limit)
         }
       end
     end
@@ -346,23 +345,23 @@ module Coord
       value.is_a?(Integer) ? value.clamp(1, MAX_WAIT) : DEFAULT_WAIT
     end
 
-    def registered_name(session)
-      profile = Profile.get_profile(session, root: @root)
+    def registered_profile(session)
+      profile = @bus.profile(session)
       raise ProfileStore::Error, 'No profile is registered for this session; register one first' unless profile
 
-      profile['name']
+      profile
     end
 
     def ping_targets(names, from)
       return [] unless names.is_a?(Array)
 
-      known = Profile.get_profiles(root: @root).map { |profile| profile['name'] }
-      names.filter_map do |name|
-        target = known.find { |candidate| candidate.casecmp?(ProfileStore.normalize_name(name)) }
+      targets = names.map do |name|
+        target = @bus.profile_named(name)
         raise ProfileStore::Error, "Unknown profile to ping: #{name}" unless target
 
         target
-      end.uniq - [from]
+      end
+      targets.uniq { |target| target.name.downcase }.reject { |target| target.name.casecmp?(from.name) }
     end
 
     def limit(args)
@@ -384,4 +383,6 @@ module Coord
   end
 end
 
-Coord::Server.new.run if $PROGRAM_NAME == __FILE__
+Coord::Server.new(
+  Bus.new(config: Config.load(), store: ProfileStore.new())
+).run if $PROGRAM_NAME == __FILE__

@@ -1,100 +1,81 @@
 require 'minitest/autorun'
-require 'tmpdir'
 
-require_relative '../source/profile'
+require_relative 'common'
 
 class ProfileTest < Minitest::Test
-  def setup
-    @root = Dir.mktmpdir('autonom')
+  include CoreTest
+
+  def setup()
+    setup_bus()
+    @marlow = @bus.register('session-1', 'marlow')
+    @wren = @bus.register('session-2', 'wren')
   end
 
-  def teardown
-    FileUtils.remove_entry(@root) if @root && File.directory?(@root)
+  def teardown()
+    teardown_bus()
   end
 
-  def test_profile_names_and_directories_are_listed
-    FileUtils.mkdir_p(File.join(@root, 'agents', 'Marlow'))
-
-    profiles = Profile.get_profiles(root: @root)
-
-    assert_equal ['Marlow'], profiles.map { |profile| profile['name'] }
-    assert_equal File.join(@root, 'agents', 'Marlow'), profiles.first['directory']
-  end
-
-  def test_set_profile_creates_a_profile_and_keeps_its_canonical_name
-    profile = Profile.set_profile('New_Agent', session: 'session-1', root: @root)
-
-    assert_equal 'new_agent', profile['name']
-    assert File.directory?(File.join(@root, 'agents', 'new_agent', 'memories'))
-    assert File.file?(File.join(@root, 'agents', 'new_agent', 'identity.md'))
-    assert_equal profile, Profile.get_profile('session-1', root: @root)
-
-    FileUtils.mkdir_p(File.join(@root, 'agents', 'Marlow', 'memories'))
-    assert_equal 'Marlow', Profile.set_profile('mArLoW', session: 'session-2', root: @root)['name']
-  end
-
-  def test_a_session_profile_cannot_be_reassigned
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-
-    assert Profile.permissions.can_set_profile?('MARLOW', session: 'session-1', root: @root)
-    refute Profile.permissions.can_set_profile?('wren', session: 'session-1', root: @root)
-    assert_raises(ProfileStore::Error) do
-      Profile.set_profile('wren', session: 'session-1', root: @root)
-    end
-  end
-
-  def test_another_profile_and_the_session_map_are_denied
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    other_profile = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
+  def test_another_profile_and_the_session_map_are_denied()
+    other_memory = File.join(@wren.directory, 'memories', 'notes.md')
     sessions_file = File.join(@root, 'agents', 'sessions.json')
 
-    refute Profile.permissions.can_read?(other_profile, session: 'session-1', root: @root)
-    refute Profile.permissions.can_write?(other_profile, session: 'session-1', root: @root)
-    refute Profile.permissions.can_read?(sessions_file, session: 'session-1', root: @root)
-    refute Profile.permissions.can_write?(sessions_file, session: 'session-1', root: @root)
+    refute @marlow.can_read?(other_memory)
+    refute @marlow.can_write?(other_memory)
+    refute @marlow.can_read?(sessions_file)
+    refute @marlow.can_write?(sessions_file)
   end
 
-  def test_the_current_profile_is_accessible_but_env_is_not
-    profile = Profile.set_profile('marlow', session: 'session-1', root: @root)
-    memory_file = File.join(profile['directory'], 'memories', 'notes.md')
+  def test_the_current_profile_is_accessible_but_env_is_not()
+    memory_file = File.join(@marlow.directory, 'memories', 'notes.md')
 
-    assert Profile.permissions.can_read?(memory_file, session: 'session-1', root: @root)
-    assert Profile.permissions.can_write?(memory_file, session: 'session-1', root: @root)
-    refute Profile.permissions.can_read?(File.join(@root, '.env'), session: 'session-1', root: @root)
+    assert @marlow.can_read?(memory_file)
+    assert @marlow.can_write?(memory_file)
+    refute @marlow.can_read?(File.join(@project, '.env'))
   end
 
-  def test_exec_blocks_profile_redirection_protected_deletion_and_a_foreign_cwd
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    other_memory = File.join(@root, 'agents', 'wren', 'memories', 'note.md')
-    other_profile = File.join(@root, 'agents', 'wren', 'memories')
-
-    refute Profile.permissions.can_exec?("printf note > #{other_memory}", session: 'session-1', root: @root, dir: @root)
-    refute Profile.permissions.can_exec?("rm -rf #{Dir.home}", root: @root, dir: @root)
-    refute Profile.permissions.can_exec?("rm -rf #{File.join(@root, 'source')}", root: @root, dir: @root)
-    refute Profile.permissions.can_exec?('rm -rf /', root: @root, dir: @root)
-    refute Profile.permissions.can_exec?('pwd', session: 'session-1', root: @root, dir: other_profile)
-    assert Profile.permissions.can_exec?('git status', session: 'session-1', root: @root)
+  def test_searching_the_store_is_denied()
+    refute @marlow.can_search?(@root)
+    assert @marlow.can_search?(@project)
   end
 
-  def test_get_unread_composes_inbox_pings_and_rooms
-    Inbox.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
-    Inbox.dm('marlow', 'dm text', from: 'wren', root: @root)
-    Room.post('general', 'room text', from: 'wren', project: @root)
+  def test_exec_blocks_profile_redirection_protected_deletion_and_a_foreign_cwd()
+    other_memory = File.join(@wren.directory, 'memories', 'note.md')
 
-    unread = Profile.get_unread('marlow', rooms: ['general'], project: @root, root: @root)
-
-    assert_equal ['ping text'], unread['pings'].map { |entry| entry['text'] }
-    assert_equal ['dm text'], unread['inbox'].map { |entry| entry['text'] }
-    assert_equal ['room text'], unread['rooms']['general'].map { |entry| entry['text'] }
+    refute @marlow.can_exec?("printf note > #{other_memory}")
+    refute @marlow.can_exec?("rm -rf #{Dir.home}")
+    refute @marlow.can_exec?("rm -rf #{File.join(@root, 'source')}")
+    refute @marlow.can_exec?('rm -rf /')
+    refute @marlow.can_exec?('pwd', dir: File.join(@wren.directory, 'memories'))
+    assert @marlow.can_exec?('git status')
   end
 
-  def test_heartbeat_is_zero_until_stamped
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
+  def test_identity_and_memory_are_sourced_from_the_profile()
+    File.write(File.join(@marlow.directory, 'identity.md'), "---\ndisplayName: Marlow\n---\n\nI read the kill columns.\n")
+    FileUtils.mkdir_p(File.join(@marlow.directory, 'memories'))
+    File.write(File.join(@marlow.directory, 'memories', 'memory.md'), "# marlow - memory\n\n## Now\n\nChecking the pricer.\n")
 
-    assert_equal 0, Profile.heartbeat('marlow', root: @root)
+    assert_equal 'Marlow', @marlow.identity.display_name
+    assert_includes @marlow.identity.get()['personality'], 'I read the kill columns.'
+    assert_includes @marlow.memory.get(), 'Checking the pricer.'
+  end
 
-    Profile.touch_heartbeat('marlow', root: @root)
+  def test_heartbeat_is_zero_until_stamped()
+    assert_equal 0, @marlow.heartbeat
 
-    assert Profile.heartbeat('marlow', root: @root).positive?
+    @marlow.touch_heartbeat()
+
+    assert @marlow.heartbeat.positive?
+  end
+
+  def test_unread_is_the_profiles_inbox_pings_and_team_room()
+    @wren.inbox.dm('hello', from: @marlow)
+    @wren.inbox.ping('look', from: @marlow, room: @bus.room('general'))
+    @bus.room('general').post('team line', from: @marlow)
+
+    unread = @wren.unread
+
+    assert_equal ['hello'], unread['inbox'].map { |entry| entry['text'] }
+    assert_equal ['look'], unread['pings'].map { |entry| entry['text'] }
+    assert_equal ['team line'], unread['rooms']['general'].map { |entry| entry['text'] }
   end
 end

@@ -1,72 +1,90 @@
 require 'json'
 
-# The workspace's autonom-config.json: the single source of truth for what
-# this workspace is and where its coordination files live. A pure reader -
-# it never normalizes names and never touches the bus.
-module Config
+# The workspace's autonom-config.json: the source of truth for what this
+# workspace is and where its coordination files live.
+class Config
   FILE = 'autonom-config.json'
   DEVIN_DIR = '.devin'
   ROOMS_DIR = 'autonom-coord/rooms'
+  DEFAULT_TEAM_ROOM = 'general'
 
-  POLICY_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
-  SALIENCE_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
-  MEMORY_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
-
-  extend self
-
-  def load(project: project_dir)
-    root = File.expand_path(project)
-    raw = read(root)
-    {
-      'project_dir' => root,
-      'project' => raw['project'],
-      'human' => raw['human'],
-      'team_room' => raw['teamRoom'],
-      'policy' => feature(raw.fetch('policy', true), POLICY_DEFAULTS),
-      'salience' => feature(raw.fetch('salience', true), SALIENCE_DEFAULTS),
-      'memory' => feature(raw.fetch('memory', false), MEMORY_DEFAULTS)
-    }
+  # A screening or gating switch: on or off, with an optional backend name.
+  Feature = Struct.new(:enabled, :backend) do
+    def enabled?
+      enabled
+    end
   end
 
-  def project_dir
+  def self.load(project = project_dir())
+    new(project)
+  end
+
+  def self.project_dir()
     File.expand_path(ENV['DEVIN_PROJECT_DIR'] || Dir.pwd)
   end
 
-  def dir(project: project_dir)
-    File.join(File.expand_path(project), DEVIN_DIR)
+  def initialize(project)
+    @project_dir = File.expand_path(project)
+    @raw = read
   end
 
-  def path(project: project_dir)
-    File.join(dir(project: project), FILE)
+  attr_reader :project_dir
+
+  def project
+    @raw['project']
   end
 
-  def rooms_dir(project: project_dir)
-    File.join(dir(project: project), ROOMS_DIR)
+  def human
+    @raw['human']
   end
 
-  def team_room(project: project_dir)
-    read(File.expand_path(project))['teamRoom']
+  def team_room
+    @raw['teamRoom']
+  end
+
+  def policy
+    feature(@raw.fetch('policy', true))
+  end
+
+  def salience
+    feature(@raw.fetch('salience', true))
+  end
+
+  def memory
+    feature(@raw.fetch('memory', false))
+  end
+
+  def dir
+    File.join(@project_dir, DEVIN_DIR)
+  end
+
+  def path
+    File.join(dir, FILE)
+  end
+
+  def rooms_dir
+    File.join(dir, ROOMS_DIR)
   end
 
   private
 
-  def read(project)
-    raw = JSON.parse(File.read(path(project: project)))
+  def read()
+    raw = JSON.parse(File.read(path))
     raw.is_a?(Hash) ? raw : {}
   rescue SystemCallError, JSON::ParserError
     {}
   end
 
-  def feature(value, defaults)
+  def feature(value)
     case value
     when Hash
-      defaults.merge(value).merge('enabled' => value.fetch('enabled', true))
+      Feature.new(value.fetch('enabled', true), value['backend'])
     when String
-      defaults.merge('enabled' => true, 'backend' => value)
+      Feature.new(true, value)
     when true
-      defaults.merge('enabled' => true)
+      Feature.new(true, nil)
     else
-      defaults.merge('enabled' => false)
+      Feature.new(false, nil)
     end
   end
 end

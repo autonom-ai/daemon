@@ -1,67 +1,64 @@
 require 'minitest/autorun'
-require 'tmpdir'
 
-require_relative '../source/coord/inbox'
+require_relative 'common'
 
 class InboxTest < Minitest::Test
-  def setup
-    @root = Dir.mktmpdir('autonom')
+  include CoreTest
+
+  def setup()
+    setup_bus()
+    @marlow = @bus.register('session-1', 'marlow')
+    @wren = @bus.register('session-2', 'wren')
+    @inbox = @wren.inbox
   end
 
-  def teardown
-    FileUtils.remove_entry(@root) if @root && File.directory?(@root)
+  def teardown()
+    teardown_bus()
   end
 
-  def test_dms_and_pings_are_profile_scoped
-    Inbox.dm('marlow', 'first', from: 'wren', root: @root)
-    Inbox.ping('marlow', 'look here', from: 'wren', room: 'general', root: @root)
+  def test_dms_and_pings_are_profile_scoped()
+    @inbox.dm('first', from: @marlow)
+    @inbox.ping('look here', from: @marlow, room: @bus.room('general'))
 
-    dms = Inbox.messages('marlow', root: @root)
-    pings = Inbox.pings('marlow', root: @root)
-
-    assert_equal ['first'], dms.map { |entry| entry['text'] }
-    assert_equal 'marlow', dms.first['to']
-    assert_equal ['look here'], pings.map { |entry| entry['text'] }
-    assert_equal 'general', pings.first['room']
-    assert_empty Inbox.messages('wren', root: @root)
+    assert_equal ['first'], @inbox.messages.map { |entry| entry['text'] }
+    assert_equal 'wren', @inbox.messages.first['to']
+    assert_equal ['look here'], @inbox.pings.map { |entry| entry['text'] }
+    assert_equal 'general', @inbox.pings.first['room']
+    assert_empty @marlow.inbox.messages
   end
 
-  def test_reading_a_stream_delivers_each_entry_once
-    Inbox.ping('marlow', 'look here', from: 'wren', room: 'general', root: @root)
-    Inbox.ping('marlow', 'and here', from: 'sable', root: @root)
+  def test_reading_a_stream_delivers_each_entry_once()
+    @inbox.ping('look here', from: @marlow, room: @bus.room('general'))
+    @inbox.ping('and here', from: @marlow)
 
-    assert_equal ['look here', 'and here'], Inbox.read_pings('marlow', root: @root).map { |ping| ping['text'] }
-    assert_empty Inbox.read_pings('marlow', root: @root)
+    assert_equal ['look here', 'and here'], @inbox.read_pings().map { |ping| ping['text'] }
+    assert_empty @inbox.read_pings()
   end
 
-  def test_unread_does_not_advance_the_cursor
-    Inbox.dm('marlow', 'dm', from: 'wren', root: @root)
+  def test_unread_does_not_advance_the_cursor()
+    @inbox.dm('dm', from: @marlow)
 
-    assert_equal 1, Inbox.unread('marlow', root: @root).length
-    assert_equal 1, Inbox.unread('marlow', root: @root).length
+    assert_equal 1, @inbox.unread.length
+    assert_equal 1, @inbox.unread.length
 
-    Inbox.read('marlow', root: @root)
+    @inbox.read()
 
-    assert_empty Inbox.unread('marlow', root: @root)
+    assert_empty @inbox.unread
   end
 
-  def test_profile_names_are_validated
-    assert_raises(ProfileStore::Error) { Inbox.dm('../wren', 'hi', from: 'marlow', root: @root) }
-  end
-
-  def test_a_dm_wakes_only_its_recipient
+  def test_a_dm_wakes_only_its_recipient()
     woken = Queue.new
     Thread.new do
-      Inbox.wait('wren', timeout: 5, root: @root)
+      @inbox.wait(timeout: 5)
       woken << 'wren'
     end
     other = Thread.new do
-      Inbox.wait('marlow', timeout: 1, root: @root)
+      @marlow.inbox.wait(timeout: 1)
       woken << 'marlow'
     end
     sleep 0.2
 
-    Inbox.dm('wren', 'psst', from: 'sable', root: @root)
+    @inbox.dm('psst', from: @marlow)
 
     assert_equal 'wren', woken.pop
     assert woken.empty?
@@ -69,19 +66,19 @@ class InboxTest < Minitest::Test
     other&.join(2)
   end
 
-  def test_a_ping_interrupts_an_inbox_wait
+  def test_a_ping_interrupts_an_inbox_wait()
     woken = Queue.new
     Thread.new do
-      Inbox.wait('wren', timeout: 5, root: @root)
+      @inbox.wait(timeout: 5)
       woken << 'wren'
     end
     other = Thread.new do
-      Inbox.wait('marlow', timeout: 1, root: @root)
+      @marlow.inbox.wait(timeout: 1)
       woken << 'marlow'
     end
     sleep 0.2
 
-    Inbox.ping('wren', 'look', from: 'sable', room: 'general', root: @root)
+    @inbox.ping('look', from: @marlow, room: @bus.room('general'))
 
     assert_equal 'wren', woken.pop
     assert woken.empty?

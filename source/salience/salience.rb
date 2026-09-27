@@ -1,5 +1,3 @@
-require_relative '../profile'
-
 # Salience is the arbiter of what an agent should be told about before it
 # acts. Today the only signals are the ones it has not read yet, so the
 # arbiter is deliberately deterministic: an unread ping, DM, or room line
@@ -100,8 +98,8 @@ module Salience
     lines
   end
 
-  def stop_text(name, rooms:, project:, root:)
-    unread = Profile.get_unread(name, rooms: rooms, project: project, root: root)
+  def stop_text(profile)
+    unread = profile.unread
     focus = focus(impulses(unread))
     return nil unless focus
 

@@ -1,70 +1,66 @@
-require_relative '../profile_store'
-require_relative 'bus'
-
-# DMs and pings are the profile-scoped side of the bus: they live in the
-# profile directory, not the workspace, so they follow the person across
-# workspaces.
-module Inbox
+# One profile's inbox: the profile-scoped side of the bus. DMs and pings live
+# in the profile directory, not the workspace, so they follow the person
+# across workspaces. An inbox holds the bus and the profile, so its methods
+# take nothing but what varies.
+class Inbox
   SOURCE = 'inbox'
   INBOX_FILE = 'inbox.jsonl'
   PINGS_FILE = 'pings.jsonl'
 
-  extend self
-
-  def path(name, root: ProfileStore::ROOT)
-    Bus.stream_path(ProfileStore.profile_dir(name, root: root), INBOX_FILE)
+  def initialize(bus, profile)
+    @bus = bus
+    @profile = profile
   end
 
-  def pings_path(name, root: ProfileStore::ROOT)
-    Bus.stream_path(ProfileStore.profile_dir(name, root: root), PINGS_FILE)
+  def path
+    @bus.stream_path(@bus.store.directory(@profile.name), INBOX_FILE)
   end
 
-  def messages(name, root: ProfileStore::ROOT)
-    Bus.read(path(name, root: root))
+  def pings_path
+    @bus.stream_path(@bus.store.directory(@profile.name), PINGS_FILE)
   end
 
-  def pings(name, root: ProfileStore::ROOT)
-    Bus.read(pings_path(name, root: root))
+  def messages
+    @bus.read(path)
   end
 
-  def unread(name, root: ProfileStore::ROOT)
-    messages(name, root: root).drop(Bus.cursor(name, SOURCE, root: root))
+  def pings
+    @bus.read(pings_path)
   end
 
-  def unread_pings(name, root: ProfileStore::ROOT)
-    pings(name, root: root).drop(Bus.cursor(name, 'pings', root: root))
+  def unread
+    messages.drop(@bus.cursor(@profile, SOURCE))
   end
 
-  def read(name, limit: nil, root: ProfileStore::ROOT)
-    Bus.read_stream(name, SOURCE, messages(name, root: root), limit: limit, root: root)
+  def unread_pings
+    pings.drop(@bus.cursor(@profile, 'pings'))
   end
 
-  def read_pings(name, root: ProfileStore::ROOT)
-    Bus.read_stream(name, 'pings', pings(name, root: root), root: root)
+  def read(limit: nil)
+    @bus.read_stream(@profile, SOURCE, messages, limit: limit)
   end
 
-  def dm(name, text, from:, root: ProfileStore::ROOT)
-    entry = Bus.entry(from: from, text: text, to: name)
-    Bus.append(path(name, root: root), entry)
-    ProfileStore.wake(name, SOURCE)
+  def read_pings()
+    @bus.read_stream(@profile, 'pings', pings)
+  end
+
+  def dm(text, from:)
+    entry = @bus.entry(from: from, text: text, to: @profile)
+    @bus.append(path, entry)
+    @bus.wake(@profile, SOURCE)
     entry
   end
 
-  def ping(name, text, from:, room: nil, root: ProfileStore::ROOT)
-    entry = Bus.entry(from: from, text: text, room: room)
-    Bus.append(pings_path(name, root: root), entry)
+  def ping(text, from:, room: nil)
+    entry = @bus.entry(from: from, text: text, room: room)
+    @bus.append(pings_path, entry)
     # A ping interrupts anything: it ends an inbox wait and any room wait
     # this person is parked in.
-    ProfileStore.wake_agent(name)
+    @bus.wake_agent(@profile)
     entry
   end
 
-  def wait(name, timeout:, root: ProfileStore::ROOT)
-    ProfileStore.wait(
-      name,
-      SOURCE,
-      timeout: timeout,
-      watch: [path(name, root: root), pings_path(name, root: root)]
-    )
+  def wait(timeout:)
+    @bus.wait(@profile, SOURCE, timeout: timeout, watch: [path, pings_path])
   end
 end
