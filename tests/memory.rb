@@ -15,13 +15,13 @@ class MemoryTest < Minitest::Test
   end
 
   def test_a_missing_memory_is_empty()
-    marlow = ProfileStore.register('session-1', 'marlow')
+    marlow = ProfileStore.register_profile('marlow', 'session-1')
 
     assert_empty marlow.memory.get()
   end
 
   def test_a_small_memory_is_returned_whole()
-    marlow = ProfileStore.register('session-1', 'marlow')
+    marlow = ProfileStore.register_profile('marlow', 'session-1')
     write_memory(marlow, "# marlow - memory\n\nshort and whole\n")
 
     assert_equal "# marlow - memory\n\nshort and whole", marlow.memory.get()
@@ -29,7 +29,7 @@ class MemoryTest < Minitest::Test
 
   def test_a_slice_keeps_identity_and_project_blocks()
     write_config('project' => 'jobs')
-    marlow = ProfileStore.register('session-1', 'marlow')
+    marlow = ProfileStore.register_profile('marlow', 'session-1')
     write_memory(
       marlow,
       [
@@ -50,7 +50,7 @@ class MemoryTest < Minitest::Test
 
   # The layer is deliberately inert until the evals branch says otherwise.
   def test_recall_and_capture_do_nothing()
-    marlow = ProfileStore.register('session-1', 'marlow')
+    marlow = ProfileStore.register_profile('marlow', 'session-1')
     write_memory(marlow, "# marlow - memory\n\nshort and whole\n")
 
     assert_empty marlow.memory.recall('anything')

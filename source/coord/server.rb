@@ -197,9 +197,9 @@ module Coord
       when 'get_profiles'
         ProfileStore.profiles.map { |profile| profile_entry(profile) }
       when 'get_profile'
-        profile_entry(ProfileStore.profile(session))
+        profile_entry(ProfileStore.profile_by_session(session))
       when 'set_profile'
-        profile_entry(ProfileStore.register(session, args['name']))
+        profile_entry(ProfileStore.register_profile(args['name'], session))
       when 'send_message'
         send_message(args, session)
       when 'read_messages'
@@ -236,14 +236,14 @@ module Coord
       if args['to'].to_s.empty?
         room = room_named(args['room'])
         entry = room.post(text, from: from)
-        targets.each { |target| target.inbox.ping(text, from: from, room: room) }
+        targets.each { |target| Bus.inbox(target).ping(text, from: from, room: room) }
         { 'room' => room.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
       else
-        to = ProfileStore.profile_named(args['to'])
+        to = ProfileStore.profile_by_name(args['to'])
         raise ProfileStore::Error, "Unknown profile: #{args['to']}" unless to
 
-        entry = to.inbox.dm(text, from: from)
-        targets.each { |target| target.inbox.ping(text, from: from) }
+        entry = Bus.inbox(to).dm(text, from: from)
+        targets.each { |target| Bus.inbox(target).ping(text, from: from) }
         { 'to' => to.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
       end
     end
@@ -266,7 +266,7 @@ module Coord
       raise ProfileStore::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
 
       if source == 'inbox'
-        profile.inbox.wait(timeout: wait_timeout(args))
+        Bus.inbox(profile).wait(timeout: wait_timeout(args))
       else
         room.wait(profile, timeout: wait_timeout(args))
       end
@@ -288,7 +288,7 @@ module Coord
     end
 
     def get_heartbeat(args)
-      profile = ProfileStore.profile_named(args['name'])
+      profile = ProfileStore.profile_by_name(args['name'])
       raise ProfileStore::Error, "Unknown profile: #{args['name']}" unless profile
 
       heartbeat = profile.heartbeat
@@ -303,7 +303,7 @@ module Coord
     # caller's own profile is stamped by whatever tool it just called. A
     # session that has not registered yet has nobody to stamp.
     def stamp_heartbeat(session)
-      profile = ProfileStore.profile(session)
+      profile = ProfileStore.profile_by_session(session)
       profile&.touch_heartbeat()
     rescue ProfileStore::Error
       nil
@@ -333,9 +333,9 @@ module Coord
     def read_stream(profile, source, room, limit)
       case source
       when 'inbox'
-        { 'source' => 'inbox', 'messages' => profile.inbox.read(limit: limit) }
+        { 'source' => 'inbox', 'messages' => Bus.inbox(profile).read(limit: limit) }
       when 'pings'
-        { 'source' => 'pings', 'messages' => profile.inbox.read_pings() }
+        { 'source' => 'pings', 'messages' => Bus.inbox(profile).read_pings() }
       else
         {
           'source' => 'room',
@@ -351,7 +351,7 @@ module Coord
     end
 
     def registered_profile(session)
-      profile = ProfileStore.profile(session)
+      profile = ProfileStore.profile_by_session(session)
       raise ProfileStore::Error, 'No profile is registered for this session; register one first' unless profile
 
       profile
@@ -361,7 +361,7 @@ module Coord
       return [] unless names.is_a?(Array)
 
       targets = names.map do |name|
-        target = ProfileStore.profile_named(name)
+        target = ProfileStore.profile_by_name(name)
         raise ProfileStore::Error, "Unknown profile to ping: #{name}" unless target
 
         target

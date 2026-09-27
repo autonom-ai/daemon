@@ -8,11 +8,11 @@ class Inbox
   end
 
   def path
-    Bus.stream_path(ProfileStore.directory(@profile.name), INBOX_FILE)
+    Bus.stream_path(@profile.directory, INBOX_FILE)
   end
 
   def pings_path
-    Bus.stream_path(ProfileStore.directory(@profile.name), PINGS_FILE)
+    Bus.stream_path(@profile.directory, PINGS_FILE)
   end
 
   def messages

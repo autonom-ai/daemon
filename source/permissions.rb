@@ -34,10 +34,10 @@ module Permissions
       File.join(agents, 'sessions.json.lock'),
       *Dir.glob(File.join(agents, '.sessions-*'))
     ]
-    ProfileStore.records.each do |record|
-      next if @name && record.name.casecmp?(@name)
+    ProfileStore.profiles.each do |profile|
+      next if @name && profile.name.casecmp?(@name)
 
-      restricted.concat(Dir.glob(File.join(record.directory, '**', '*'), File::FNM_DOTMATCH))
+      restricted.concat(Dir.glob(File.join(profile.directory, '**', '*'), File::FNM_DOTMATCH))
     end
 
     flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH

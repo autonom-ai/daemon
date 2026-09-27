@@ -40,6 +40,6 @@ module CoreTest
   end
 
   def profile(name)
-    ProfileStore.profile_named(name)
+    ProfileStore.profile_by_name(name)
   end
 end

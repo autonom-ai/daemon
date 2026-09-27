@@ -8,7 +8,7 @@ class IdentityTest < Minitest::Test
 
   def setup()
     setup_core()
-    @marlow = ProfileStore.register('session-1', 'marlow')
+    @marlow = ProfileStore.register_profile('marlow', 'session-1')
   end
 
   def teardown()
@@ -38,7 +38,7 @@ class IdentityTest < Minitest::Test
   end
 
   def test_priors_digest_interests_and_skip_self()
-    wren = ProfileStore.register('session-2', 'wren')
+    wren = ProfileStore.register_profile('wren', 'session-2')
     write_identity(wren, "---\ndisplayName: Wren\n---\n\n## Interests\n\nembeddings, search quality\n\n## Disinterests\n\nresume formatting\n")
     write_identity(@marlow, "---\ndisplayName: Marlow\n---\n\n## Voice\n\nblunt\n")
 

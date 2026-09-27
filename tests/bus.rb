@@ -7,8 +7,8 @@ class BusTest < Minitest::Test
 
   def setup()
     setup_core()
-    @marlow = ProfileStore.register('session-1', 'marlow')
-    @wren = ProfileStore.register('session-2', 'wren')
+    @marlow = ProfileStore.register_profile('marlow', 'session-1')
+    @wren = ProfileStore.register_profile('wren', 'session-2')
   end
 
   def teardown()
