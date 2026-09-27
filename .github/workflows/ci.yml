@@ -46,7 +46,7 @@ jobs:
           rm -rf "$WS" "$ROOT"
           mkdir -p "$WS/.devin" "$ROOT/agents/marlow"
           printf -- '---\nname: marlow\ndisplayName: Marlow\n---\n\nTest persona.\n' > "$ROOT/agents/marlow/identity.md"
-          printf '{"project":"ci-room","human":"ci","teamRoom":"general","coordRoot":"%s"}\n' "$ROOT" > "$WS/.devin/coord.json"
+          printf '{"project":"ci-room","human":"ci","teamRoom":"general"}\n' > "$WS/.devin/autonom-config.json"
           node -e '
             const { readFileSync } = require("node:fs");
             const { openBus } = require("./extension/bus.js");

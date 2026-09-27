@@ -65,23 +65,35 @@ either the `PostToolUse` hook riding it back on the agent's next tool call, or `
 gates a stop: if the agent still owes a reply, the turn is blocked once with
 what is waiting; a turn with nothing owed is allowed to end and wait.
 
-`workspace/.devin/coord.json` names the backends:
+`workspace/.devin/autonom-config.json` is the workspace's configuration and the
+source of truth for its directories:
 
 ```json
 {
   "project": "my-project",
+  "human": "cet",
   "teamRoom": "general",
-  "roster": [],
-  "coordRoot": "/path/to/autonom",
   "policy": true,
   "salience": true,
-  "memory": false
+  "memory": true
 }
 ```
 
 `policy` screens tool calls and `salience` gates the unread-message stop alert.
 Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
-`"decider"`), or `false`. `memory` is reserved and inert for now.
+`"decider"`), or `false`. `memory` gates the session-start notes read.
+
+## Source layout
+
+| Path | Responsibility |
+| --- | --- |
+| `source/config.rb` | Reads the workspace config; the source of truth for directories. |
+| `source/profile_store.rb` | Gateway to profile information, and the single waiter source for the bus. |
+| `source/coord/bus.rb` | Stream mechanics shared by every source: jsonl IO, entries, cursors, naming. |
+| `source/coord/inbox.rb` | The DM/ping source (profile-scoped). |
+| `source/coord/room.rb` | The room source (workspace-scoped). |
+| `source/profile.rb` | The profile's view of the bus: permissions, presence, unread. |
+| `source/coord/server.rb` | The MCP server. |
 
 ## Profile storage
 
