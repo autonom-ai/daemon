@@ -1,53 +1,55 @@
-require_relative 'profile_store'
-
 # Who a person is when they wake up: the identity file's frontmatter and
 # body, and the leanings their teammates have stated. Identity files are
 # clone content, so they follow the person across workspaces.
-module Identity
+class Identity
+  FILE = 'identity.md'
   MAX_PRIOR = 800
 
-  extend self
+  # Teammate priors: what the others reach for and avoid, from the sections
+  # the identity scaffold writes.
+  def self.priors(profiles, skip: nil)
+    profiles.filter_map do |profile|
+      next if skip && profile.name.casecmp?(skip.to_s)
 
-  def get(name, root: ProfileStore::ROOT)
-    dir = directory(name, root: root)
-    return nil unless dir
+      digest = profile.identity.digest
+      "#{profile.identity.display_name}:\n#{digest[0, MAX_PRIOR]}" unless digest.empty?
+    end
+  end
 
-    path = File.join(dir, 'identity.md')
+  def initialize(profile)
+    @profile = profile
+  end
+
+  def get()
+    path = File.join(@profile.directory, FILE)
     return nil unless File.file?(path)
 
     meta, body = split_frontmatter(File.read(path))
     {
-      'name' => File.basename(dir),
-      'display_name' => meta['displayName']&.strip || File.basename(dir),
+      'name' => @profile.name,
+      'display_name' => meta['displayName']&.strip || @profile.name,
       'color' => color(meta['color']),
       'personality' => body.strip
     }
   end
 
-  # Teammate priors: what the others reach for and avoid, from the sections
-  # the identity scaffold writes.
-  def priors(root: ProfileStore::ROOT, skip: nil)
-    ProfileStore.get_profiles(root: root).filter_map do |profile|
-      next if skip && profile['name'].casecmp?(skip.to_s)
+  def display_name
+    identity = get()
+    identity ? identity['display_name'] : @profile.name
+  end
 
-      identity = get(profile['name'], root: root)
-      next unless identity
+  def digest
+    identity = get()
+    return '' unless identity
 
-      digest = identity['personality']
-        .scan(/^##\s*(Interests|Disinterests)\b(.*?)(?=^##\s|\z)/m)
-        .map { |title, body| "### #{title}\n#{body.strip}" }
-        .join("\n")
-        .strip
-      "#{identity['display_name']}:\n#{digest[0, MAX_PRIOR]}" unless digest.empty?
-    end
+    identity['personality']
+      .scan(/^##\s*(Interests|Disinterests)\b(.*?)(?=^##\s|\z)/m)
+      .map { |title, body| "### #{title}\n#{body.strip}" }
+      .join("\n")
+      .strip
   end
 
   private
-
-  def directory(name, root:)
-    profile = ProfileStore.get_profiles(root: root).find { |candidate| candidate['name'].casecmp?(name.to_s) }
-    profile&.fetch('directory', nil)
-  end
 
   # Frontmatter is the leading --- block and ONLY that block: a body line
   # like "Rule: read the room first" is not metadata.

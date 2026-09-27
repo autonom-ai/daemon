@@ -6,12 +6,16 @@ require 'securerandom'
 # belongs to which profile, and where a profile's directory lives. It is also
 # the single waiter source for the bus, so a wake names a profile, a source,
 # or both without either source knowing about the other.
-module ProfileStore
+class ProfileStore
   ROOT = File.expand_path('..', __dir__)
   NAME_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\z/
+  SESSIONS_FILE = 'sessions.json'
 
   class Error < StandardError
   end
+
+  # A profile as the store knows it: a name and the directory it lives in.
+  Record = Struct.new(:name, :directory)
 
   # Waiters are parked by source ("inbox", "pings", "room:<name>") and by the
   # profile parked on it, so one wake can name a profile on a source, every
@@ -22,13 +26,13 @@ module ProfileStore
 
     Ticket = Struct.new(:woken)
 
-    def initialize
+    def initialize()
       @lock = Mutex.new
       @condition = ConditionVariable.new
       @entries = {}
     end
 
-    def wait(agent, source, timeout, watch: [])
+    def wait(agent, source, timeout:, watch: [])
       # The files are read before the waiter is registered: a line that lands
       # in the gap is a change the waiter can still see on its next slice, and
       # one that lands after registration is a change too.
@@ -46,20 +50,20 @@ module ProfileStore
     end
 
     def wake(agent, source)
-      signal { Array(@entries.dig(source, agent)) }
+      signal() { Array(@entries.dig(source, agent)) }
     end
 
     def wake_agent(agent)
-      signal { @entries.values.flat_map { |agents| Array(agents[agent]) } }
+      signal() { @entries.values.flat_map { |agents| Array(agents[agent]) } }
     end
 
     def wake_source(source)
-      signal { Array(@entries[source]&.values&.flatten) }
+      signal() { Array(@entries[source]&.values&.flatten) }
     end
 
     private
 
-    def signal
+    def signal()
       @lock.synchronize do
         yield.each { |ticket| ticket.woken = true }
         @condition.broadcast
@@ -101,12 +105,15 @@ module ProfileStore
     end
   end
 
-  extend self
+  def initialize(root = ROOT)
+    @root = File.expand_path(root)
+    @waiters = WaitRegistry.new
+  end
 
-  WAITERS = WaitRegistry.new
+  attr_reader :root
 
-  def get_profiles(root: ROOT)
-    dir = agents_dir(root)
+  def records
+    dir = agents_dir
     return [] unless File.directory?(dir)
     raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
@@ -116,49 +123,54 @@ module ProfileStore
       profile = File.join(dir, name)
       next unless File.directory?(profile) && !File.symlink?(profile)
 
-      { 'name' => name, 'directory' => File.realpath(profile) }
-    end.sort_by { |profile| profile['name'].downcase }
+      Record.new(name, File.realpath(profile))
+    end.sort_by { |record| record.name.downcase }
   end
 
-  def get_profile(session, root: ROOT)
+  def record(name)
+    matches = records.select { |record| record.name.casecmp?(name.to_s) }
+    raise Error, 'Profile names must be unique without regard to case' if matches.length > 1
+
+    matches.first
+  end
+
+  def session(session)
     return nil if session.nil? || session.to_s.empty?
 
-    name = with_lock(root, File::LOCK_SH) do
-      read_sessions(root)[validate_session(session)]
-    end
+    name = with_lock(File::LOCK_SH) { read_sessions()[validate_session(session)] }
     return nil unless name
 
-    profile = find_profile(name, root: root)
-    raise Error, 'The registered profile no longer exists' unless profile
+    record = record(name)
+    raise Error, 'The registered profile no longer exists' unless record
 
-    profile
+    record
   end
 
-  def set_profile(session, name, root: ROOT)
+  def register(session, name)
     session = validate_session(session)
     name = normalize_name(name)
 
-    with_lock(root, File::LOCK_EX) do
-      sessions = read_sessions(root)
+    with_lock(File::LOCK_EX) do
+      sessions = read_sessions()
       current = sessions[session]
 
       if current
-        profile = find_profile(current, root: root)
-        raise Error, 'The registered profile no longer exists' unless profile
-        raise Error, 'A session profile cannot be changed after registration' unless profile['name'].casecmp?(name)
+        record = record(current)
+        raise Error, 'The registered profile no longer exists' unless record
+        raise Error, 'A session profile cannot be changed after registration' unless record.name.casecmp?(name)
 
-        next profile
+        next record
       end
 
-      profile = find_profile(name, root: root) || create_profile(name.downcase, root: root)
-      sessions[session] = profile['name']
-      write_sessions(sessions, root: root)
-      profile
+      record = record(name) || create(name.downcase)
+      sessions[session] = record.name
+      write_sessions(sessions)
+      record
     end
   end
 
-  def profile_dir(name, root: ROOT)
-    dir = agents_dir(root)
+  def directory(name)
+    dir = agents_dir
     raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
     profile = File.join(dir, normalize_name(name))
@@ -179,36 +191,29 @@ module ProfileStore
   end
 
   def wait(agent, source, timeout:, watch: [])
-    WAITERS.wait(agent, source, timeout, watch: watch)
+    @waiters.wait(agent, source, timeout: timeout, watch: watch)
   end
 
   def wake(agent, source)
-    WAITERS.wake(agent, source)
+    @waiters.wake(agent, source)
   end
 
   def wake_agent(agent)
-    WAITERS.wake_agent(agent)
+    @waiters.wake_agent(agent)
   end
 
   def wake_source(source)
-    WAITERS.wake_source(source)
+    @waiters.wake_source(source)
   end
 
   private
 
-  def agents_dir(root)
-    File.join(File.expand_path(root), 'agents')
+  def agents_dir
+    File.join(@root, 'agents')
   end
 
-  def find_profile(name, root: ROOT)
-    matches = get_profiles(root: root).select { |profile| profile['name'].casecmp?(name.to_s) }
-    raise Error, 'Profile names must be unique without regard to case' if matches.length > 1
-
-    matches.first
-  end
-
-  def create_profile(name, root: ROOT)
-    dir = agents_dir(root)
+  def create(name)
+    dir = agents_dir
     FileUtils.mkdir_p(dir)
     raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
@@ -222,7 +227,7 @@ module ProfileStore
     ) do |file|
       file.write("---\nname: #{name}\ndisplayName: #{name}\n---\n\n# #{name}\n")
     end
-    { 'name' => name, 'directory' => File.realpath(profile) }
+    Record.new(name, File.realpath(profile))
   rescue SystemCallError => error
     raise Error, "Could not create profile: #{error.class}"
   end
@@ -234,12 +239,12 @@ module ProfileStore
     session
   end
 
-  def with_lock(root, mode)
-    dir = agents_dir(root)
+  def with_lock(mode)
+    dir = agents_dir
     FileUtils.mkdir_p(dir)
     raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
-    path = File.join(dir, 'sessions.json.lock')
+    path = File.join(dir, "#{SESSIONS_FILE}.lock")
     raise Error, 'Session lock must not be a symlink' if File.symlink?(path)
 
     File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
@@ -253,8 +258,8 @@ module ProfileStore
     raise Error, "Could not lock session mappings: #{error.class}"
   end
 
-  def read_sessions(root)
-    path = File.join(agents_dir(root), 'sessions.json')
+  def read_sessions()
+    path = File.join(agents_dir, SESSIONS_FILE)
     return {} unless File.exist?(path)
     raise Error, 'Session mapping file must not be a symlink' if File.symlink?(path)
 
@@ -271,9 +276,9 @@ module ProfileStore
     raise Error, "Could not read session mappings: #{error.class}"
   end
 
-  def write_sessions(sessions, root: ROOT)
-    dir = agents_dir(root)
-    path = File.join(dir, 'sessions.json')
+  def write_sessions(sessions)
+    dir = agents_dir
+    path = File.join(dir, SESSIONS_FILE)
     tmp = File.join(dir, ".sessions-#{Process.pid}-#{SecureRandom.hex(8)}.tmp")
     File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
       file.write(JSON.pretty_generate(sessions))

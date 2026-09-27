@@ -1,70 +1,60 @@
 require 'fileutils'
 require 'json'
 
-require_relative 'config'
+require_relative 'identity'
+require_relative 'memory/memory'
 require_relative 'permissions'
 require_relative 'profile_store'
-require_relative 'coord/bus'
-require_relative 'coord/inbox'
-require_relative 'coord/room'
 
-# The profile's view of the bus: who a session is, whether that person is
-# around, and everything waiting for them across the inbox and the rooms.
-module Profile
+# A profile as the bus sees it: who it is, where it lives, and everything
+# waiting for them across the inbox and the rooms. Profile-dependent things
+# hang off the profile itself.
+class Profile
+  include Permissions
+
   HEARTBEAT_FILE = 'heartbeat.json'
 
-  extend self
-
-  def permissions
-    Permissions
+  def initialize(bus, name, directory)
+    @bus = bus
+    @name = name
+    @directory = directory
   end
 
-  def get_profiles(root: ProfileStore::ROOT)
-    ProfileStore.get_profiles(root: root)
+  attr_reader :bus, :name, :directory
+
+  def inbox
+    @bus.inbox(self)
   end
 
-  def get_profile(session, root: ProfileStore::ROOT)
-    ProfileStore.get_profile(session, root: root)
+  def identity
+    @identity ||= Identity.new(self)
   end
 
-  def set_profile(name, session:, root: ProfileStore::ROOT)
-    ProfileStore.set_profile(session, name, root: root)
+  def memory
+    @memory ||= Memory.new(self)
   end
 
-  # The profile's unread view: DMs and pings come from the profile-scoped
-  # Inbox, room traffic from the workspace-scoped Room, and the cursor that
-  # says what has been read is the profile's own.
-  def get_unread(name, rooms: [], project: Config.project_dir, root: ProfileStore::ROOT)
+  # Everything waiting for this profile: unread pings, unread DMs, and the
+  # unread lines of the team room, keyed by room name.
+  def unread
+    room = @bus.room(@bus.team_room)
     {
-      'pings' => Inbox.unread_pings(name, root: root),
-      'inbox' => Inbox.unread(name, root: root),
-      'rooms' => rooms.to_h do |room|
-        [
-          room,
-          unread_room(room, name: name, project: project, root: root)
-        ]
-      end
+      'pings' => inbox.unread_pings,
+      'inbox' => inbox.unread,
+      'rooms' => { room.name => room.unread(self) }
     }
   end
 
-  def unread_room(room, name:, project: Config.project_dir, root: ProfileStore::ROOT)
-    Room.unread(room, agent: name, project: project, root: root)
-  end
-
-  def read_room(room, name:, limit: nil, project: Config.project_dir, root: ProfileStore::ROOT)
-    Room.read(room, agent: name, limit: limit, project: project, root: root)
-  end
-
   # Profile heartbeat is determined by last MCP call.
-  def heartbeat(name, root: ProfileStore::ROOT)
-    path = heartbeat_path(name, root: root)
+  def heartbeat
+    path = heartbeat_path
     File.exist?(path) ? parse_heartbeat(File.read(path)) : 0
   rescue SystemCallError => error
     raise ProfileStore::Error, "Could not read the heartbeat: #{error.class}"
   end
 
-  def touch_heartbeat(name, root: ProfileStore::ROOT)
-    path = heartbeat_path(name, root: root)
+  def touch_heartbeat()
+    path = heartbeat_path
     FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
     File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
       file.flock(File::LOCK_EX)
@@ -81,8 +71,8 @@ module Profile
 
   private
 
-  def heartbeat_path(name, root:)
-    Bus.stream_path(ProfileStore.profile_dir(name, root: root), HEARTBEAT_FILE)
+  def heartbeat_path
+    @bus.stream_path(@bus.store.directory(@name), HEARTBEAT_FILE)
   end
 
   def parse_heartbeat(raw)

@@ -1,12 +1,12 @@
 require_relative 'config'
 require_relative 'identity'
 require_relative 'memory/memory'
+require_relative 'permissions'
 require_relative 'profile'
+require_relative 'profile_store'
 require_relative 'salience/salience'
 require_relative 'jev'
 require_relative 'coord/bus'
-require_relative 'coord/inbox'
-require_relative 'coord/room'
 
 require 'json'
 
@@ -47,21 +47,22 @@ module Hooks
     }
   }.freeze
   THRESHOLD = 0.5
+  DENIED = 'Access to this profile or protected file is blocked'
 
   extend self
 
-  def call(event, jev: JEV, root: ProfileStore::ROOT)
+  def call(event, jev: JEV, bus: default_bus())
     case event['hook_event_name']
     when 'SessionStart'
-      session_start(event, root: root)
+      session_start(event, bus: bus)
     when 'UserPromptSubmit'
-      prompt_submit(event, root: root)
+      prompt_submit(event, bus: bus)
     when 'PreToolUse'
-      pre_tool_use(event, jev: jev, root: root)
+      pre_tool_use(event, jev: jev, bus: bus)
     when 'PostToolUse'
-      post_tool_use(event, root: root)
+      post_tool_use(event, bus: bus)
     when 'Stop'
-      stop(event, root: root)
+      stop(event, bus: bus)
     when 'SubagentStop'
       # Avoid subagents waiting forever.
       nil
@@ -79,23 +80,25 @@ module Hooks
 
   private
 
+  def default_bus()
+    Bus.new(config: Config.load(), store: ProfileStore.new())
+  end
+
   # SessionStart - hand the tab its own context: who it is, what it
   # remembers, who else is here, and what the room has been saying.
-  def session_start(event, root:)
+  def session_start(event, bus:)
     session = event['session_id']
-    profile = Profile.get_profile(session, root: root)
-    config = Config.load
-    room = Bus.normalize(config['team_room'], project: config['project_dir'])
+    profile = bus.profile(session)
     lines = []
     lines << "Your session ID is #{session}. Tell the user what it is." if session
-    lines.concat(identity_lines(profile, config, root: root))
-    lines.concat(team_lines(profile, room, root: root))
-    lines.concat(room_lines(room, config, root: root))
-    lines.concat(prior_lines(profile, root: root))
+    lines.concat(identity_lines(profile, bus))
+    lines.concat(team_lines(profile, bus))
+    lines.concat(room_lines(bus))
+    lines.concat(prior_lines(profile, bus))
     context('SessionStart', lines.join("\n"))
   end
 
-  def identity_lines(profile, config, root:)
+  def identity_lines(profile, bus)
     unless profile
       return [
         'No profile is registered for this session yet. Claim your name with set_profile - get_profiles',
@@ -103,78 +106,73 @@ module Hooks
       ]
     end
 
-    name = profile['name']
-    identity = Identity.get(name, root: root)
-    lines = ["You are #{identity ? identity['display_name'] : name} (#{name}) - profile at #{profile['directory']}."]
+    identity = profile.identity.get()
+    lines = ["You are #{identity ? identity['display_name'] : profile.name} (#{profile.name}) - profile at #{profile.directory}."]
     lines << identity['personality'] if identity && !identity['personality'].empty?
-    if config['memory']['enabled']
-      memory = Memory.get(name, config['project'], root: root)
+    if bus.config.memory.enabled?
+      memory = profile.memory.get()
       lines.concat(['', 'Your memory:', memory]) unless memory.empty?
     end
     lines
   end
 
-  def team_lines(profile, room, root:)
-    name = profile && profile['name']
-    teammates = Profile.get_profiles(root: root).map { |entry| entry['name'] }
-    teammates = teammates.reject { |teammate| teammate.casecmp?(name.to_s) }
+  def team_lines(profile, bus)
+    teammates = bus.profiles.map(&:name)
+    teammates = teammates.reject { |name| name.casecmp?(profile ? profile.name : '') }
     lines = [
       '',
       'This workspace is worked by a team. The room is where the team actually is: talk there, coordinate',
       'there, post what you find.'
     ]
-    lines << "Team room: ##{room}."
+    lines << "Team room: ##{bus.team_room}."
     lines << (teammates.empty? ? 'Nobody else is registered yet.' : "Teammates: #{teammates.join(', ')}.")
     lines
   end
 
-  def room_lines(room, config, root:)
-    entries = Room.messages(room, project: config['project_dir'])
-    return ['', "##{room} is empty so far - introducing yourself is a fine first move."] if entries.empty?
+  def room_lines(bus)
+    room = bus.room(bus.team_room)
+    entries = room.messages
+    return ['', "##{room.name} is empty so far - introducing yourself is a fine first move."] if entries.empty?
 
     [
       '',
-      "Recent ##{room} traffic:",
+      "Recent ##{room.name} traffic:",
       *Salience.format_entries(entries.last(RECENT_ROOM))
     ]
   end
 
-  def prior_lines(profile, root:)
-    priors = Identity.priors(root: root, skip: profile && profile['name'])
+  def prior_lines(profile, bus)
+    priors = Identity.priors(bus.profiles, skip: profile && profile.name)
     priors.empty? ? [] : ['', "Your teammates' stated leanings:", priors.join("\n\n")]
   end
 
   # UserPromptSubmit - a nudge, not a delivery: cursors stay where the agent
   # left them, so the same traffic is still waiting in read_messages.
-  def prompt_submit(event, root:)
+  def prompt_submit(event, bus:)
     session = event['session_id']
     return nil unless valid_session?(session)
 
-    profile = Profile.get_profile(session, root: root)
+    profile = bus.profile(session)
     return nil unless profile
 
-    config = Config.load
-    project = config['project_dir']
-    room = Bus.normalize(config['team_room'], project: project)
-    unread = Profile.get_unread(profile['name'], rooms: [room], project: project, root: root)
-    lines = ["You are #{profile['name']}. Team room: ##{room}."]
-    lines.concat(Salience.unread_lines(unread))
+    lines = ["You are #{profile.name}. Team room: ##{bus.team_room}."]
+    lines.concat(Salience.unread_lines(profile.unread))
     context('UserPromptSubmit', lines.join("\n"))
   end
 
-  def pre_tool_use(event, jev:, root:)
+  def pre_tool_use(event, jev:, bus:)
     tool = event['tool_name'].to_s
     input = event['tool_input'].is_a?(Hash) ? event['tool_input'] : {}
     session = event['session_id']
-    reason = denial(tool, input, session, root: root)
+    profile = bus.profile(session)
+    reason = denial(tool, input, session, profile, bus)
     return block(reason) if reason
 
-    profile = Profile.get_profile(session, root: root)
-    # The workspace's config names the backend; true or an absent key keeps
-    # the default, and false turns screening off outright.
-    policy = Config.load['policy']
-    if policy['enabled']
-      jev.backend = policy['backend'] if policy['backend'].is_a?(String)
+    # The workspace's config names the backend; an absent key keeps the
+    # default, and false turns screening off outright.
+    policy = bus.config.policy
+    if policy.enabled?
+      jev.backend = policy.backend if policy.backend.is_a?(String)
       return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
     end
 
@@ -196,7 +194,7 @@ module Hooks
     state = {
       'tool_name' => tool,
       'tool_input' => JEV::Common.scrub(input),
-      'profile_name' => profile && profile['name'],
+      'profile_name' => profile && profile.name,
       'policy' => POLICY
     }
     score = jev.decide(state, POLICY_QUESTIONS).dig('harmful', 'noul')
@@ -208,14 +206,14 @@ module Hooks
   # Every tool call is a chance to deliver what the agent has not seen: an
   # unread ping rides back as context, and reading it advances the cursor so
   # it is delivered exactly once. A failure here must never break the tool.
-  def post_tool_use(event, root:)
+  def post_tool_use(event, bus:)
     session = event['session_id']
     return nil unless valid_session?(session)
 
-    profile = Profile.get_profile(session, root: root)
+    profile = bus.profile(session)
     return nil unless profile
 
-    pings = Inbox.read_pings(profile['name'], root: root)
+    pings = profile.inbox.read_pings()
     return nil if pings.empty?
 
     context(
@@ -231,86 +229,56 @@ module Hooks
   # reach, so the hook refuses the stop and hands back what is waiting. An
   # unread message is the only thing that blocks: an agent with nothing owed
   # is allowed to stop and wait. The stand-down marker is the release valve.
-  def stop(event, root:)
+  def stop(event, bus:)
     session = event['session_id']
     return nil unless valid_session?(session)
     # A stop hook that keeps blocking re-enters itself; one re-prompt is the
     # point, a loop is not.
     return nil if event['stop_hook_active']
 
-    profile = Profile.get_profile(session, root: root)
+    profile = bus.profile(session)
     return nil unless profile
 
-    config = Config.load
-    project = config['project_dir']
-    return nil if stand_down?(project)
-    return nil unless config['salience']['enabled']
+    return nil if stand_down?(bus)
+    return nil unless bus.config.salience.enabled?
 
-    reason = Salience.stop_text(
-      profile['name'],
-      rooms: [Bus.normalize(config['team_room'], project: project)],
-      project: project,
-      root: root
-    )
+    reason = Salience.stop_text(profile)
     return nil unless reason
 
     { 'decision' => 'block', 'reason' => reason }
   end
 
-  def stand_down?(project)
-    File.exist?(File.join(Config.dir(project: project), 'collaboration', 'stand-down'))
+  def stand_down?(bus)
+    File.exist?(File.join(bus.config.dir, 'collaboration', 'stand-down'))
   end
 
-  def denial(tool, input, session, root:)
+  def denial(tool, input, session, profile, bus)
+    actor = profile || Unclaimed.new(bus)
     case tool
     when 'mcp__autonom-coord-mcp__get_profile'
       'A Devin session ID is required' unless valid_session?(session)
     when 'mcp__autonom-coord-mcp__set_profile'
       return 'A Devin session ID is required' unless valid_session?(session)
-      return 'A session profile cannot be changed after registration' unless Profile.permissions.can_set_profile?(
-        input['name'],
-        session: session,
-        root: root
-      )
+
+      name = input['name'].to_s
+      return 'A valid profile name is required' unless bus.store.valid_name?(name)
+      return 'A session profile cannot be changed after registration' if profile && !profile.name.casecmp?(name)
     when 'read', 'notebook_read'
       paths(tool, input).each do |path|
-        return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_read?(
-          path,
-          session: session,
-          root: root,
-          dir: Config.project_dir
-        )
+        return DENIED unless actor.can_read?(path)
       end
     when 'grep'
-      return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_search?(
-        input['path'] || Config.project_dir,
-        session: session,
-        root: root,
-        dir: Config.project_dir
-      )
+      return DENIED unless actor.can_search?(input['path'] || bus.config.project_dir)
     when 'glob'
-      return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_glob?(
-        input['pattern'],
-        path: input['path'] || Config.project_dir,
-        session: session,
-        root: root,
-        dir: Config.project_dir
-      )
+      return DENIED unless actor.can_glob?(input['pattern'], path: input['path'] || bus.config.project_dir)
     when 'write', 'edit', 'notebook_edit', 'apply_patch'
       paths(tool, input).each do |path|
-        return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_write?(
-          path,
-          session: session,
-          root: root,
-          dir: Config.project_dir
-        )
+        return DENIED unless actor.can_write?(path)
       end
     when 'exec'
-      return 'Execution targets a protected profile or directory' unless Profile.permissions.can_exec?(
+      return 'Execution targets a protected profile or directory' unless actor.can_exec?(
         input['command'],
-        session: session,
-        root: root,
-        dir: input['cwd'] || input['working_directory'] || Config.project_dir
+        dir: input['cwd'] || input['working_directory']
       )
     end
 

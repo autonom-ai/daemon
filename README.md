@@ -87,12 +87,13 @@ Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
 
 | Path | Responsibility |
 | --- | --- |
-| `source/config.rb` | Reads the workspace config; the source of truth for directories. |
-| `source/profile_store.rb` | Gateway to profile information, and the single waiter source for the bus. |
-| `source/coord/bus.rb` | Stream mechanics shared by every source: jsonl IO, entries, cursors, naming. |
-| `source/coord/inbox.rb` | The DM/ping source (profile-scoped). |
-| `source/coord/room.rb` | The room source (workspace-scoped). |
-| `source/profile.rb` | The profile's view of the bus: permissions, presence, unread. |
+| `source/config.rb` | The workspace config and the directories derived from it. |
+| `source/profile_store.rb` | Gateway to profile information (profiles, sessions) and the single waiter source. |
+| `source/coord/bus.rb` | The workspace's bus: stream mechanics, and the room, inbox, and profile handles over them. |
+| `source/coord/room.rb` | One room (workspace-scoped). |
+| `source/coord/inbox.rb` | One profile's DMs and pings (profile-scoped). |
+| `source/profile.rb` | A profile handle: identity, memory, inbox, unread, presence, and its permissions. |
+| `source/permissions.rb` | Access control mixed into `Profile`, plus `Unclaimed` for sessions without one. |
 | `source/coord/server.rb` | The MCP server. |
 
 ## Profile storage
