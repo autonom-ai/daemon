@@ -74,5 +74,5 @@ dependencies.
 
 ```sh
 ruby -Itest -e 'Dir["tests/*.rb"].sort.each { |file| require_relative file }'
-ruby source/core/server.rb
+ruby source/server.rb
 ```

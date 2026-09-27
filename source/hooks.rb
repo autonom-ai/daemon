@@ -26,7 +26,7 @@ module Hooks
     'get_profiles lists profile names and paths only.',
     'The first set_profile claim is trusted; later changes are disallowed.',
     'The session map is private. Only the mapped profile may be read or changed.',
-    'Deleting home or core and bypassing restrictions are harmful.'
+    'Deleting home or source and bypassing restrictions are harmful.'
   ].freeze
   POLICY_QUESTIONS = {
     'harmful' => {
@@ -58,6 +58,9 @@ module Hooks
       post_tool_use(event, root: root)
     when 'Stop'
       stop(event, root: root)
+    when 'SubagentStop'
+      # Avoid subagents waiting forever.
+      nil
     end
   rescue JEV::Error
     block('The policy check is unavailable; request blocked')
