@@ -10,7 +10,7 @@
 const vscode = require("vscode");
 const fs = require("node:fs");
 const path = require("node:path");
-const { openBus, readJson } = require("./bus.js");
+const { openBus } = require("./bus.js");
 
 const VIEW_ID = "agentCoord.chat";
 const MEDIA_DIR = path.join(__dirname, "media");
@@ -36,17 +36,14 @@ function findWorkspace()
     const configured = vscode.workspace.getConfiguration("agentCoord").get("workspace");
     const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
     for (const dir of [...(configured ? [configured] : []), ...folders])
-        if (dir && fs.existsSync(path.join(dir, ".devin", "coord.json")))
+        if (dir && fs.existsSync(path.join(dir, ".devin", "autonom-config.json")))
             return dir;
     return null;
 }
 
-function coordRootOf(projectDir)
+function coordRootOf()
 {
-    const config = readJson(path.join(projectDir, ".devin", "coord.json"), {});
-    return config.coordRoot
-        ?? vscode.workspace.getConfiguration("agentCoord").get("coordRoot")
-        ?? null;
+    return vscode.workspace.getConfiguration("agentCoord").get("coordRoot") ?? null;
 }
 
 function postAll(message)
@@ -81,16 +78,16 @@ async function ensureBus()
     const projectDir = findWorkspace();
     if (!projectDir)
     {
-        busError = "No .devin/coord.json in the open folders - this workspace is not wired into a team.";
+        busError = "No .devin/autonom-config.json in the open folders - this workspace is not wired into a team.";
         postAll({ type: "conn", up: false });
         postAll({ type: "toast", text: busError, tone: "bad" });
         scheduleReconnect();
         return null;
     }
-    const coordRoot = coordRootOf(projectDir);
+    const coordRoot = coordRootOf();
     if (!coordRoot)
     {
-        busError = "coord.json has no coordRoot and agentCoord.coordRoot is not set.";
+        busError = "agentCoord.coordRoot is not set.";
         postAll({ type: "toast", text: busError, tone: "bad" });
         scheduleReconnect();
         return null;
@@ -119,7 +116,7 @@ async function ensureBus()
     return busPromise;
 }
 
-// A failed open is not terminal. The store may not be built yet, coord.json may
+// A failed open is not terminal. The store may not be built yet, the config may
 // still be wrong, the workspace may still be opening - so back off and retry
 // instead of leaving the room dead until the extension is unloaded. This is the
 // recovery path the manual refresh used to be the only way to reach.
@@ -157,7 +154,7 @@ async function pushState()
 }
 
 // A manual refresh is the retry path: a failed bus open (missing store, a
-// coord.json fix) clears here so the next attempt is real, not cached.
+// config fix) clears here so the next attempt is real, not cached.
 async function refresh()
 {
     busError = null;

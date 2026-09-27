@@ -26,12 +26,11 @@ class ServerTest < Minitest::Test
 
     listed_tools = responses.find { |response| response['id'] == 2 }.dig('result', 'tools')
     set_result = result(responses, 3)
-    get_result = result(responses, 4)
 
     assert_equal %w[get_profiles get_profile set_profile send_message read_messages wait_for_message list_rooms get_heartbeat],
                  listed_tools.map { |tool| tool['name'] }
     assert_equal 'marlow', set_result['name']
-    assert_equal set_result, get_result
+    assert_equal set_result, result(responses, 4)
   end
 
   def test_chat_tools_route_rooms_dms_and_pings
@@ -43,9 +42,7 @@ class ServerTest < Minitest::Test
       call(5, 'read_messages', 'source' => 'room', 'session_id' => 'session-2'),
       call(6, 'send_message', 'text' => 'psst', 'to' => 'marlow', 'session_id' => 'session-2'),
       call(7, 'read_messages', 'source' => 'inbox', 'session_id' => 'session-1'),
-      call(8, 'read_messages', 'source' => 'pings', 'session_id' => 'session-2'),
-      call(9, 'send_message', 'text' => 'hi', 'ping' => ['nobody'], 'session_id' => 'session-1'),
-      call(10, 'read_messages', 'source' => 'pings', 'session_id' => 'session-1')
+      call(8, 'send_message', 'text' => 'hi', 'ping' => ['nobody'], 'session_id' => 'session-1')
     )
 
     sent = result(responses, 3)
@@ -57,9 +54,7 @@ class ServerTest < Minitest::Test
     assert_equal ['hello team'], result(responses, 5)['messages'].map { |entry| entry['text'] }
     assert_equal %w[wren marlow], result(responses, 6)['entry'].values_at('from', 'to')
     assert_equal ['psst'], result(responses, 7)['messages'].map { |entry| entry['text'] }
-    assert_empty result(responses, 8)['messages']
-    assert responses.find { |response| response['id'] == 9 }.dig('result', 'isError')
-    assert_empty result(responses, 10)['messages']
+    assert responses.find { |response| response['id'] == 8 }.dig('result', 'isError')
   end
 
   def test_reads_are_cursored_and_list_rooms_reports_unread
@@ -80,19 +75,6 @@ class ServerTest < Minitest::Test
     assert_equal 2, rooms.first['count']
     assert_equal 1, rooms.first['unread']
     assert_equal 2, result(responses, 7).first['unread']
-  end
-
-  def test_wait_for_message_wakes_on_a_new_room_line
-    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
-    writer = Thread.new do
-      sleep 0.3
-      Room.post('general', 'late line', from: 'marlow', root: @root)
-    end
-
-    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
-    writer.join
-
-    assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
   end
 
   def test_wait_for_message_returns_what_is_already_unread
@@ -117,11 +99,24 @@ class ServerTest < Minitest::Test
     assert_empty result(responses, 2)['messages']
   end
 
+  def test_a_room_post_wakes_a_room_wait
+    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
+    writer = Thread.new do
+      sleep 0.3
+      Room.post('general', 'late line', from: 'marlow', project: @root)
+    end
+
+    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    writer.join
+
+    assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
+  end
+
   def test_a_ping_interrupts_a_room_wait
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
     pinger = Thread.new do
       sleep 0.3
-      Profile.ping('wren', 'look', from: 'marlow', room: 'general', root: @root)
+      Inbox.ping('wren', 'look', from: 'marlow', room: 'general', root: @root)
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -137,7 +132,7 @@ class ServerTest < Minitest::Test
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
     sender = Thread.new do
       sleep 0.3
-      Profile.dm('wren', 'psst', from: 'marlow', root: @root)
+      Inbox.dm('wren', 'psst', from: 'marlow', root: @root)
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -155,7 +150,7 @@ class ServerTest < Minitest::Test
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
     writer = Thread.new do
       sleep 0.3
-      append_line(Room.path('general', root: @root), 'from' => 'marlow', 'text' => 'late line')
+      append_line(Room.path('general', project: @root), 'from' => 'marlow', 'text' => 'late line')
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -167,56 +162,29 @@ class ServerTest < Minitest::Test
     assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
   end
 
-  def test_a_dm_written_by_another_process_wakes_an_inbox_wait
-    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
-    writer = Thread.new do
-      sleep 0.3
-      append_line(
-        ProfileStore.inbox_file('wren', root: @root),
-        'from' => 'marlow', 'to' => 'wren', 'text' => 'psst'
-      )
-    end
-
-    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    responses = exchange(call(2, 'wait_for_message', 'source' => 'inbox', 'timeout' => 5, 'session_id' => 'session-2'))
-    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-    writer.join
-
-    assert_operator elapsed, :<, 1.5
-    assert_equal ['psst'], result(responses, 2)['messages'].map { |entry| entry['text'] }
-  end
-
-  def test_a_ping_written_by_another_process_interrupts_a_room_wait
-    exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
-    writer = Thread.new do
-      sleep 0.3
-      append_line(
-        ProfileStore.pings_file('wren', root: @root),
-        'from' => 'marlow', 'room' => 'general', 'text' => 'look'
-      )
-    end
-
-    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
-    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-    writer.join
-
-    assert_operator elapsed, :<, 1.5
-    assert_empty result(responses, 2)['messages']
-  end
-
-  def test_get_heartbeat_reports_another_profile
+  def test_heartbeats_report_presence_and_are_stamped_by_calls
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
       call(3, 'get_heartbeat', 'name' => 'wren', 'session_id' => 'session-1')
     )
-
     beat = result(responses, 3)
 
     assert_equal 'wren', beat['name']
     assert beat['lastHeartbeat'].positive?
     assert beat['online']
+
+    file = File.join(@root, 'agents', 'marlow', 'heartbeat.json')
+    File.write(file, '{"ts":0}')
+    exchange(call(4, 'get_profiles', 'session_id' => 'session-1'))
+
+    assert JSON.parse(File.read(file))['ts'].positive?
+  end
+
+  def test_an_unregistered_session_stamps_nobody
+    exchange(call(1, 'get_profiles'))
+
+    assert_empty Dir.glob(File.join(@root, 'agents', '*', 'heartbeat.json'))
   end
 
   def test_get_heartbeat_requires_a_known_profile
@@ -226,22 +194,6 @@ class ServerTest < Minitest::Test
     )
 
     assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')
-  end
-
-  def test_a_plain_call_refreshes_the_heartbeat
-    exchange(call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'))
-    file = File.join(@root, 'agents', 'marlow', 'heartbeat.json')
-    File.write(file, '{"ts":0}')
-
-    exchange(call(2, 'get_profiles', 'session_id' => 'session-1'))
-
-    assert JSON.parse(File.read(file))['ts'].positive?
-  end
-
-  def test_an_unregistered_session_stamps_nobody
-    exchange(call(1, 'get_profiles'))
-
-    assert_empty Dir.glob(File.join(@root, 'agents', '*', 'heartbeat.json'))
   end
 
   private

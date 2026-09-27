@@ -100,8 +100,8 @@ module Salience
     lines
   end
 
-  def stop_text(name, rooms:, rooms_root:, root:)
-    unread = Profile.get_unread(name, rooms: rooms, rooms_root: rooms_root, root: root)
+  def stop_text(name, rooms:, project:, root:)
+    unread = Profile.get_unread(name, rooms: rooms, project: project, root: root)
     focus = focus(impulses(unread))
     return nil unless focus
 

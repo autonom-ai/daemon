@@ -1,35 +1,18 @@
-require 'json'
-require 'securerandom'
-
+require_relative '../config'
 require_relative '../profile_store'
-require_relative 'waiters'
+require_relative 'bus'
 
+# Rooms are the workspace-scoped side of the bus: they live under the
+# project's .devin directory and never follow a person anywhere.
 module Room
-  DEFAULT_ROOM = 'general'
-
-  class Error < StandardError
-  end
-
   extend self
 
-  # One registry per room, keyed by the people waiting in it. In-memory: a
-  # waiter is a fact about a live MCP process, not about the bus - and a signal
-  # only reaches this process, so a waiter watches the room file as well.
-  WAITERS = {}
-  WAITERS_LOCK = Mutex.new
-
-  def waiters
-    WAITERS
+  def messages(name, project: Config.project_dir)
+    Bus.read(path(name, project: project))
   end
 
-  # Rooms are workspace-scoped: they live under the project's .devin directory
-  # and never follow a person anywhere.
-  def messages(name, root: project_root)
-    ProfileStore.read_jsonl(file(name, root: root))
-  end
-
-  def names(root: project_root)
-    dir = rooms_dir(root)
+  def names(project: Config.project_dir)
+    dir = Config.rooms_dir(project: project)
     return [] unless File.directory?(dir)
 
     Dir.children(dir).filter_map do |entry|
@@ -37,79 +20,38 @@ module Room
     end.sort
   end
 
-  def post(name, text, from:, root: project_root)
-    room = normalize(name, root: root)
-    entry = {
-      'id' => SecureRandom.uuid,
-      'ts' => (Time.now.to_f * 1000).round,
-      'from' => from.to_s,
-      'text' => text.to_s
-    }
-    ProfileStore.append_jsonl(file(room, root: root), entry)
-    wake(room)
+  def read(name, agent:, limit: nil, project: Config.project_dir, root: ProfileStore::ROOT)
+    room = Bus.normalize(name, project: project)
+    Bus.read_stream(agent, source(room), messages(room, project: project), limit: limit, root: root)
+  end
+
+  def unread(name, agent:, project: Config.project_dir, root: ProfileStore::ROOT)
+    room = Bus.normalize(name, project: project)
+    messages(room, project: project).drop(Bus.cursor(agent, source(room), root: root))
+  end
+
+  def post(name, text, from:, project: Config.project_dir)
+    room = Bus.normalize(name, project: project)
+    entry = Bus.entry(from: from, text: text)
+    Bus.append(path(room, project: project), entry)
+    ProfileStore.wake_source(source(room))
     entry
   end
 
-  def wait(name, agent, timeout:, watch: [])
-    registry(normalize(name)).wait(agent, timeout, watch: watch)
+  def wait(name, agent, timeout:, project: Config.project_dir)
+    room = Bus.normalize(name, project: project)
+    ProfileStore.wait(agent, source(room), timeout: timeout, watch: [path(room, project: project)])
   end
 
-  def wake(name)
-    registry = WAITERS_LOCK.synchronize { WAITERS[name] }
-    registry&.wake_all
-  end
-
-  # A ping ends any room wait this person is parked in, wherever it is.
-  def wake_agent(agent)
-    registries = WAITERS_LOCK.synchronize { WAITERS.values }
-    registries.each { |registry| registry.wake(agent) }
-  end
-
-  def normalize(name, root: project_root)
-    name = name.to_s.strip.sub(/\A#/, '').downcase
-    name = default_name(root: root) if name.empty?
-    raise Error, 'Invalid room name' unless ProfileStore.valid_name?(name)
-
-    name
-  end
-
-  # The team room named by the workspace's coord.json, so a bare room name
-  # means the room this workspace actually talks in.
-  def default_name(root: project_root)
-    config = JSON.parse(File.read(File.join(root, '.devin', 'coord.json')))
-    name = config['teamRoom'].to_s.strip.sub(/\A#/, '').downcase
-    ProfileStore.valid_name?(name) ? name : DEFAULT_ROOM
-  rescue SystemCallError, JSON::ParserError
-    DEFAULT_ROOM
-  end
-
-  # The file a room's lines live in: what a parked waiter watches so a line
-  # written by another process can still wake it.
-  def path(name, root: project_root)
-    file(name, root: root)
-  end
-
-  def project_root
-    File.expand_path(ENV['DEVIN_PROJECT_DIR'] || Dir.pwd)
+  def path(name, project: Config.project_dir)
+    room = Bus.normalize(name, project: project)
+    Bus.stream_path(Config.rooms_dir(project: project), "#{room}.jsonl")
   end
 
   private
 
-  def registry(name)
-    WAITERS_LOCK.synchronize { WAITERS[name] ||= Waiters::Registry.new }
-  end
-
-  def rooms_dir(root)
-    File.join(root, '.devin', 'autonom-coord', 'rooms')
-  end
-
-  def file(name, root:)
-    dir = rooms_dir(root)
-    raise Error, 'Room directory must not be a symlink' if File.symlink?(dir)
-
-    path = File.join(dir, "#{normalize(name, root: root)}.jsonl")
-    raise Error, 'Room file must not be a symlink' if File.symlink?(path)
-
-    path
+  # The stream key a room's read cursor lives under.
+  def source(room)
+    "room:#{room}"
   end
 end

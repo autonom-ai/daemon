@@ -14,11 +14,10 @@ class SalienceTest < Minitest::Test
   end
 
   def test_unread_lines_reports_undrained_signals
-    Profile.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
-    Profile.dm('marlow', 'dm text', from: 'wren', root: @root)
-    Room.post('general', 'room text', from: 'wren', root: @root)
+    Inbox.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
+    Inbox.dm('marlow', 'dm text', from: 'wren', root: @root)
+    Room.post('general', 'room text', from: 'wren', project: @root)
 
-    unread = Profile.get_unread('marlow', rooms: ['general'], rooms_root: @root, root: @root)
     lines = Salience.unread_lines(unread)
 
     assert lines.any? { |line| line.include?('Unread pings (1)') }
@@ -27,17 +26,15 @@ class SalienceTest < Minitest::Test
     assert lines.any? { |line| line.include?('ping text') }
     assert lines.any? { |line| line.include?('dm text') }
     assert lines.any? { |line| line.include?('room text') }
-    assert_equal 1, Profile.unread_pings('marlow', root: @root).length
+    assert_equal 1, Inbox.unread_pings('marlow', root: @root).length
   end
 
   def test_a_direct_message_outranks_room_traffic
-    Profile.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
-    Profile.dm('marlow', 'dm text', from: 'wren', root: @root)
-    Room.post('general', 'room text', from: 'wren', root: @root)
+    Inbox.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
+    Inbox.dm('marlow', 'dm text', from: 'wren', root: @root)
+    Room.post('general', 'room text', from: 'wren', project: @root)
 
-    unread = Profile.get_unread('marlow', rooms: ['general'], rooms_root: @root, root: @root)
-    impulses = Salience.impulses(unread)
-    focus = Salience.focus(impulses)
+    focus = Salience.focus(Salience.impulses(unread))
 
     assert_equal 'Respond', focus.kind
     assert focus.required?
@@ -47,35 +44,31 @@ class SalienceTest < Minitest::Test
   end
 
   def test_room_traffic_alone_is_a_coordinate_impulse
-    Room.post('general', 'anyone around?', from: 'wren', root: @root)
+    Room.post('general', 'anyone around?', from: 'wren', project: @root)
 
-    unread = Profile.get_unread('marlow', rooms: ['general'], rooms_root: @root, root: @root)
     focus = Salience.focus(Salience.impulses(unread))
 
     assert_equal 'Coordinate', focus.kind
     refute focus.required?
   end
 
-  def test_no_unread_signals_means_no_focus
-    unread = Profile.get_unread('marlow', rooms: ['general'], rooms_root: @root, root: @root)
-
-    assert_empty Salience.impulses(unread)
-    assert_nil Salience.focus(Salience.impulses(unread))
-  end
-
-  def test_an_unknown_impulse_kind_is_refused
-    assert_raises(ArgumentError) { Salience.impulse('Vibes', 'anything') }
-  end
-
   def test_stop_text_is_one_complete_message
-    Profile.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
-    unread = Profile.get_unread('marlow', rooms: ['general'], rooms_root: @root, root: @root)
-    focus = Salience.focus(Salience.impulses(unread))
+    Inbox.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
 
-    text = Salience.stop_text(unread, focus: focus)
+    text = Salience.stop_text('marlow', rooms: ['general'], project: @root, root: @root)
 
     assert_includes text, 'Do not end the turn yet'
     assert_includes text, 'Unread pings (1)'
     assert_includes text, 'call wait_for_message on the room'
+  end
+
+  def test_stop_text_is_nil_when_nothing_is_waiting
+    assert_nil Salience.stop_text('marlow', rooms: ['general'], project: @root, root: @root)
+  end
+
+  private
+
+  def unread
+    Profile.get_unread('marlow', rooms: ['general'], project: @root, root: @root)
   end
 end

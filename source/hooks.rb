@@ -1,8 +1,10 @@
+require_relative 'config'
 require_relative 'identity'
 require_relative 'memory/memory'
 require_relative 'profile'
 require_relative 'salience/salience'
 require_relative 'jev'
+require_relative 'coord/bus'
 require_relative 'coord/inbox'
 require_relative 'coord/room'
 
@@ -45,11 +47,6 @@ module Hooks
     }
   }.freeze
   THRESHOLD = 0.5
-  POLICY_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
-  SALIENCE_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
-  # Memory is inert as a layer; the only thing it does today is read the
-  # person's own notes at session start, which is what this gates.
-  MEMORY_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
 
   extend self
 
@@ -71,7 +68,7 @@ module Hooks
     end
   rescue JEV::Error
     block('The policy check is unavailable; request blocked')
-  rescue ProfileStore::Error, Room::Error
+  rescue ProfileStore::Error, Bus::Error
     case event['hook_event_name']
     when 'PreToolUse'
       block('Profile access could not be verified')
@@ -87,12 +84,13 @@ module Hooks
   def session_start(event, root:)
     session = event['session_id']
     profile = Profile.get_profile(session, root: root)
-    config = workspace_config
+    config = Config.load
+    room = Bus.normalize(config['team_room'], project: config['project_dir'])
     lines = []
     lines << "Your session ID is #{session}. Tell the user what it is." if session
     lines.concat(identity_lines(profile, config, root: root))
-    lines.concat(team_lines(profile, config, root: root))
-    lines.concat(room_lines(config, root: root))
+    lines.concat(team_lines(profile, room, root: root))
+    lines.concat(room_lines(room, config, root: root))
     lines.concat(prior_lines(profile, root: root))
     context('SessionStart', lines.join("\n"))
   end
@@ -116,28 +114,27 @@ module Hooks
     lines
   end
 
-  def team_lines(profile, config, root:)
+  def team_lines(profile, room, root:)
     name = profile && profile['name']
-    teammates = config['roster'].empty? ? Profile.get_profiles(root: root).map { |entry| entry['name'] } : config['roster']
+    teammates = Profile.get_profiles(root: root).map { |entry| entry['name'] }
     teammates = teammates.reject { |teammate| teammate.casecmp?(name.to_s) }
     lines = [
       '',
       'This workspace is worked by a team. The room is where the team actually is: talk there, coordinate',
       'there, post what you find.'
     ]
-    lines << "Team room: ##{config['team_room']}."
+    lines << "Team room: ##{room}."
     lines << (teammates.empty? ? 'Nobody else is registered yet.' : "Teammates: #{teammates.join(', ')}.")
-    lines << "Start with the #{config['team_skill']} skill." if config['team_skill']
     lines
   end
 
-  def room_lines(config, root:)
-    entries = Room.messages(config['team_room'], root: config['project_dir'])
-    return ['', "##{config['team_room']} is empty so far - introducing yourself is a fine first move."] if entries.empty?
+  def room_lines(room, config, root:)
+    entries = Room.messages(room, project: config['project_dir'])
+    return ['', "##{room} is empty so far - introducing yourself is a fine first move."] if entries.empty?
 
     [
       '',
-      "Recent ##{config['team_room']} traffic:",
+      "Recent ##{room} traffic:",
       *Salience.format_entries(entries.last(RECENT_ROOM))
     ]
   end
@@ -156,14 +153,11 @@ module Hooks
     profile = Profile.get_profile(session, root: root)
     return nil unless profile
 
-    config = workspace_config
-    unread = Profile.get_unread(
-      profile['name'],
-      rooms: [config['team_room']],
-      rooms_root: config['project_dir'],
-      root: root
-    )
-    lines = ["You are #{profile['name']}. Team room: ##{config['team_room']}."]
+    config = Config.load
+    project = config['project_dir']
+    room = Bus.normalize(config['team_room'], project: project)
+    unread = Profile.get_unread(profile['name'], rooms: [room], project: project, root: root)
+    lines = ["You are #{profile['name']}. Team room: ##{room}."]
     lines.concat(Salience.unread_lines(unread))
     context('UserPromptSubmit', lines.join("\n"))
   end
@@ -176,9 +170,9 @@ module Hooks
     return block(reason) if reason
 
     profile = Profile.get_profile(session, root: root)
-    # coord.json names this workspace's backend; true or an absent key keeps
+    # The workspace's config names the backend; true or an absent key keeps
     # the default, and false turns screening off outright.
-    policy = workspace_config['policy']
+    policy = Config.load['policy']
     if policy['enabled']
       jev.backend = policy['backend'] if policy['backend'].is_a?(String)
       return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
@@ -247,14 +241,15 @@ module Hooks
     profile = Profile.get_profile(session, root: root)
     return nil unless profile
 
-    config = workspace_config
-    return nil if stand_down?(config['project_dir'])
+    config = Config.load
+    project = config['project_dir']
+    return nil if stand_down?(project)
     return nil unless config['salience']['enabled']
 
     reason = Salience.stop_text(
       profile['name'],
-      rooms: [config['team_room']],
-      rooms_root: config['project_dir'],
+      rooms: [Bus.normalize(config['team_room'], project: project)],
+      project: project,
       root: root
     )
     return nil unless reason
@@ -262,8 +257,8 @@ module Hooks
     { 'decision' => 'block', 'reason' => reason }
   end
 
-  def stand_down?(project_dir)
-    File.exist?(File.join(project_dir, '.devin', 'collaboration', 'stand-down'))
+  def stand_down?(project)
+    File.exist?(File.join(Config.dir(project: project), 'collaboration', 'stand-down'))
   end
 
   def denial(tool, input, session, root:)
@@ -283,23 +278,23 @@ module Hooks
           path,
           session: session,
           root: root,
-          dir: project_dir
+          dir: Config.project_dir
         )
       end
     when 'grep'
       return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_search?(
-        input['path'] || project_dir,
+        input['path'] || Config.project_dir,
         session: session,
         root: root,
-        dir: project_dir
+        dir: Config.project_dir
       )
     when 'glob'
       return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_glob?(
         input['pattern'],
-        path: input['path'] || project_dir,
+        path: input['path'] || Config.project_dir,
         session: session,
         root: root,
-        dir: project_dir
+        dir: Config.project_dir
       )
     when 'write', 'edit', 'notebook_edit', 'apply_patch'
       paths(tool, input).each do |path|
@@ -307,7 +302,7 @@ module Hooks
           path,
           session: session,
           root: root,
-          dir: project_dir
+          dir: Config.project_dir
         )
       end
     when 'exec'
@@ -315,7 +310,7 @@ module Hooks
         input['command'],
         session: session,
         root: root,
-        dir: input['cwd'] || input['working_directory'] || project_dir
+        dir: input['cwd'] || input['working_directory'] || Config.project_dir
       )
     end
 
@@ -332,58 +327,6 @@ module Hooks
     return [] unless patch.is_a?(String)
 
     patch.scan(/^\*\*\* (?:Update|Add|Delete) File:\s*(.+)$/).flatten
-  end
-
-  # The workspace's .devin/coord.json, with the defaults a missing or partial
-  # file should not cost: the team room, the roster, which backend screens
-  # tool calls, and whether unread messages block a stop.
-  def workspace_config
-    dir = project_dir
-    config = JSON.parse(File.read(File.join(dir, '.devin', 'coord.json')))
-    policy = config.key?('policy') ? config['policy'] : config.fetch('jev', true)
-
-    {
-      'project_dir' => dir,
-      'project' => config['project'],
-      'team_room' => team_room(config['teamRoom'], dir),
-      'team_skill' => config['teamSkill'],
-      'roster' => Array(config['roster']),
-      'policy' => feature_config(policy, POLICY_DEFAULTS),
-      'salience' => feature_config(config.fetch('salience', true), SALIENCE_DEFAULTS),
-      'memory' => feature_config(config.fetch('memory', false), MEMORY_DEFAULTS)
-    }
-  rescue SystemCallError, JSON::ParserError
-    {
-      'project_dir' => dir,
-      'team_room' => Room::DEFAULT_ROOM,
-      'roster' => [],
-      'policy' => POLICY_DEFAULTS.dup,
-      'salience' => SALIENCE_DEFAULTS.dup,
-      'memory' => MEMORY_DEFAULTS.dup
-    }
-  end
-
-  def feature_config(value, defaults)
-    case value
-    when Hash
-      defaults.merge(value).merge('enabled' => value.fetch('enabled', true))
-    when String
-      defaults.merge('enabled' => true, 'backend' => value)
-    when true
-      defaults.merge('enabled' => true)
-    else
-      defaults.merge('enabled' => false)
-    end
-  end
-
-  def team_room(value, dir)
-    Room.normalize(value, root: dir)
-  rescue Room::Error
-    Room::DEFAULT_ROOM
-  end
-
-  def project_dir
-    ENV['DEVIN_PROJECT_DIR'] || Dir.pwd
   end
 
   def valid_session?(session)

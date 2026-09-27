@@ -2,18 +2,108 @@ require 'fileutils'
 require 'json'
 require 'securerandom'
 
+# The gateway to profile information: who the profiles are, which session
+# belongs to which profile, and where a profile's directory lives. It is also
+# the single waiter source for the bus, so a wake names a profile, a source,
+# or both without either source knowing about the other.
 module ProfileStore
   ROOT = File.expand_path('..', __dir__)
   NAME_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\z/
-  INBOX_FILE = 'inbox.jsonl'
-  PINGS_FILE = 'pings.jsonl'
-  CURSORS_FILE = 'cursors.json'
-  HEARTBEAT_FILE = 'heartbeat.json'
 
   class Error < StandardError
   end
 
+  # Waiters are parked by source ("inbox", "pings", "room:<name>") and by the
+  # profile parked on it, so one wake can name a profile on a source, every
+  # source a profile is parked on, or every profile on a source.
+  class WaitRegistry
+    FIRST_SLICE = 0.05
+    MAX_SLICE = 0.5
+
+    Ticket = Struct.new(:woken)
+
+    def initialize
+      @lock = Mutex.new
+      @condition = ConditionVariable.new
+      @entries = {}
+    end
+
+    def wait(agent, source, timeout, watch: [])
+      # The files are read before the waiter is registered: a line that lands
+      # in the gap is a change the waiter can still see on its next slice, and
+      # one that lands after registration is a change too.
+      baseline = fingerprint(watch)
+      ticket = Ticket.new(false)
+      @lock.synchronize { ((@entries[source] ||= {})[agent] ||= []) << ticket }
+      park(ticket, timeout, watch, baseline)
+    ensure
+      @lock.synchronize do
+        parked = @entries.dig(source, agent)
+        parked&.delete(ticket)
+        @entries[source]&.delete(agent) if parked&.empty?
+        @entries.delete(source) if @entries[source]&.empty?
+      end
+    end
+
+    def wake(agent, source)
+      signal { Array(@entries.dig(source, agent)) }
+    end
+
+    def wake_agent(agent)
+      signal { @entries.values.flat_map { |agents| Array(agents[agent]) } }
+    end
+
+    def wake_source(source)
+      signal { Array(@entries[source]&.values&.flatten) }
+    end
+
+    private
+
+    def signal
+      @lock.synchronize do
+        yield.each { |ticket| ticket.woken = true }
+        @condition.broadcast
+      end
+    end
+
+    # A wake that lands before the wait is not lost: the flag is already set
+    # when the wait starts, so it returns without sleeping. A wait with files
+    # to watch sleeps in slices and looks at them in between, so a write from
+    # another process lands within a slice; a wait with nothing to watch
+    # sleeps the whole timeout in one go.
+    def park(ticket, timeout, watch, baseline)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      slice = FIRST_SLICE
+      loop do
+        remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        return if remaining <= 0
+
+        @lock.synchronize do
+          @condition.wait(@lock, watch.empty? ? remaining : [slice, remaining].min) unless ticket.woken
+          return if ticket.woken
+        end
+        return if fingerprint(watch) != baseline
+
+        slice = [slice * 2, MAX_SLICE].min
+      end
+    end
+
+    # What the watched files looked like when the wait began: size catches an
+    # append, mtime and inode catch a rewrite or a replaced file, and a file
+    # that is not there yet is a state like any other - its arrival is a change.
+    def fingerprint(paths)
+      paths.map do |path|
+        stat = File.stat(path)
+        [stat.size, stat.mtime.to_f, stat.ino]
+      rescue SystemCallError
+        nil
+      end
+    end
+  end
+
   extend self
+
+  WAITERS = WaitRegistry.new
 
   def get_profiles(root: ROOT)
     dir = agents_dir(root)
@@ -67,6 +157,16 @@ module ProfileStore
     end
   end
 
+  def profile_dir(name, root: ROOT)
+    dir = agents_dir(root)
+    raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
+
+    profile = File.join(dir, normalize_name(name))
+    raise Error, 'Profile directory must not be a symlink' if File.symlink?(profile)
+
+    profile
+  end
+
   def valid_name?(name)
     name.is_a?(String) && NAME_PATTERN.match?(name)
   end
@@ -78,132 +178,26 @@ module ProfileStore
     name
   end
 
-  def inbox_file(name, root: ROOT)
-    chat_file(name, INBOX_FILE, root: root)
+  def wait(agent, source, timeout:, watch: [])
+    WAITERS.wait(agent, source, timeout, watch: watch)
   end
 
-  def pings_file(name, root: ROOT)
-    chat_file(name, PINGS_FILE, root: root)
+  def wake(agent, source)
+    WAITERS.wake(agent, source)
   end
 
-  def read_jsonl(path)
-    return [] unless File.exist?(path)
-
-    File.read(path).lines.filter_map do |line|
-      JSON.parse(line)
-    rescue JSON::ParserError
-      nil
-    end
-  rescue SystemCallError => error
-    raise Error, "Could not read chat stream: #{error.class}"
+  def wake_agent(agent)
+    WAITERS.wake_agent(agent)
   end
 
-  def append_jsonl(path, entry)
-    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
-    File.open(path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
-      file.write("#{JSON.generate(entry)}\n")
-    end
-  rescue SystemCallError => error
-    raise Error, "Could not append to chat stream: #{error.class}"
-  end
-
-  # How far this profile has read each stream: "inbox", "pings", and
-  # "room:<name>" keys, each holding the entry count already delivered.
-  def cursors(name, root: ROOT)
-    path = chat_file(name, CURSORS_FILE, root: root)
-    File.exist?(path) ? parse_cursors(File.read(path)) : {}
-  rescue SystemCallError => error
-    raise Error, "Could not read the read cursor: #{error.class}"
-  end
-
-  def cursor(name, key, root: ROOT)
-    cursors(name, root: root)[key.to_s].to_i
-  end
-
-  def advance_cursor(name, key, count, root: ROOT)
-    path = chat_file(name, CURSORS_FILE, root: root)
-    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
-    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
-      file.flock(File::LOCK_EX)
-      current = parse_cursors(file.read)
-      next if current[key.to_s].to_i >= count
-
-      current[key.to_s] = count
-      file.rewind
-      file.truncate(0)
-      file.write(JSON.generate(current))
-      file.flush
-    ensure
-      file.flock(File::LOCK_UN)
-    end
-  rescue SystemCallError => error
-    raise Error, "Could not update the read cursor: #{error.class}"
-  end
-
-  # Unread entries, and reading advances the cursor: a stream is delivered
-  # once. A first read starts with the newest `limit` entries instead of the
-  # whole backlog.
-  def read_stream(name, key, entries, limit: nil, root: ROOT)
-    seen = cursor(name, key, root: root)
-    unread = seen.zero? && limit ? entries.last(limit) : entries.drop(seen)
-    advance_cursor(name, key, entries.length, root: root)
-    unread
-  end
-
-  # Presence is explicit, not inferred: a profile is as fresh as the last
-  # MCP call it made. Every tool call stamps this, so a heartbeat is a fact
-  # about use rather than a liveness probe the caller has to trust.
-  def heartbeat(name, root: ROOT)
-    path = chat_file(name, HEARTBEAT_FILE, root: root)
-    File.exist?(path) ? parse_heartbeat(File.read(path)) : 0
-  rescue SystemCallError => error
-    raise Error, "Could not read the heartbeat: #{error.class}"
-  end
-
-  def touch_heartbeat(name, root: ROOT)
-    path = chat_file(name, HEARTBEAT_FILE, root: root)
-    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
-    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
-      file.flock(File::LOCK_EX)
-      file.truncate(0)
-      file.rewind
-      file.write(JSON.generate('ts' => (Time.now.to_f * 1000).round))
-      file.flush
-    ensure
-      file.flock(File::LOCK_UN)
-    end
-  rescue SystemCallError => error
-    raise Error, "Could not update the heartbeat: #{error.class}"
+  def wake_source(source)
+    WAITERS.wake_source(source)
   end
 
   private
 
-  def parse_heartbeat(raw)
-    parsed = raw.strip.empty? ? {} : JSON.parse(raw)
-    parsed.is_a?(Hash) ? parsed['ts'].to_i : 0
-  rescue JSON::ParserError
-    0
-  end
-
-  def parse_cursors(raw)
-    parsed = raw.strip.empty? ? {} : JSON.parse(raw)
-    parsed.is_a?(Hash) ? parsed : {}
-  rescue JSON::ParserError
-    {}
-  end
-
   def agents_dir(root)
     File.join(File.expand_path(root), 'agents')
-  end
-
-  def chat_file(name, file, root:)
-    dir = File.join(agents_dir(root), normalize_name(name))
-    raise Error, 'Profile directory must not be a symlink' if File.symlink?(dir)
-
-    path = File.join(dir, file)
-    raise Error, 'Chat stream must not be a symlink' if File.symlink?(path)
-
-    path
   end
 
   def find_profile(name, root: ROOT)

@@ -1,4 +1,6 @@
+require_relative '../config'
 require_relative '../profile'
+require_relative 'bus'
 require_relative 'inbox'
 require_relative 'room'
 
@@ -16,7 +18,7 @@ module Coord
     MAX_WAIT = 60
     ONLINE_MS = 30 * 60_000
 
-    def initialize(root: ProfileStore::ROOT, project: Room.project_root)
+    def initialize(root: ProfileStore::ROOT, project: Config.project_dir)
       @root = root
       @project = project
     end
@@ -239,8 +241,8 @@ module Coord
 
       targets = ping_targets(args['ping'], from)
       if args['to'].to_s.empty?
-        room = Room.normalize(args['room'], root: @project)
-        entry = Room.post(room, text, from: from, root: @project)
+        room = Bus.normalize(args['room'], project: @project)
+        entry = Room.post(room, text, from: from, project: @project)
         targets.each { |target| Inbox.ping(target, text, from: from, room: room, root: @root) }
         { 'room' => room, 'entry' => entry, 'pinged' => targets }
       else
@@ -274,32 +276,20 @@ module Coord
 
     def wait_for(name, source, room, timeout)
       if source == 'inbox'
-        Inbox.wait(name, timeout: timeout, watch: inbox_watch(name))
+        Inbox.wait(name, timeout: timeout, root: @root)
       else
-        Room.wait(room, name, timeout: timeout, watch: room_watch(room, name))
+        Room.wait(room, name, timeout: timeout, project: @project)
       end
-    end
-
-    # A signal only reaches the waiters in the sender's own process and every
-    # session runs its own, so a waiter is handed the files its wake would have
-    # written: the stream it is parked on, and its own pings - which interrupt
-    # any wait, wherever they land.
-    def room_watch(room, name)
-      [Room.path(room, root: @project), Inbox.pings_path(name, root: @root)]
-    end
-
-    def inbox_watch(name)
-      [Inbox.inbox_path(name, root: @root), Inbox.pings_path(name, root: @root)]
     end
 
     def list_rooms(session)
       name = registered_name(session)
-      (Room.names(root: @project) | [Room.default_name(root: @project)]).sort.map do |room|
-        entries = Room.messages(room, root: @project)
+      (Room.names(project: @project) | [Bus.team_room(project: @project)]).sort.map do |room|
+        entries = Room.messages(room, project: @project)
         {
           'name' => room,
           'count' => entries.length,
-          'unread' => Profile.unread_room(room, name: name, rooms_root: @project, root: @root).length,
+          'unread' => Room.unread(room, agent: name, project: @project, root: @root).length,
           'lastTs' => entries.last&.fetch('ts', nil)
         }
       end
@@ -333,7 +323,7 @@ module Coord
       source = 'room' if source.empty?
       raise ProfileStore::Error, "Unknown source: #{source}" unless SOURCES.include?(source)
 
-      [source, Room.normalize(args['room'], root: @project)]
+      [source, Bus.normalize(args['room'], project: @project)]
     end
 
     def read_stream(name, source, room, limit)
@@ -346,7 +336,7 @@ module Coord
         {
           'source' => 'room',
           'room' => room,
-          'messages' => Profile.read_room(room, name: name, limit: limit, rooms_root: @project, root: @root)
+          'messages' => Room.read(room, agent: name, limit: limit, project: @project, root: @root)
         }
       end
     end

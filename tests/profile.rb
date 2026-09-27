@@ -1,4 +1,3 @@
-require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
 
@@ -22,24 +21,19 @@ class ProfileTest < Minitest::Test
     assert_equal File.join(@root, 'agents', 'Marlow'), profiles.first['directory']
   end
 
-  def test_set_profile_is_case_insensitive_and_creates_memories
+  def test_set_profile_creates_a_profile_and_keeps_its_canonical_name
     profile = Profile.set_profile('New_Agent', session: 'session-1', root: @root)
 
     assert_equal 'new_agent', profile['name']
     assert File.directory?(File.join(@root, 'agents', 'new_agent', 'memories'))
     assert File.file?(File.join(@root, 'agents', 'new_agent', 'identity.md'))
     assert_equal profile, Profile.get_profile('session-1', root: @root)
-  end
 
-  def test_existing_profile_name_keeps_its_canonical_case
     FileUtils.mkdir_p(File.join(@root, 'agents', 'Marlow', 'memories'))
-
-    profile = Profile.set_profile('mArLoW', session: 'session-1', root: @root)
-
-    assert_equal 'Marlow', profile['name']
+    assert_equal 'Marlow', Profile.set_profile('mArLoW', session: 'session-2', root: @root)['name']
   end
 
-  def test_session_profile_cannot_be_changed
+  def test_a_session_profile_cannot_be_reassigned
     Profile.set_profile('marlow', session: 'session-1', root: @root)
 
     assert Profile.permissions.can_set_profile?('MARLOW', session: 'session-1', root: @root)
@@ -49,7 +43,7 @@ class ProfileTest < Minitest::Test
     end
   end
 
-  def test_direct_access_to_another_profile_and_session_map_is_denied
+  def test_another_profile_and_the_session_map_are_denied
     Profile.set_profile('marlow', session: 'session-1', root: @root)
     other_profile = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
     sessions_file = File.join(@root, 'agents', 'sessions.json')
@@ -60,7 +54,7 @@ class ProfileTest < Minitest::Test
     refute Profile.permissions.can_write?(sessions_file, session: 'session-1', root: @root)
   end
 
-  def test_current_profile_is_accessible_but_env_is_not
+  def test_the_current_profile_is_accessible_but_env_is_not
     profile = Profile.set_profile('marlow', session: 'session-1', root: @root)
     memory_file = File.join(profile['directory'], 'memories', 'notes.md')
 
@@ -69,32 +63,29 @@ class ProfileTest < Minitest::Test
     refute Profile.permissions.can_read?(File.join(@root, '.env'), session: 'session-1', root: @root)
   end
 
-  def test_exec_blocks_profile_redirection_and_protected_deletion
+  def test_exec_blocks_profile_redirection_protected_deletion_and_a_foreign_cwd
     Profile.set_profile('marlow', session: 'session-1', root: @root)
     other_memory = File.join(@root, 'agents', 'wren', 'memories', 'note.md')
+    other_profile = File.join(@root, 'agents', 'wren', 'memories')
 
-    refute Profile.permissions.can_exec?(
-      "printf note > #{other_memory}",
-      session: 'session-1',
-      root: @root,
-      dir: @root
-    )
+    refute Profile.permissions.can_exec?("printf note > #{other_memory}", session: 'session-1', root: @root, dir: @root)
     refute Profile.permissions.can_exec?("rm -rf #{Dir.home}", root: @root, dir: @root)
     refute Profile.permissions.can_exec?("rm -rf #{File.join(@root, 'source')}", root: @root, dir: @root)
     refute Profile.permissions.can_exec?('rm -rf /', root: @root, dir: @root)
+    refute Profile.permissions.can_exec?('pwd', session: 'session-1', root: @root, dir: other_profile)
     assert Profile.permissions.can_exec?('git status', session: 'session-1', root: @root)
   end
 
-  def test_exec_denies_another_profile_as_working_directory
-    Profile.set_profile('marlow', session: 'session-1', root: @root)
-    other_profile = File.join(@root, 'agents', 'wren', 'memories')
+  def test_get_unread_composes_inbox_pings_and_rooms
+    Inbox.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
+    Inbox.dm('marlow', 'dm text', from: 'wren', root: @root)
+    Room.post('general', 'room text', from: 'wren', project: @root)
 
-    refute Profile.permissions.can_exec?(
-      'pwd',
-      session: 'session-1',
-      root: @root,
-      dir: other_profile
-    )
+    unread = Profile.get_unread('marlow', rooms: ['general'], project: @root, root: @root)
+
+    assert_equal ['ping text'], unread['pings'].map { |entry| entry['text'] }
+    assert_equal ['dm text'], unread['inbox'].map { |entry| entry['text'] }
+    assert_equal ['room text'], unread['rooms']['general'].map { |entry| entry['text'] }
   end
 
   def test_heartbeat_is_zero_until_stamped

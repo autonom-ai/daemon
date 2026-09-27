@@ -210,7 +210,7 @@ function fanout(ctx, text, room)
 
 async function openBus({ projectDir, coordRoot })
 {
-    const config = readJson(path.join(projectDir, ".devin", "coord.json"), {});
+    const config = readJson(path.join(projectDir, ".devin", "autonom-config.json"), {});
     const ctx = {
         projectDir,
         coordRoot,
@@ -396,4 +396,4 @@ async function openBus({ projectDir, coordRoot })
     return { ctx, projectDir, coordRoot, state, pump, say, dm };
 }
 
-module.exports = { openBus, readJson };
+module.exports = { openBus };

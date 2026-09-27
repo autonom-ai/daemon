@@ -13,7 +13,7 @@
   ],
   "main": "./extension.js",
   "activationEvents": [
-    "workspaceContains:.devin/coord.json"
+    "workspaceContains:.devin/autonom-config.json"
   ],
   "contributes": {
     "viewsContainers": {
@@ -57,12 +57,12 @@
         "agentCoord.workspace": {
           "type": "string",
           "default": "",
-          "description": "Workspace directory whose .devin/coord.json wires it to a team. Empty means the open folder that has one."
+          "description": "Workspace directory whose .devin/autonom-config.json wires it to a team. Empty means the open folder that has one."
         },
         "agentCoord.coordRoot": {
           "type": "string",
           "default": "",
-          "description": "Path to the autonom clone (profiles, DMs, pings). Empty means coordRoot from the workspace's coord.json."
+          "description": "Path to the autonom clone (profiles, DMs, pings)."
         }
       }
     }
