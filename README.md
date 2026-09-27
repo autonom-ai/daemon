@@ -1,9 +1,19 @@
-# Agent Coord
+# Autonom
 
-Agent Coord is a Ruby MCP server and Devin hook pair for session-scoped agent
-profiles and chat. Agents talk in rooms, DM each other, and ping each other to
-wake a teammate; the human sits in the same rooms through the Team Room
-extension.
+## MCP server
+
+The server is `autonom-coord-mcp` and runs from `source/coord/server.rb`:
+
+```json
+{
+  "mcpServers": {
+    "autonom-coord-mcp": {
+      "command": "ruby",
+      "args": ["<COORD_ROOT>/source/coord/server.rb"]
+    }
+  }
+}
+```
 
 ## MCP tools
 
@@ -26,7 +36,7 @@ and is used to identify the caller. After a session ID has been mapped, it canno
 Rooms are workspace-scoped and live under the project:
 
 ```text
-<workspace>/.devin/agent-coord/rooms/<room>.jsonl
+<workspace>/.devin/autonom-coord/rooms/<room>.jsonl
 ```
 
 DMs and pings are profile-scoped and live in the profile, so they follow a
@@ -48,6 +58,30 @@ A profile counts as online when its last call is within thirty minutes.
 The cursor in `cursors.json` (`inbox`, `pings`, and `room:<name>`) records what has been delivered.
 First read starts with the newest `limit` entries instead of the whole backlog. A ping is delivered by
 either the `PostToolUse` hook riding it back on the agent's next tool call, or `read_messages` draining it.
+
+## Hooks
+
+`source/hooks.rb` runs on every lifecycle event. Salience is the only thing that
+gates a stop: if the agent still owes a reply, the turn is blocked once with
+what is waiting; a turn with nothing owed is allowed to end and wait.
+
+`workspace/.devin/coord.json` names the backends:
+
+```json
+{
+  "project": "my-project",
+  "teamRoom": "general",
+  "roster": [],
+  "coordRoot": "/path/to/autonom",
+  "policy": true,
+  "salience": true,
+  "memory": false
+}
+```
+
+`policy` screens tool calls and `salience` gates the unread-message stop alert.
+Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
+`"decider"`), or `false`. `memory` is reserved and inert for now.
 
 ## Profile storage
 
@@ -74,5 +108,5 @@ dependencies.
 
 ```sh
 ruby -Itest -e 'Dir["tests/*.rb"].sort.each { |file| require_relative file }'
-ruby source/server.rb
+ruby source/coord/server.rb
 ```

@@ -1,6 +1,6 @@
 // The extension host's view of one workspace's chat.
 //
-// Rooms are workspace-scoped - <project>/.devin/agent-coord/rooms/<room>.jsonl.
+// Rooms are workspace-scoped - <project>/.devin/autonom-coord/rooms/<room>.jsonl.
 // DMs and pings are profile-scoped - <coordRoot>/agents/<name>/inbox.jsonl and
 // pings.jsonl - so they follow a person across workspaces. The human is a
 // profile like anyone else; the Ruby core reads and writes the same files.
@@ -67,7 +67,7 @@ function normalizeRoom(name)
 
 function chatDir(projectDir)
 {
-    return path.join(projectDir, ".devin", "agent-coord");
+    return path.join(projectDir, ".devin", "autonom-coord");
 }
 
 function roomFile(projectDir, room)

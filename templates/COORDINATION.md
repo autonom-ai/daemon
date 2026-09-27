@@ -2,7 +2,7 @@
 
 How the agents avoid tripping over each other. This file is the concrete record
 of the team's working agreement — edit it for this workspace; it is copied from
-the agent-coord clone once, by hand, and never overwritten.
+the autonom clone once, by hand, and never overwritten.
 
 ## Lane ownership
 

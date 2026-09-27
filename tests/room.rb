@@ -2,12 +2,12 @@ require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../source/room'
-require_relative '../source/agent/profile'
+require_relative '../source/coord/room'
+require_relative '../source/profile'
 
 class RoomTest < Minitest::Test
   def setup
-    @root = Dir.mktmpdir('agent-coord')
+    @root = Dir.mktmpdir('autonom')
   end
 
   def teardown
@@ -21,7 +21,7 @@ class RoomTest < Minitest::Test
 
     assert_equal ['hello'], entries.map { |entry| entry['text'] }
     assert_equal 'marlow', entries.first['from']
-    assert File.file?(File.join(@root, '.devin', 'agent-coord', 'rooms', 'general.jsonl'))
+    assert File.file?(File.join(@root, '.devin', 'autonom-coord', 'rooms', 'general.jsonl'))
     assert_empty Room.messages('other', root: @root)
   end
 
@@ -41,7 +41,7 @@ class RoomTest < Minitest::Test
   end
 
   def test_symlinked_room_files_are_refused
-    rooms = File.join(@root, '.devin', 'agent-coord', 'rooms')
+    rooms = File.join(@root, '.devin', 'autonom-coord', 'rooms')
     FileUtils.mkdir_p(rooms)
     target = File.join(@root, 'elsewhere.jsonl')
     File.write(target, '')
@@ -81,7 +81,7 @@ class RoomTest < Minitest::Test
     end
     sleep 0.2
 
-    Agent::Profile.ping('wren', 'look', from: 'sable', room: 'general', root: @root)
+    Profile.ping('wren', 'look', from: 'sable', room: 'general', root: @root)
 
     assert_equal 'wren', woken.pop
     assert woken.empty?

@@ -1,0 +1,9 @@
+{
+  "comment": "MCP server entry for the autonom clone - merge into your Devin MCP config (mcp_config.json) and replace {{COORD_ROOT}}. The server name determines the tool prefix the hooks expect: mcp__autonom-coord-mcp__*.",
+  "mcpServers": {
+    "autonom-coord-mcp": {
+      "command": "ruby",
+      "args": ["{{COORD_ROOT}}/source/coord/server.rb"]
+    }
+  }
+}

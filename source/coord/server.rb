@@ -1,11 +1,11 @@
-require_relative 'agent/profile'
+require_relative '../profile'
 require_relative 'room'
 
 require 'json'
 
-module Agent
+module Coord
   class Server
-    INFO = { 'name' => 'agent-coord', 'version' => '0.1.0' }.freeze
+    INFO = { 'name' => 'autonom-coord-mcp', 'version' => '0.1.0' }.freeze
     PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
     SOURCES = %w[room inbox pings].freeze
     WAIT_SOURCES = %w[room inbox].freeze
@@ -393,4 +393,4 @@ module Agent
   end
 end
 
-Agent::Server.new.run if $PROGRAM_NAME == __FILE__
+Coord::Server.new.run if $PROGRAM_NAME == __FILE__

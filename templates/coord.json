@@ -1,10 +1,12 @@
 {
-  "comment": "Workspace coordination config - copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks, the Ruby MCP server, and the Team Room extension read this. `roster` is the expected team - agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: profiles, DMs, and pings live there; rooms live in this workspace. `jev` names the policy backend for this workspace: \"openjev\" (the default, a hosted service), \"typesafe\" (TypeSafe through OpenRouter, needs OPENROUTER_API_KEY), \"decider\" (a local LM Studio model), true for the default, or false to skip screening.",
+  "comment": "Copy into <workspace>/.devin/coord.json and fill in the {{…}} placeholders. The hooks, the autonom-coord-mcp server, and the Team Room extension read this. `roster` is the expected team - agent names, which ARE the identities; there are no seats. `coordRoot` is this clone's absolute path: profiles, DMs, and pings live there; rooms live in this workspace. `policy` screens tool calls and `salience` gates the unread-message stop alert; each is true (default backend), a backend name (\"openjev\", \"typesafe\", \"decider\"), or false. `memory` is inert as a layer and only gates the session-start notes read.",
   "project": "{{PROJECT}}",
   "human": "{{HUMAN}}",
   "teamRoom": "general",
   "roster": [],
   "teamSkill": "{{PROJECT}}-team",
   "coordRoot": "{{COORD_ROOT}}",
-  "jev": true
+  "policy": true,
+  "salience": true,
+  "memory": true
 }

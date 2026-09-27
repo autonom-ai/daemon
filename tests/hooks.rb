@@ -25,7 +25,7 @@ class HooksTest < Minitest::Test
   end
 
   def setup
-    @root = Dir.mktmpdir('agent-coord')
+    @root = Dir.mktmpdir('autonom')
     @project = Dir.mktmpdir('agent-project')
     @previous_project = ENV['DEVIN_PROJECT_DIR']
     ENV['DEVIN_PROJECT_DIR'] = @project
@@ -119,7 +119,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_session_id_is_injected_for_profile_tools
-    event = event('mcp__agent-coord__set_profile', 'name' => 'marlow', 'session_id' => 'forged')
+    event = event('mcp__autonom-coord-mcp__set_profile', 'name' => 'marlow', 'session_id' => 'forged')
     result = Hooks.call(event, jev: @jev, root: @root)
 
     assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
@@ -127,9 +127,9 @@ class HooksTest < Minitest::Test
   end
 
   def test_reassignment_is_denied_before_jev
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
 
-    result = Hooks.call(event('mcp__agent-coord__set_profile', 'name' => 'wren'), jev: @jev, root: @root)
+    result = Hooks.call(event('mcp__autonom-coord-mcp__set_profile', 'name' => 'wren'), jev: @jev, root: @root)
 
     assert_equal 'block', result['decision']
     assert_equal 0, @jev.calls
@@ -139,7 +139,7 @@ class HooksTest < Minitest::Test
     result = Hooks.call(
       {
         'hook_event_name' => 'PreToolUse',
-        'tool_name' => 'mcp__agent-coord__set_profile',
+        'tool_name' => 'mcp__autonom-coord-mcp__set_profile',
         'tool_input' => { 'name' => 'marlow' }
       },
       jev: @jev,
@@ -161,8 +161,8 @@ class HooksTest < Minitest::Test
   end
 
   def test_unread_pings_ride_back_after_a_tool_call
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Agent::Profile.ping('marlow', '@marlow check the pricer', from: 'wren', room: 'general', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.ping('marlow', '@marlow check the pricer', from: 'wren', room: 'general', root: @root)
 
     result = Hooks.call(post_event, jev: @jev, root: @root)
     context = result.dig('hookSpecificOutput', 'additionalContext')
@@ -177,13 +177,13 @@ class HooksTest < Minitest::Test
   def test_post_tool_use_stays_quiet_without_pings
     assert_nil Hooks.call(post_event, jev: @jev, root: @root)
 
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
 
     assert_nil Hooks.call(post_event, jev: @jev, root: @root)
   end
 
   def test_post_tool_use_never_blocks_a_tool
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
     pings = File.join(@root, 'agents', 'marlow', 'pings.jsonl')
     File.symlink(File.join(@root, 'agents', 'marlow', 'identity.md'), pings)
 
@@ -191,21 +191,21 @@ class HooksTest < Minitest::Test
   end
 
   def test_pings_wait_for_a_tool_to_finish
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Agent::Profile.ping('marlow', 'look', from: 'wren', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.ping('marlow', 'look', from: 'wren', root: @root)
 
     assert_nil Hooks.call(event('exec', 'command' => 'git status'), jev: @jev, root: @root)
-    assert_equal 1, Agent::Profile.read_pings('marlow', root: @root).length
+    assert_equal 1, Profile.read_pings('marlow', root: @root).length
   end
 
   def test_session_id_is_injected_for_chat_tools
-    result = Hooks.call(event('mcp__agent-coord__send_message', 'text' => 'hi'), jev: @jev, root: @root)
+    result = Hooks.call(event('mcp__autonom-coord-mcp__send_message', 'text' => 'hi'), jev: @jev, root: @root)
 
     assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
   end
 
   def test_session_id_is_injected_for_the_heartbeat_tool
-    result = Hooks.call(event('mcp__agent-coord__get_heartbeat', 'name' => 'wren'), jev: @jev, root: @root)
+    result = Hooks.call(event('mcp__autonom-coord-mcp__get_heartbeat', 'name' => 'wren'), jev: @jev, root: @root)
 
     assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
   end
@@ -214,7 +214,7 @@ class HooksTest < Minitest::Test
     write_coord(project: 'jobs', team_room: 'general', roster: %w[marlow wren])
     write_identity('marlow', display: 'Marlow', body: "# Marlow\n\nI read the kill columns.")
     write_memory('marlow', "# marlow - memory\n\n## Now\n\nChecking the pricer.")
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
     Room.post('general', 'hello team', from: 'wren', root: @project)
 
     result = Hooks.call({ 'hook_event_name' => 'SessionStart', 'session_id' => 'session-1' }, jev: @jev, root: @root)
@@ -238,19 +238,19 @@ class HooksTest < Minitest::Test
 
   def test_prompt_nudge_lists_waiting_without_draining
     write_coord
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Agent::Profile.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
 
     result = Hooks.call({ 'hook_event_name' => 'UserPromptSubmit', 'session_id' => 'session-1' }, jev: @jev, root: @root)
 
     assert_includes result.dig('hookSpecificOutput', 'additionalContext'), 'Unread pings (1)'
-    assert_equal 1, Agent::Profile.unread_pings('marlow', root: @root).length
+    assert_equal 1, Profile.unread_pings('marlow', root: @root).length
   end
 
   def test_stop_blocks_with_what_is_waiting
     write_coord
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Agent::Profile.ping('marlow', '@marlow the pricer moved', from: 'wren', room: 'general', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.ping('marlow', '@marlow the pricer moved', from: 'wren', room: 'general', root: @root)
     Room.post('general', 'anyone around?', from: 'wren', root: @project)
 
     result = Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
@@ -265,9 +265,31 @@ class HooksTest < Minitest::Test
     assert_equal 0, @jev.calls
   end
 
+  def test_a_re_entered_stop_hook_lets_the_turn_end
+    write_coord
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.ping('marlow', '@marlow the pricer moved', from: 'wren', room: 'general', root: @root)
+
+    result = Hooks.call(
+      { 'hook_event_name' => 'Stop', 'session_id' => 'session-1', 'stop_hook_active' => true },
+      jev: @jev,
+      root: @root
+    )
+
+    assert_nil result
+    assert_equal 1, Profile.unread_pings('marlow', root: @root).length
+  end
+
+  def test_an_agent_with_nothing_waiting_is_allowed_to_stop
+    write_coord
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
+
+    assert_nil Hooks.call({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
+  end
+
   def test_stand_down_lets_a_session_stop
     write_coord
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
     FileUtils.mkdir_p(File.join(@project, '.devin', 'collaboration'))
     File.write(File.join(@project, '.devin', 'collaboration', 'stand-down'), '')
 
@@ -276,15 +298,15 @@ class HooksTest < Minitest::Test
 
   def test_a_subagent_stop_is_never_blocked
     write_coord
-    Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
-    Agent::Profile.ping('marlow', '@marlow the pricer moved', from: 'wren', room: 'general', root: @root)
+    Profile.set_profile('marlow', session: 'session-1', root: @root)
+    Profile.ping('marlow', '@marlow the pricer moved', from: 'wren', room: 'general', root: @root)
     Room.post('general', 'anyone around?', from: 'wren', root: @project)
 
     result = Hooks.call({ 'hook_event_name' => 'SubagentStop', 'session_id' => 'session-1' }, jev: @jev, root: @root)
 
     assert_nil result
     assert_equal 0, @jev.calls
-    assert_equal 1, Agent::Profile.unread_pings('marlow', root: @root).length
+    assert_equal 1, Profile.unread_pings('marlow', root: @root).length
   end
 
   def test_jev_can_be_turned_off_per_workspace

@@ -1,11 +1,11 @@
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../source/agent/memory'
+require_relative '../source/memory/memory'
 
 class MemoryTest < Minitest::Test
   def setup
-    @root = Dir.mktmpdir('agent-coord')
+    @root = Dir.mktmpdir('autonom')
   end
 
   def teardown
@@ -15,8 +15,8 @@ class MemoryTest < Minitest::Test
   def test_missing_memory_is_empty
     FileUtils.mkdir_p(File.join(@root, 'agents', 'wren'))
 
-    assert_empty Agent::Memory.get('wren', 'jobs', root: @root)
-    assert_empty Agent::Memory.get('nobody', 'jobs', root: @root)
+    assert_empty Memory.get('wren', 'jobs', root: @root)
+    assert_empty Memory.get('nobody', 'jobs', root: @root)
   end
 
   def test_slice_keeps_identity_and_project_blocks
@@ -31,7 +31,7 @@ class MemoryTest < Minitest::Test
       ].join("\n\n")
     )
 
-    slice = Agent::Memory.get('marlow', 'jobs', max_chars: 300, root: @root)
+    slice = Memory.get('marlow', 'jobs', max_chars: 300, root: @root)
 
     assert_includes slice, 'Checking the pricer.'
     assert_includes slice, 'jobs-specific detail'
@@ -41,7 +41,15 @@ class MemoryTest < Minitest::Test
   def test_small_memory_is_returned_whole
     write_memory('marlow', "# marlow - memory\n\nshort and whole\n")
 
-    assert_equal "# marlow - memory\n\nshort and whole", Agent::Memory.get('marlow', 'jobs', root: @root)
+    assert_equal "# marlow - memory\n\nshort and whole", Memory.get('marlow', 'jobs', root: @root)
+  end
+
+  # The layer is deliberately inert until the evals branch says otherwise.
+  def test_recall_and_capture_do_nothing
+    write_memory('marlow', "# marlow - memory\n\nshort and whole\n")
+
+    assert_empty Memory.recall('marlow', 'anything', project: 'jobs', root: @root)
+    refute Memory.capture('marlow', 'a durable lesson', root: @root)
   end
 
   private

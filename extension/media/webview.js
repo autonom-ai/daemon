@@ -9,7 +9,7 @@ const state = {
     messages: [],
     rooms: [],
     agents: [],
-    seen: JSON.parse(localStorage.getItem("agent-coord-seen") ?? "{}"),
+    seen: JSON.parse(localStorage.getItem("autonom-seen") ?? "{}"),
     room: null,
     dm: null,
     human: "user",
@@ -305,7 +305,7 @@ function markSeen()
         else if (state.dm && message.from === state.dm)
             state.seen[`dm:${state.dm}`] = Math.max(state.seen[`dm:${state.dm}`] ?? 0, message.ts);
     }
-    localStorage.setItem("agent-coord-seen", JSON.stringify(state.seen));
+    localStorage.setItem("autonom-seen", JSON.stringify(state.seen));
 }
 
 function addMessages(incoming)

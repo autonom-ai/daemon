@@ -3,12 +3,12 @@ require 'minitest/autorun'
 require 'stringio'
 require 'tmpdir'
 
-require_relative '../source/server'
+require_relative '../source/coord/server'
 
 class ServerTest < Minitest::Test
   def setup
-    @root = Dir.mktmpdir('agent-coord')
-    @server = Agent::Server.new(root: @root, project: @root)
+    @root = Dir.mktmpdir('autonom')
+    @server = Coord::Server.new(root: @root, project: @root)
   end
 
   def teardown
@@ -121,7 +121,7 @@ class ServerTest < Minitest::Test
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
     pinger = Thread.new do
       sleep 0.3
-      Agent::Profile.ping('wren', 'look', from: 'marlow', room: 'general', root: @root)
+      Profile.ping('wren', 'look', from: 'marlow', room: 'general', root: @root)
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -137,7 +137,7 @@ class ServerTest < Minitest::Test
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
     sender = Thread.new do
       sleep 0.3
-      Agent::Profile.dm('wren', 'psst', from: 'marlow', root: @root)
+      Profile.dm('wren', 'psst', from: 'marlow', root: @root)
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)

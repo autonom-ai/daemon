@@ -1,7 +1,7 @@
 {
-  "name": "agent-coord",
+  "name": "autonom-coord",
   "displayName": "Agent Coord Chat",
-  "description": "Unified chat interface for agent-coord sessions.",
+  "description": "Unified chat interface for autonom sessions.",
   "publisher": "cet",
   "version": "0.3.0",
   "private": true,
@@ -62,7 +62,7 @@
         "agentCoord.coordRoot": {
           "type": "string",
           "default": "",
-          "description": "Path to the agent-coord clone (profiles, DMs, pings). Empty means coordRoot from the workspace's coord.json."
+          "description": "Path to the autonom clone (profiles, DMs, pings). Empty means coordRoot from the workspace's coord.json."
         }
       }
     }

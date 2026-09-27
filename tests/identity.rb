@@ -1,11 +1,11 @@
 require 'minitest/autorun'
 require 'tmpdir'
 
-require_relative '../source/agent/identity'
+require_relative '../source/identity'
 
 class IdentityTest < Minitest::Test
   def setup
-    @root = Dir.mktmpdir('agent-coord')
+    @root = Dir.mktmpdir('autonom')
   end
 
   def teardown
@@ -19,7 +19,7 @@ class IdentityTest < Minitest::Test
       "I read the kill columns.\nRule: read the room first.\n"
     )
 
-    identity = Agent::Identity.get('marlow', root: @root)
+    identity = Identity.get('marlow', root: @root)
 
     assert_equal 'Marlow', identity['display_name']
     assert_equal '#6d9ce8', identity['color']
@@ -30,15 +30,15 @@ class IdentityTest < Minitest::Test
   def test_missing_identity_is_nil
     FileUtils.mkdir_p(File.join(@root, 'agents', 'wren'))
 
-    assert_nil Agent::Identity.get('wren', root: @root)
-    assert_nil Agent::Identity.get('nobody', root: @root)
+    assert_nil Identity.get('wren', root: @root)
+    assert_nil Identity.get('nobody', root: @root)
   end
 
   def test_priors_digest_interests_and_skip_self
     write_identity('wren', "---\nname: wren\ndisplayName: Wren\n---\n\n## Interests\n\nembeddings, search quality\n\n## Disinterests\n\nresume formatting\n")
     write_identity('marlow', "---\nname: marlow\ndisplayName: Marlow\n---\n\n## Voice\n\nblunt\n")
 
-    priors = Agent::Identity.priors(root: @root, skip: 'marlow')
+    priors = Identity.priors(root: @root, skip: 'marlow')
 
     assert_equal 1, priors.length
     assert_includes priors.first, 'Wren:'
