@@ -3,6 +3,7 @@ require_relative 'memory/memory'
 require_relative 'profile'
 require_relative 'salience/salience'
 require_relative 'jev'
+require_relative 'coord/inbox'
 require_relative 'coord/room'
 
 require 'json'
@@ -220,7 +221,7 @@ module Hooks
     profile = Profile.get_profile(session, root: root)
     return nil unless profile
 
-    pings = Profile.read_pings(profile['name'], root: root)
+    pings = Inbox.read_pings(profile['name'], root: root)
     return nil if pings.empty?
 
     context(
@@ -250,16 +251,15 @@ module Hooks
     return nil if stand_down?(config['project_dir'])
     return nil unless config['salience']['enabled']
 
-    unread = Profile.get_unread(
+    reason = Salience.stop_text(
       profile['name'],
       rooms: [config['team_room']],
       rooms_root: config['project_dir'],
       root: root
     )
-    focus = Salience.focus(Salience.impulses(unread))
-    return nil unless focus
+    return nil unless reason
 
-    { 'decision' => 'block', 'reason' => Salience.stop_text(unread, focus: focus) }
+    { 'decision' => 'block', 'reason' => reason }
   end
 
   def stand_down?(project_dir)
