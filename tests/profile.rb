@@ -44,7 +44,7 @@ class ProfileTest < Minitest::Test
 
     assert Agent::Profile.permissions.can_set_profile?('MARLOW', session: 'session-1', root: @root)
     refute Agent::Profile.permissions.can_set_profile?('wren', session: 'session-1', root: @root)
-    assert_raises(Agent::Store::Error) do
+    assert_raises(ProfileStore::Error) do
       Agent::Profile.set_profile('wren', session: 'session-1', root: @root)
     end
   end
@@ -142,22 +142,9 @@ class ProfileTest < Minitest::Test
     assert_empty Agent::Profile.unread_inbox('marlow', root: @root)
   end
 
-  def test_waiting_gathers_undrained_signals
-    Agent::Profile.ping('marlow', 'ping text', from: 'wren', room: 'general', root: @root)
-    Agent::Profile.dm('marlow', 'dm text', from: 'wren', root: @root)
-    Room.post('general', 'room text', from: 'wren', root: @root)
-
-    waiting = Agent::Profile.waiting('marlow', rooms: ['general'], rooms_root: @root, root: @root)
-
-    assert_equal ['ping text'], waiting['pings'].map { |entry| entry['text'] }
-    assert_equal ['dm text'], waiting['inbox'].map { |entry| entry['text'] }
-    assert_equal ['room text'], waiting['rooms']['general'].map { |entry| entry['text'] }
-    assert_equal 1, Agent::Profile.unread_pings('marlow', root: @root).length
-  end
-
   def test_chat_names_are_validated
-    assert_raises(Agent::Store::Error) { Agent::Profile.dm('../wren', 'hi', from: 'marlow', root: @root) }
-    assert_raises(Agent::Store::Error) { Agent::Profile.ping('..', 'hi', from: 'marlow', root: @root) }
+    assert_raises(ProfileStore::Error) { Agent::Profile.dm('../wren', 'hi', from: 'marlow', root: @root) }
+    assert_raises(ProfileStore::Error) { Agent::Profile.ping('..', 'hi', from: 'marlow', root: @root) }
   end
 
   def test_heartbeat_is_zero_until_stamped

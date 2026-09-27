@@ -1,6 +1,6 @@
-require_relative 'store'
+require_relative '../profile_store'
 require_relative 'permissions'
-require_relative 'waiters'
+require_relative '../waiters'
 require_relative '../room'
 
 require 'securerandom'
@@ -22,72 +22,75 @@ module Agent
       WAITERS
     end
 
-    def get_profiles(root: Store::ROOT)
-      Store.get_profiles(root: root)
+    def get_profiles(root: ProfileStore::ROOT)
+      ProfileStore.get_profiles(root: root)
     end
 
-    def get_profile(session, root: Store::ROOT)
-      Store.get_profile(session, root: root)
+    def get_profile(session, root: ProfileStore::ROOT)
+      ProfileStore.get_profile(session, root: root)
     end
 
-    def set_profile(name, session:, root: Store::ROOT)
-      Store.set_profile(session, name, root: root)
+    def set_profile(name, session:, root: ProfileStore::ROOT)
+      ProfileStore.set_profile(session, name, root: root)
     end
 
     # DMs and pings are profile-scoped: they live in the profile directory, not
     # the workspace, so they follow the person across workspaces.
-    def inbox(name, root: Store::ROOT)
-      Store.read_jsonl(Store.inbox_file(name, root: root))
+    def inbox(name, root: ProfileStore::ROOT)
+      ProfileStore.read_jsonl(ProfileStore.inbox_file(name, root: root))
     end
 
-    def pings(name, root: Store::ROOT)
-      Store.read_jsonl(Store.pings_file(name, root: root))
+    def pings(name, root: ProfileStore::ROOT)
+      ProfileStore.read_jsonl(ProfileStore.pings_file(name, root: root))
     end
 
-    def unread_inbox(name, root: Store::ROOT)
-      inbox(name, root: root).drop(Store.cursor(name, 'inbox', root: root))
+    def unread_inbox(name, root: ProfileStore::ROOT)
+      inbox(name, root: root).drop(ProfileStore.cursor(name, 'inbox', root: root))
     end
 
-    def unread_pings(name, root: Store::ROOT)
-      pings(name, root: root).drop(Store.cursor(name, 'pings', root: root))
+    def unread_pings(name, root: ProfileStore::ROOT)
+      pings(name, root: root).drop(ProfileStore.cursor(name, 'pings', root: root))
     end
 
-    def unread_room(room, name:, rooms_root: Room.project_root, root: Store::ROOT)
-      Room.messages(room, root: rooms_root).drop(Store.cursor(name, room_key(room), root: root))
+    def unread_room(room, name:, rooms_root: Room.project_root, root: ProfileStore::ROOT)
+      Room.messages(room, root: rooms_root).drop(ProfileStore.cursor(name, room_key(room), root: root))
     end
 
-    def read_inbox(name, limit: nil, root: Store::ROOT)
-      read_stream(name, 'inbox', inbox(name, root: root), limit: limit, root: root)
-    end
-
-    def read_pings(name, root: Store::ROOT)
-      read_stream(name, 'pings', pings(name, root: root), root: root)
-    end
-
-    def read_room(room, name:, limit: nil, rooms_root: Room.project_root, root: Store::ROOT)
-      read_stream(name, room_key(room), Room.messages(room, root: rooms_root), limit: limit, root: root)
-    end
-
-    # Everything waiting for this person, unread and undrained — the seam a
-    # salience layer grows into: what to weigh, not just what arrived.
-    def waiting(name, rooms: [], rooms_root: Room.project_root, root: Store::ROOT)
+    def get_unread(name, rooms: [], rooms_root: Room.project_root, root: ProfileStore::ROOT)
       {
         'pings' => unread_pings(name, root: root),
         'inbox' => unread_inbox(name, root: root),
-        'rooms' => rooms.to_h { |room| [room, unread_room(room, name: name, rooms_root: rooms_root, root: root)] }
+        'rooms' => rooms.to_h do |room|
+          [
+            room,
+            unread_room(room, name: name, rooms_root: rooms_root, root: root)
+          ]
+        end
       }
     end
 
-    def dm(name, text, from:, root: Store::ROOT)
+    def read_inbox(name, limit: nil, root: ProfileStore::ROOT)
+      read_stream(name, 'inbox', inbox(name, root: root), limit: limit, root: root)
+    end
+
+    def read_pings(name, root: ProfileStore::ROOT)
+      read_stream(name, 'pings', pings(name, root: root), root: root)
+    end
+
+    def read_room(room, name:, limit: nil, rooms_root: Room.project_root, root: ProfileStore::ROOT)
+      read_stream(name, room_key(room), Room.messages(room, root: rooms_root), limit: limit, root: root)
+    end
+
+    def dm(name, text, from:, root: ProfileStore::ROOT)
       entry = chat_entry(from: from, text: text, to: name)
-      Store.append_jsonl(Store.inbox_file(name, root: root), entry)
+      ProfileStore.append_jsonl(ProfileStore.inbox_file(name, root: root), entry)
       wake(name)
       entry
     end
 
-    def ping(name, text, from:, room: nil, root: Store::ROOT)
+    def ping(name, text, from:, room: nil, root: ProfileStore::ROOT)
       entry = chat_entry(from: from, text: text, room: room)
-      Store.append_jsonl(Store.pings_file(name, root: root), entry)
+      ProfileStore.append_jsonl(ProfileStore.pings_file(name, root: root), entry)
       # A ping interrupts anything: it ends an inbox wait and any room wait
       # this person is parked in.
       wake(name)
@@ -103,12 +106,12 @@ module Agent
       WAITERS.wake(name)
     end
 
-    def heartbeat(name, root: Store::ROOT)
-      Store.heartbeat(name, root: root)
+    def heartbeat(name, root: ProfileStore::ROOT)
+      ProfileStore.heartbeat(name, root: root)
     end
 
-    def touch_heartbeat(name, root: Store::ROOT)
-      Store.touch_heartbeat(name, root: root)
+    def touch_heartbeat(name, root: ProfileStore::ROOT)
+      ProfileStore.touch_heartbeat(name, root: root)
     end
 
     private
@@ -117,9 +120,9 @@ module Agent
     # once. A first read starts with the newest `limit` entries instead of the
     # whole backlog.
     def read_stream(name, key, entries, limit: nil, root:)
-      seen = Store.cursor(name, key, root: root)
+      seen = ProfileStore.cursor(name, key, root: root)
       unread = seen.zero? && limit ? entries.last(limit) : entries.drop(seen)
-      Store.advance_cursor(name, key, entries.length, root: root)
+      ProfileStore.advance_cursor(name, key, entries.length, root: root)
       unread
     end
 

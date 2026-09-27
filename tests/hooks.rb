@@ -213,7 +213,7 @@ class HooksTest < Minitest::Test
   def test_session_start_carries_identity_memory_and_room_context
     write_coord(project: 'jobs', team_room: 'general', roster: %w[marlow wren])
     write_identity('marlow', display: 'Marlow', body: "# Marlow\n\nI read the kill columns.")
-    write_memory('marlow', "# marlow — memory\n\n## Now\n\nChecking the pricer.")
+    write_memory('marlow', "# marlow - memory\n\n## Now\n\nChecking the pricer.")
     Agent::Profile.set_profile('marlow', session: 'session-1', root: @root)
     Room.post('general', 'hello team', from: 'wren', root: @project)
 

@@ -44,7 +44,7 @@ function displayName(id)
     return state.agents.find((agent) => agent.id === id)?.display || id;
 }
 
-// A stable muted color per seat — the identity's own color when it has one,
+// A stable muted color per seat - the identity's own color when it has one,
 // otherwise a deterministic palette entry, so a seat keeps its color across
 // workspaces and no per-project name list is needed. The human gets the
 // accent-warm --human tone rather than a palette entry.
@@ -71,7 +71,7 @@ function paintColors(root)
 }
 
 // The seats that can be pinged, plus @everyone. The human is excluded: pinging
-// yourself is not a ping. #room is a plain reference — pings are named people.
+// yourself is not a ping. #room is a plain reference - pings are named people.
 function mentionCandidates(sigil)
 {
     if (sigil === "#")
@@ -88,7 +88,7 @@ function knownMentions()
     return new Set(["everyone", ...state.agents.map((agent) => agent.id)]);
 }
 
-// A ping is delivered to the human's own pings stream; this is display only —
+// A ping is delivered to the human's own pings stream; this is display only -
 // a room message that names the human or everyone reads as one.
 function isPing(message)
 {
@@ -154,7 +154,7 @@ function visible(message)
     }
     else
     {
-        // A room view shows only that room's messages — DMs never bleed in.
+        // A room view shows only that room's messages - DMs never bleed in.
         if (message.stream === "dm")
             return false;
         if (state.room && message.stream === "room" && message.room !== state.room)
@@ -174,7 +174,7 @@ function renderMessages(scroll = "force")
     el.messages.innerHTML = shown.map((m) =>
     {
         const mine = m.from === state.human;
-        // A run of consecutive messages from one sender shows the name once —
+        // A run of consecutive messages from one sender shows the name once -
         // on the first. A ping still earns its full meta row, and a stream,
         // room, or long time gap ends the run even from the same sender.
         const merged = prev !== null
@@ -221,11 +221,11 @@ function renderSidebar()
 
     const { mode, name } = destination();
     el.text.placeholder = mode === "dm"
-        ? `Message ${displayName(name)} — only they see it`
-        : `Message #${name} — @mention or #room`;
+        ? `Message ${displayName(name)} - only they see it`
+        : `Message #${name} - @mention or #room`;
 }
 
-// A seat is as alive as the newest bus line it authored — a message it sent.
+// A seat is as alive as the newest bus line it authored - a message it sent.
 // Thirty silent minutes marks it offline in the list; it still stays listed,
 // because hiding a seat would hide a DM target.
 function renderDms()
@@ -334,7 +334,7 @@ let stale = false;
 // A batch of entries that arrived together renders once. The host posts the
 // whole pump as one message for exactly this reason.
 //
-// Only scroll for a message the current view actually shows — traffic in
+// Only scroll for a message the current view actually shows - traffic in
 // another room shouldn't yank the scroll position. Your own sends snap to
 // bottom unconditionally; anything else follows only when you're already there.
 function receive(entries)
@@ -382,7 +382,7 @@ window.addEventListener("message", (event) =>
             el.hint.textContent = "";
             closeMentions();
             if (payload.pinged?.length)
-                toast(`pinged ${payload.pinged.map((name) => `@${name}`).join(", ")} — delivered as a ping`, "good");
+                toast(`pinged ${payload.pinged.map((name) => `@${name}`).join(", ")} - delivered as a ping`, "good");
         }
         else
         {
@@ -532,7 +532,7 @@ el.mentions.addEventListener("click", (event) =>
         acceptMention(mentionState.items.find((item) => item.name === row.dataset.name));
 });
 
-// The sidebar is a slide-over drawer on narrow screens — the ☰ button opens
+// The sidebar is a slide-over drawer on narrow screens - the ☰ button opens
 // it, and picking a room or a seat closes it again.
 el.menu.addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
 
@@ -587,7 +587,7 @@ setInterval(() =>
 
 // Coming back to the window is the moment the view is most likely to be
 // showing something stale, so it asks then rather than waiting for the tick.
-// (Editor-tab switches are the host's job — it already pushes state when the
+// (Editor-tab switches are the host's job - it already pushes state when the
 // view or panel becomes visible again.)
 document.addEventListener("visibilitychange", () =>
 {

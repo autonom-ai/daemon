@@ -1,7 +1,7 @@
-// Team Room — the human's seat on the coord bus, as a Devin Desktop tab.
+// Team Room - the human's seat on the coord bus, as a Devin Desktop tab.
 //
 // The extension host owns the bus (./bus.js): no HTTP server, no port, no
-// browser, no respawn wrapper. The webview is presentation only — it renders
+// browser, no respawn wrapper. The webview is presentation only - it renders
 // what the host posts and sends back say/dm intents.
 //
 // The room opens as an editor tab (agentCoord.focus / agentCoord.openPanel).
@@ -81,7 +81,7 @@ async function ensureBus()
     const projectDir = findWorkspace();
     if (!projectDir)
     {
-        busError = "No .devin/coord.json in the open folders — this workspace is not wired into a team.";
+        busError = "No .devin/coord.json in the open folders - this workspace is not wired into a team.";
         postAll({ type: "conn", up: false });
         postAll({ type: "toast", text: busError, tone: "bad" });
         scheduleReconnect();
@@ -120,7 +120,7 @@ async function ensureBus()
 }
 
 // A failed open is not terminal. The store may not be built yet, coord.json may
-// still be wrong, the workspace may still be opening — so back off and retry
+// still be wrong, the workspace may still be opening - so back off and retry
 // instead of leaving the room dead until the extension is unloaded. This is the
 // recovery path the manual refresh used to be the only way to reach.
 function scheduleReconnect()
@@ -212,7 +212,7 @@ async function poll()
             }
             notifyPing(ping);
         }
-        // The incremental stream can miss a line — a compaction reset, a write
+        // The incremental stream can miss a line - a compaction reset, a write
         // that lands between reads, a webview that reloaded mid-burst. A slow
         // full-state push while the room is on screen makes the view converge
         // on its own instead of waiting for a manual refresh.

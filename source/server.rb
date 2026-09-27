@@ -15,7 +15,7 @@ module Agent
     MAX_WAIT = 60
     ONLINE_MS = 30 * 60_000
 
-    def initialize(root: Store::ROOT, project: Room.project_root)
+    def initialize(root: ProfileStore::ROOT, project: Room.project_root)
       @root = root
       @project = project
     end
@@ -27,9 +27,9 @@ module Agent
       input.each_line do |line|
         req = parse(line)
         # A blocking wait must not stall the requests behind it, so it runs on
-        # its own thread. Everything else is answered in arrival order — a
+        # its own thread. Everything else is answered in arrival order - a
         # client that sends set_profile then send_message must not see the two
-        # race — and no worker outlives the process with its response unwritten.
+        # race - and no worker outlives the process with its response unwritten.
         if waiting?(req)
           blocking << Thread.new { respond(req, output, write_lock) }
         else
@@ -121,7 +121,7 @@ module Agent
           'name' => 'send_message',
           'description' => 'Send a chat message. Pass `to` to DM one profile (the DM sits in their ' \
                            'inbox and does not ping), or `room` for a room message (defaults to the ' \
-                           'team room). `ping` names profiles to notify — each gets an unread ping, ' \
+                           'team room). `ping` names profiles to notify - each gets an unread ping, ' \
                            'delivered on their next tool call.',
           'inputSchema' => {
             'type' => 'object',
@@ -227,14 +227,14 @@ module Agent
         'structuredContent' => ret,
         'isError' => false
       }
-    rescue Store::Error, Room::Error => error
+    rescue ProfileStore::Error, Room::Error => error
       tool_error(error.message)
     end
 
     def send_message(args, session)
       from = registered_name(session)
       text = args['text'].to_s
-      raise Store::Error, 'A message needs text' if text.strip.empty?
+      raise ProfileStore::Error, 'A message needs text' if text.strip.empty?
 
       targets = ping_targets(args['ping'], from)
       if args['to'].to_s.empty?
@@ -243,7 +243,7 @@ module Agent
         targets.each { |target| Profile.ping(target, text, from: from, room: room, root: @root) }
         { 'room' => room, 'entry' => entry, 'pinged' => targets }
       else
-        to = Store.normalize_name(args['to'])
+        to = ProfileStore.normalize_name(args['to'])
         entry = Profile.dm(to, text, from: from, root: @root)
         targets.each { |target| Profile.ping(target, text, from: from, root: @root) }
         { 'to' => to, 'entry' => entry, 'pinged' => targets }
@@ -258,14 +258,14 @@ module Agent
 
     # The no-idle loop's bottom rung: block until something lands, so an agent
     # that has nothing to say is reachable instead of dark. The wait is a
-    # registry entry in this process, not a poll — and since the signal that
+    # registry entry in this process, not a poll - and since the signal that
     # would clear it cannot cross a process boundary, it also watches the files
     # a line would land in, which costs a couple of stats a second and no reads
     # at all.
     def wait_for_message(args, session)
       name = registered_name(session)
       source, room = read_target(args)
-      raise Store::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
+      raise ProfileStore::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
 
       wait_for(name, source, room, wait_timeout(args))
       read_stream(name, source, room, limit(args))
@@ -281,14 +281,14 @@ module Agent
 
     # A signal only reaches the waiters in the sender's own process and every
     # session runs its own, so a waiter is handed the files its wake would have
-    # written: the stream it is parked on, and its own pings — which interrupt
+    # written: the stream it is parked on, and its own pings - which interrupt
     # any wait, wherever they land.
     def room_watch(room, name)
-      [Room.path(room, root: @project), Agent::Store.pings_file(name, root: @root)]
+      [Room.path(room, root: @project), ProfileStore.pings_file(name, root: @root)]
     end
 
     def inbox_watch(name)
-      [Agent::Store.inbox_file(name, root: @root), Agent::Store.pings_file(name, root: @root)]
+      [ProfileStore.inbox_file(name, root: @root), ProfileStore.pings_file(name, root: @root)]
     end
 
     def list_rooms(session)
@@ -305,9 +305,9 @@ module Agent
     end
 
     def get_heartbeat(args)
-      name = Store.normalize_name(args['name'])
+      name = ProfileStore.normalize_name(args['name'])
       profile = Profile.get_profiles(root: @root).find { |entry| entry['name'].casecmp?(name) }
-      raise Store::Error, "Unknown profile: #{name}" unless profile
+      raise ProfileStore::Error, "Unknown profile: #{name}" unless profile
 
       heartbeat = Profile.heartbeat(profile['name'], root: @root)
       {
@@ -323,14 +323,14 @@ module Agent
     def stamp_heartbeat(session)
       profile = Profile.get_profile(session, root: @root)
       Profile.touch_heartbeat(profile['name'], root: @root) if profile
-    rescue Store::Error
+    rescue ProfileStore::Error
       nil
     end
 
     def read_target(args)
       source = args['source'].to_s
       source = 'room' if source.empty?
-      raise Store::Error, "Unknown source: #{source}" unless SOURCES.include?(source)
+      raise ProfileStore::Error, "Unknown source: #{source}" unless SOURCES.include?(source)
 
       [source, Room.normalize(args['room'], root: @project)]
     end
@@ -357,7 +357,7 @@ module Agent
 
     def registered_name(session)
       profile = Profile.get_profile(session, root: @root)
-      raise Store::Error, 'No profile is registered for this session; register one first' unless profile
+      raise ProfileStore::Error, 'No profile is registered for this session; register one first' unless profile
 
       profile['name']
     end
@@ -367,8 +367,8 @@ module Agent
 
       known = Profile.get_profiles(root: @root).map { |profile| profile['name'] }
       names.filter_map do |name|
-        target = known.find { |candidate| candidate.casecmp?(Store.normalize_name(name)) }
-        raise Store::Error, "Unknown profile to ping: #{name}" unless target
+        target = known.find { |candidate| candidate.casecmp?(ProfileStore.normalize_name(name)) }
+        raise ProfileStore::Error, "Unknown profile to ping: #{name}" unless target
 
         target
       end.uniq - [from]

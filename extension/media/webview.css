@@ -386,7 +386,7 @@ textarea::placeholder { color: var(--faint); }
     color: var(--status);
 }
 
-/* Narrow screens — the activity-bar view is always narrow — the sidebar
+/* Narrow screens - the activity-bar view is always narrow - the sidebar
    becomes a slide-over drawer (☰ button in the toolbar) so the chat gets the
    full width. */
 @media (max-width: 780px)

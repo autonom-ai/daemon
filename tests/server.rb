@@ -172,7 +172,7 @@ class ServerTest < Minitest::Test
     writer = Thread.new do
       sleep 0.3
       append_line(
-        Agent::Store.inbox_file('wren', root: @root),
+        ProfileStore.inbox_file('wren', root: @root),
         'from' => 'marlow', 'to' => 'wren', 'text' => 'psst'
       )
     end
@@ -191,7 +191,7 @@ class ServerTest < Minitest::Test
     writer = Thread.new do
       sleep 0.3
       append_line(
-        Agent::Store.pings_file('wren', root: @root),
+        ProfileStore.pings_file('wren', root: @root),
         'from' => 'marlow', 'room' => 'general', 'text' => 'look'
       )
     end
@@ -265,7 +265,7 @@ class ServerTest < Minitest::Test
     responses.find { |response| response['id'] == id }.dig('result', 'structuredContent')
   end
 
-  # A line appended with no wake at all — what a different session's process,
+  # A line appended with no wake at all - what a different session's process,
   # or the human's extension, does.
   def append_line(path, entry)
     FileUtils.mkdir_p(File.dirname(path))

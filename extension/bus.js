@@ -1,8 +1,8 @@
 // The extension host's view of one workspace's chat.
 //
-// Rooms are workspace-scoped — <project>/.devin/agent-coord/rooms/<room>.jsonl.
-// DMs and pings are profile-scoped — <coordRoot>/agents/<name>/inbox.jsonl and
-// pings.jsonl — so they follow a person across workspaces. The human is a
+// Rooms are workspace-scoped - <project>/.devin/agent-coord/rooms/<room>.jsonl.
+// DMs and pings are profile-scoped - <coordRoot>/agents/<name>/inbox.jsonl and
+// pings.jsonl - so they follow a person across workspaces. The human is a
 // profile like anyone else; the Ruby core reads and writes the same files.
 
 const { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } = require("node:fs");
@@ -135,7 +135,7 @@ function advancePingCursor(coordRoot, name, count)
     writeFileSync(file, `${JSON.stringify({ ...readCursors(coordRoot, name), pings: count })}\n`, "utf8");
 }
 
-// displayName + color from agents/<id>/identity.md — the room renders people by
+// displayName + color from agents/<id>/identity.md - the room renders people by
 // who they are, not by directory name.
 function identityMeta(coordRoot, id)
 {
@@ -220,7 +220,7 @@ async function openBus({ projectDir, coordRoot })
     };
     ensureProfile(coordRoot, ctx.human);
 
-    // One watched file per stream — every room and the human's inbox — each
+    // One watched file per stream - every room and the human's inbox - each
     // carrying the kind it decorates entries with. The human's pings are read
     // whole, against their cursor, so a ping that lands while the extension is
     // closed is still delivered on the next open.
