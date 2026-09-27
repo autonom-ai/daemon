@@ -83,7 +83,7 @@ module Hooks
   # SessionStart - hand the tab its own context: who it is, what it
   # remembers, who else is here, and what the room has been saying.
   def session_start(event)
-    profile = ProfileStore.profile(event['session_id'])
+    profile = ProfileStore.profile_by_session(event['session_id'])
     lines = []
     lines.concat(identity_lines(profile))
     lines.concat(team_lines(profile))
@@ -140,10 +140,7 @@ module Hooks
   # UserPromptSubmit - a nudge, not a delivery: cursors stay where the agent
   # left them, so the same traffic is still waiting in read_messages.
   def prompt_submit(event)
-    session = event['session_id']
-    return nil unless valid_session?(session)
-
-    profile = ProfileStore.profile(session)
+    profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
 
     lines = ["You are #{profile.name}."]
@@ -155,7 +152,7 @@ module Hooks
     tool = event['tool_name'].to_s
     input = event['tool_input'].is_a?(Hash) ? event['tool_input'] : {}
     session = event['session_id']
-    profile = ProfileStore.profile(session)
+    profile = ProfileStore.profile_by_session(session)
     reason = denial(tool, input, session, profile)
     return block(reason) if reason
 
@@ -165,7 +162,7 @@ module Hooks
       return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
     end
 
-    return nil unless SESSION_TOOLS.include?(tool) && valid_session?(session)
+    return nil unless SESSION_TOOLS.include?(tool) && !session.to_s.empty?
 
     {
       'hookSpecificOutput' => {
@@ -196,10 +193,7 @@ module Hooks
   # unread ping rides back as context, and reading it advances the cursor so
   # it is delivered exactly once. A failure here must never break the tool.
   def post_tool_use(event)
-    session = event['session_id']
-    return nil unless valid_session?(session)
-
-    profile = ProfileStore.profile(session)
+    profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
 
     pings = Bus.inbox(profile).read_pings()
@@ -219,13 +213,11 @@ module Hooks
   # unread message is the only thing that blocks: an agent with nothing owed
   # is allowed to stop and wait. The stand-down marker is the release valve.
   def stop(event)
-    session = event['session_id']
-    return nil unless valid_session?(session)
     # A stop hook that keeps blocking re-enters itself; one re-prompt is the
     # point, a loop is not.
     return nil if event['stop_hook_active']
 
-    profile = ProfileStore.profile(session)
+    profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
 
     return nil if stand_down?
@@ -245,9 +237,9 @@ module Hooks
     actor = profile || Unclaimed.new()
     case tool
     when 'mcp__autonom-coord-mcp__get_profile'
-      'A Devin session ID is required' unless valid_session?(session)
+      'A Devin session ID is required' if session.to_s.empty?
     when 'mcp__autonom-coord-mcp__set_profile'
-      return 'A Devin session ID is required' unless valid_session?(session)
+      return 'A Devin session ID is required' if session.to_s.empty?
 
       name = input['name'].to_s
       return 'A valid profile name is required' unless ProfileStore.valid_name?(name)
@@ -284,10 +276,6 @@ module Hooks
     return [] unless patch.is_a?(String)
 
     patch.scan(/^\*\*\* (?:Update|Add|Delete) File:\s*(.+)$/).flatten
-  end
-
-  def valid_session?(session)
-    session.is_a?(String) && !session.empty?
   end
 
   def context(event_name, text)

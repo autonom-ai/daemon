@@ -12,8 +12,6 @@ module ProfileStore
   class Error < StandardError
   end
 
-  Record = Struct.new(:name, :directory)
-
   extend self
 
   def root
@@ -24,7 +22,7 @@ module ProfileStore
     @root = File.expand_path(path)
   end
 
-  def records
+  def profiles
     dir = agents_dir
     return [] unless File.directory?(dir)
     raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
@@ -32,90 +30,56 @@ module ProfileStore
     Dir.children(dir).filter_map do |name|
       next unless valid_name?(name)
 
-      profile = File.join(dir, name)
-      next unless File.directory?(profile) && !File.symlink?(profile)
+      directory = File.join(dir, name)
+      next unless File.directory?(directory) && !File.symlink?(directory)
 
-      Record.new(name, File.realpath(profile))
-    end.sort_by { |record| record.name.downcase }
+      Profile.new(name, File.realpath(directory))
+    end.sort_by { |profile| profile.name.downcase }
   end
 
-  def record(name)
-    matches = records.select { |record| record.name.casecmp?(name.to_s) }
+  def profile_by_session(session)
+    key = session.to_s
+    return nil if key.empty?
+
+    name = with_lock(File::LOCK_SH) { read_sessions[key] }
+    return nil unless name
+
+    profile_by_name(name) || raise(Error, 'The registered profile no longer exists')
+  end
+
+  def profile_by_name(name)
+    matches = profiles.select { |profile| profile.name.casecmp?(name.to_s) }
     raise Error, 'Profile names must be unique without regard to case' if matches.length > 1
 
     matches.first
   end
 
-  def session(session)
-    return nil if session.nil? || session.to_s.empty?
+  def register_profile(name, session)
+    key = session.to_s
+    raise Error, 'A valid session ID is required' if key.empty?
 
-    name = with_lock(File::LOCK_SH) { read_sessions[session] }
-    return nil unless name
+    name = name.to_s.strip
+    raise Error, 'Invalid profile name' unless valid_name?(name)
 
-    stored = record(name)
-    raise Error, 'The registered profile no longer exists' unless stored
-
-    stored
-  end
-
-  def register(session, name)
-    raise Error, 'A valid session ID is required' if session.nil? || session.to_s.empty?
-    name = normalize_name(name)
-
-    stored = with_lock(File::LOCK_EX) do
+    with_lock(File::LOCK_EX) do
       sessions = read_sessions
-      current = sessions[session]
-
-      if current
-        existing = record(current)
+      if (current = sessions[key])
+        existing = profile_by_name(current)
         raise Error, 'The registered profile no longer exists' unless existing
         raise Error, 'A session profile cannot be changed after registration' unless existing.name.casecmp?(name)
 
         next existing
       end
 
-      existing = record(name) || create(name.downcase)
-      sessions[session] = existing.name
+      existing = profile_by_name(name) || create(name.downcase)
+      sessions[key] = existing.name
       write_sessions(sessions)
       existing
     end
-
-    profile_from(stored)
-  end
-
-  def directory(name)
-    dir = agents_dir
-    raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
-
-    profile = File.join(dir, normalize_name(name))
-    raise Error, 'Profile directory must not be a symlink' if File.symlink?(profile)
-
-    profile
-  end
-
-  def profiles
-    records.map { |record| profile_from(record) }
-  end
-
-  def profile(session)
-    stored = session(session)
-    stored && profile_from(stored)
-  end
-
-  def profile_named(name)
-    stored = record(name)
-    stored && profile_from(stored)
   end
 
   def valid_name?(name)
     name.is_a?(String) && NAME_PATTERN.match?(name)
-  end
-
-  def normalize_name(name)
-    name = name.to_s.strip
-    raise Error, 'Invalid profile name' unless valid_name?(name)
-
-    name
   end
 
   private
@@ -124,26 +88,22 @@ module ProfileStore
     File.join(root, 'agents')
   end
 
-  def profile_from(record)
-    Profile.new(record.name, record.directory)
-  end
-
   def create(name)
     dir = agents_dir
     FileUtils.mkdir_p(dir)
     raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
-    profile = File.join(dir, name)
-    FileUtils.mkdir(profile, mode: 0o700)
-    FileUtils.mkdir(File.join(profile, 'memories'), mode: 0o700)
+    directory = File.join(dir, name)
+    FileUtils.mkdir(directory, mode: 0o700)
+    FileUtils.mkdir(File.join(directory, 'memories'), mode: 0o700)
     File.open(
-      File.join(profile, 'identity.md'),
+      File.join(directory, 'identity.md'),
       File::WRONLY | File::CREAT | File::EXCL,
       0o600
     ) do |file|
       file.write("---\nname: #{name}\ndisplayName: #{name}\n---\n\n# #{name}\n")
     end
-    Record.new(name, File.realpath(profile))
+    Profile.new(name, File.realpath(directory))
   rescue SystemCallError => error
     raise Error, "Could not create profile: #{error.class}"
   end

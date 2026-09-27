@@ -258,7 +258,7 @@ module Bus
   end
 
   def cursors_path(profile)
-    stream_path(ProfileStore.directory(profile.name), CURSORS_FILE)
+    stream_path(profile.directory, CURSORS_FILE)
   end
 
   def parse_cursors(raw)
