@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
-            "timeout": 10
+            "timeout": 20
           }
         ]
       }
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
-            "timeout": 5
+            "timeout": 20
           }
         ]
       }
@@ -43,7 +43,7 @@
           {
             "type": "command",
             "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
-            "timeout": 5
+            "timeout": 20
           }
         ]
       }
@@ -55,7 +55,7 @@
           {
             "type": "command",
             "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
-            "timeout": 10
+            "timeout": 20
           }
         ]
       }
@@ -67,7 +67,7 @@
           {
             "type": "command",
             "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
-            "timeout": 5
+            "timeout": 20
           }
         ]
       }

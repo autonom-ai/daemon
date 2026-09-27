@@ -1,7 +1,7 @@
 require 'json'
 require 'securerandom'
 
-require_relative 'profile_store'
+require_relative '../profile_store'
 require_relative 'waiters'
 
 module Room
@@ -100,7 +100,7 @@ module Room
   end
 
   def rooms_dir(root)
-    File.join(root, '.devin', 'agent-coord', 'rooms')
+    File.join(root, '.devin', 'autonom-coord', 'rooms')
   end
 
   def file(name, root:)

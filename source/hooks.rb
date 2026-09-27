@@ -1,22 +1,22 @@
-require_relative 'agent/identity'
-require_relative 'agent/memory'
-require_relative 'agent/profile'
-require_relative 'agent/salience'
+require_relative 'identity'
+require_relative 'memory/memory'
+require_relative 'profile'
+require_relative 'salience/salience'
 require_relative 'jev'
-require_relative 'room'
+require_relative 'coord/room'
 
 require 'json'
 
 module Hooks
   SESSION_TOOLS = %w[
-    mcp__agent-coord__get_profiles
-    mcp__agent-coord__get_profile
-    mcp__agent-coord__set_profile
-    mcp__agent-coord__send_message
-    mcp__agent-coord__read_messages
-    mcp__agent-coord__wait_for_message
-    mcp__agent-coord__list_rooms
-    mcp__agent-coord__get_heartbeat
+    mcp__autonom-coord-mcp__get_profiles
+    mcp__autonom-coord-mcp__get_profile
+    mcp__autonom-coord-mcp__set_profile
+    mcp__autonom-coord-mcp__send_message
+    mcp__autonom-coord-mcp__read_messages
+    mcp__autonom-coord-mcp__wait_for_message
+    mcp__autonom-coord-mcp__list_rooms
+    mcp__autonom-coord-mcp__get_heartbeat
   ].freeze
 
   RECENT_ROOM = 6
@@ -44,6 +44,11 @@ module Hooks
     }
   }.freeze
   THRESHOLD = 0.5
+  POLICY_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
+  SALIENCE_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
+  # Memory is inert as a layer; the only thing it does today is read the
+  # person's own notes at session start, which is what this gates.
+  MEMORY_DEFAULTS = { 'enabled' => true, 'backend' => nil }.freeze
 
   extend self
 
@@ -80,7 +85,7 @@ module Hooks
   # remembers, who else is here, and what the room has been saying.
   def session_start(event, root:)
     session = event['session_id']
-    profile = Agent::Profile.get_profile(session, root: root)
+    profile = Profile.get_profile(session, root: root)
     config = workspace_config
     lines = []
     lines << "Your session ID is #{session}. Tell the user what it is." if session
@@ -100,17 +105,19 @@ module Hooks
     end
 
     name = profile['name']
-    identity = Agent::Identity.get(name, root: root)
+    identity = Identity.get(name, root: root)
     lines = ["You are #{identity ? identity['display_name'] : name} (#{name}) - profile at #{profile['directory']}."]
     lines << identity['personality'] if identity && !identity['personality'].empty?
-    memory = Agent::Memory.get(name, config['project'], root: root)
-    lines.concat(['', 'Your memory:', memory]) unless memory.empty?
+    if config['memory']['enabled']
+      memory = Memory.get(name, config['project'], root: root)
+      lines.concat(['', 'Your memory:', memory]) unless memory.empty?
+    end
     lines
   end
 
   def team_lines(profile, config, root:)
     name = profile && profile['name']
-    teammates = config['roster'].empty? ? Agent::Profile.get_profiles(root: root).map { |entry| entry['name'] } : config['roster']
+    teammates = config['roster'].empty? ? Profile.get_profiles(root: root).map { |entry| entry['name'] } : config['roster']
     teammates = teammates.reject { |teammate| teammate.casecmp?(name.to_s) }
     lines = [
       '',
@@ -130,12 +137,12 @@ module Hooks
     [
       '',
       "Recent ##{config['team_room']} traffic:",
-      *Agent::Salience.format_entries(entries.last(RECENT_ROOM))
+      *Salience.format_entries(entries.last(RECENT_ROOM))
     ]
   end
 
   def prior_lines(profile, root:)
-    priors = Agent::Identity.priors(root: root, skip: profile && profile['name'])
+    priors = Identity.priors(root: root, skip: profile && profile['name'])
     priors.empty? ? [] : ['', "Your teammates' stated leanings:", priors.join("\n\n")]
   end
 
@@ -145,18 +152,18 @@ module Hooks
     session = event['session_id']
     return nil unless valid_session?(session)
 
-    profile = Agent::Profile.get_profile(session, root: root)
+    profile = Profile.get_profile(session, root: root)
     return nil unless profile
 
     config = workspace_config
-    unread = Agent::Profile.get_unread(
+    unread = Profile.get_unread(
       profile['name'],
       rooms: [config['team_room']],
       rooms_root: config['project_dir'],
       root: root
     )
     lines = ["You are #{profile['name']}. Team room: ##{config['team_room']}."]
-    lines.concat(Agent::Salience.unread_lines(unread))
+    lines.concat(Salience.unread_lines(unread))
     context('UserPromptSubmit', lines.join("\n"))
   end
 
@@ -167,12 +174,12 @@ module Hooks
     reason = denial(tool, input, session, root: root)
     return block(reason) if reason
 
-    profile = Agent::Profile.get_profile(session, root: root)
+    profile = Profile.get_profile(session, root: root)
     # coord.json names this workspace's backend; true or an absent key keeps
     # the default, and false turns screening off outright.
-    setting = workspace_config['jev']
-    unless setting == false
-      jev.backend = setting if setting.is_a?(String)
+    policy = workspace_config['policy']
+    if policy['enabled']
+      jev.backend = policy['backend'] if policy['backend'].is_a?(String)
       return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
     end
 
@@ -210,42 +217,49 @@ module Hooks
     session = event['session_id']
     return nil unless valid_session?(session)
 
-    profile = Agent::Profile.get_profile(session, root: root)
+    profile = Profile.get_profile(session, root: root)
     return nil unless profile
 
-    pings = Agent::Profile.read_pings(profile['name'], root: root)
+    pings = Profile.read_pings(profile['name'], root: root)
     return nil if pings.empty?
 
     context(
       'PostToolUse',
       [
         "Unread pings (#{pings.length}) - reply in the room when you get a turn:",
-        *Agent::Salience.format_entries(pings)
+        *Salience.format_entries(pings)
       ].join("\n")
     )
   end
 
   # Stop - the team does not idle. A turn that ends is a teammate nobody can
-  # reach, so the hook refuses the stop and hands back what is waiting. The
-  # signals gathered by Salience are what it has to weigh, not just what
-  # arrived. The stand-down marker is the release valve.
+  # reach, so the hook refuses the stop and hands back what is waiting. An
+  # unread message is the only thing that blocks: an agent with nothing owed
+  # is allowed to stop and wait. The stand-down marker is the release valve.
   def stop(event, root:)
     session = event['session_id']
     return nil unless valid_session?(session)
+    # A stop hook that keeps blocking re-enters itself; one re-prompt is the
+    # point, a loop is not.
+    return nil if event['stop_hook_active']
 
-    profile = Agent::Profile.get_profile(session, root: root)
+    profile = Profile.get_profile(session, root: root)
     return nil unless profile
 
     config = workspace_config
     return nil if stand_down?(config['project_dir'])
+    return nil unless config['salience']['enabled']
 
-    unread = Agent::Profile.get_unread(
+    unread = Profile.get_unread(
       profile['name'],
       rooms: [config['team_room']],
       rooms_root: config['project_dir'],
       root: root
     )
-    { 'decision' => 'block', 'reason' => Agent::Salience.stop_text(unread) }
+    focus = Salience.focus(Salience.impulses(unread))
+    return nil unless focus
+
+    { 'decision' => 'block', 'reason' => Salience.stop_text(unread, focus: focus) }
   end
 
   def stand_down?(project_dir)
@@ -254,18 +268,18 @@ module Hooks
 
   def denial(tool, input, session, root:)
     case tool
-    when 'mcp__agent-coord__get_profile'
+    when 'mcp__autonom-coord-mcp__get_profile'
       'A Devin session ID is required' unless valid_session?(session)
-    when 'mcp__agent-coord__set_profile'
+    when 'mcp__autonom-coord-mcp__set_profile'
       return 'A Devin session ID is required' unless valid_session?(session)
-      return 'A session profile cannot be changed after registration' unless Agent::Profile.permissions.can_set_profile?(
+      return 'A session profile cannot be changed after registration' unless Profile.permissions.can_set_profile?(
         input['name'],
         session: session,
         root: root
       )
     when 'read', 'notebook_read'
       paths(tool, input).each do |path|
-        return 'Access to this profile or protected file is blocked' unless Agent::Profile.permissions.can_read?(
+        return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_read?(
           path,
           session: session,
           root: root,
@@ -273,14 +287,14 @@ module Hooks
         )
       end
     when 'grep'
-      return 'Access to this profile or protected file is blocked' unless Agent::Profile.permissions.can_search?(
+      return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_search?(
         input['path'] || project_dir,
         session: session,
         root: root,
         dir: project_dir
       )
     when 'glob'
-      return 'Access to this profile or protected file is blocked' unless Agent::Profile.permissions.can_glob?(
+      return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_glob?(
         input['pattern'],
         path: input['path'] || project_dir,
         session: session,
@@ -289,7 +303,7 @@ module Hooks
       )
     when 'write', 'edit', 'notebook_edit', 'apply_patch'
       paths(tool, input).each do |path|
-        return 'Access to this profile or protected file is blocked' unless Agent::Profile.permissions.can_write?(
+        return 'Access to this profile or protected file is blocked' unless Profile.permissions.can_write?(
           path,
           session: session,
           root: root,
@@ -297,7 +311,7 @@ module Hooks
         )
       end
     when 'exec'
-      return 'Execution targets a protected profile or directory' unless Agent::Profile.permissions.can_exec?(
+      return 'Execution targets a protected profile or directory' unless Profile.permissions.can_exec?(
         input['command'],
         session: session,
         root: root,
@@ -321,21 +335,45 @@ module Hooks
   end
 
   # The workspace's .devin/coord.json, with the defaults a missing or partial
-  # file should not cost: the team room, the roster, and which JEV backend
-  # screens this workspace, if any.
+  # file should not cost: the team room, the roster, which backend screens
+  # tool calls, and whether unread messages block a stop.
   def workspace_config
     dir = project_dir
     config = JSON.parse(File.read(File.join(dir, '.devin', 'coord.json')))
+    policy = config.key?('policy') ? config['policy'] : config.fetch('jev', true)
+
     {
       'project_dir' => dir,
       'project' => config['project'],
       'team_room' => team_room(config['teamRoom'], dir),
       'team_skill' => config['teamSkill'],
       'roster' => Array(config['roster']),
-      'jev' => config.fetch('jev', true)
+      'policy' => feature_config(policy, POLICY_DEFAULTS),
+      'salience' => feature_config(config.fetch('salience', true), SALIENCE_DEFAULTS),
+      'memory' => feature_config(config.fetch('memory', false), MEMORY_DEFAULTS)
     }
   rescue SystemCallError, JSON::ParserError
-    { 'project_dir' => dir, 'team_room' => Room::DEFAULT_ROOM, 'roster' => [], 'jev' => true }
+    {
+      'project_dir' => dir,
+      'team_room' => Room::DEFAULT_ROOM,
+      'roster' => [],
+      'policy' => POLICY_DEFAULTS.dup,
+      'salience' => SALIENCE_DEFAULTS.dup,
+      'memory' => MEMORY_DEFAULTS.dup
+    }
+  end
+
+  def feature_config(value, defaults)
+    case value
+    when Hash
+      defaults.merge(value).merge('enabled' => value.fetch('enabled', true))
+    when String
+      defaults.merge('enabled' => true, 'backend' => value)
+    when true
+      defaults.merge('enabled' => true)
+    else
+      defaults.merge('enabled' => false)
+    end
   end
 
   def team_room(value, dir)
