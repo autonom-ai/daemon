@@ -16,7 +16,10 @@ module CoreTest
     ENV['DEVIN_PROJECT_DIR'] = @project
     ProfileStore.root = @root
     FileUtils.mkdir_p(File.join(@root, 'templates'))
-    FileUtils.cp(File.join(ProfileStore::ROOT, 'templates', 'policy.yml'), File.join(@root, 'templates', 'policy.yml'))
+    FileUtils.cp(
+      File.join(ProfileStore::ROOT, 'templates', 'autonom-policy.yml'),
+      File.join(@root, 'templates', 'autonom-policy.yml')
+    )
     Policy.reset!
     write_config(config)
   end

@@ -1,5 +1,5 @@
 {
-  "comment": "Copy into <workspace>/.devin/autonom-config.json and fill in the {{…}} placeholders. The hooks, the autonom-coord-mcp server, and the Team Room extension read this. `policy` screens tool calls and `salience` gates the unread-message stop alert; each is true (default backend), a backend name (\"openjev\", \"typesafe\", \"decider\"), or false. `memory` gates the session-start notes read.",
+  "comment": "Copy into <workspace>/.devin/autonom-config.json and fill in the {{…}} placeholders. The hooks, the autonom-coord-mcp server, and the Team Room extension read this. `policy` screens tool calls and `salience` gates the unread-message stop alert; each is true (default backend), a backend name (\"openjev\", \"typesafe\", \"decider\"), or false. `memory` gates the session-start notes read. The workspace's own policy is .devin/autonom-policy.yml - copy templates/autonom-policy.yml to start from the defaults.",
   "project": "{{PROJECT}}",
   "human": "{{HUMAN}}",
   "defaultRoom": "general",

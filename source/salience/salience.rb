@@ -126,7 +126,10 @@ module Salience
     lines.join("\n")
   end
 
+  # Coordination is opt-in.
   def briefing(profile)
+    return identity_lines(nil).join("\n") unless profile
+
     profiles = ProfileStore.profiles
     rooms = Bus.visible_rooms(profile)
     lines = identity_lines(profile)

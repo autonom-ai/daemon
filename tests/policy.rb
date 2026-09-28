@@ -66,11 +66,11 @@ class PolicyTest < Minitest::Test
   end
 
   def test_a_later_allow_cannot_outrank_an_earlier_deny()
-    master = load(<<~'YAML')
+    workspace = load(<<~'YAML')
       rules:
         - match: { tool: exec }
           action: deny
-          reason: master
+          reason: workspace
     YAML
     room = load(<<~'YAML')
       rules:
@@ -78,10 +78,10 @@ class PolicyTest < Minitest::Test
           action: allow
     YAML
 
-    denied, reason = Policy.decide([master, room], request('exec'), jev: @jev)
+    denied, reason = Policy.decide([workspace, room], request('exec'), jev: @jev)
 
     assert denied
-    assert_equal 'master', reason
+    assert_equal 'workspace', reason
   end
 
   def test_a_rule_that_matches_nothing_allows()
@@ -98,13 +98,58 @@ class PolicyTest < Minitest::Test
     assert_equal 0, @jev.calls
   end
 
-  def test_the_master_template_loads_and_screens()
-    assert Policy.master.any?
+  def test_the_default_template_loads_and_screens()
+    assert Policy.workspace.rules.any?
+    assert Policy.workspace.guard?('codebase', 'quill')
+    refute Policy.workspace.guard?('codebase', 'sable')
 
-    denied, = Policy.decide([Policy.master], request('exec', 'command' => 'git status'), jev: @jev)
+    denied, = Policy.decide([Policy.workspace], request('exec', 'command' => 'git status'), jev: @jev)
 
     refute denied
     assert_equal 1, @jev.calls
+  end
+
+  def test_the_workspace_file_wins_over_the_template()
+    File.write(Config.policy_path, "rules: []\n")
+    Policy.reset!
+
+    assert Policy.workspace.rules.empty?
+    refute Policy.workspace.guard?('env', 'marlow')
+  end
+
+  def test_an_except_rule_does_not_apply_to_the_profile()
+    rules = load(<<~'YAML')
+      rules:
+        - match: { tool: exec }
+          action: deny
+          reason: blocked
+          except: [marlow]
+    YAML
+
+    denied, = Policy.decide([rules], request('exec'), jev: @jev)
+
+    refute denied
+
+    denied, reason = Policy.decide([rules], request('exec', {}, 'wren'), jev: @jev)
+
+    assert denied
+    assert_equal 'blocked', reason
+  end
+
+  def test_an_except_guard_does_not_apply_to_the_profile()
+    policy = load(<<~'YAML')
+      access:
+        - guard: codebase
+          except: [sable]
+    YAML
+
+    assert policy.guard?('codebase', 'quill')
+    refute policy.guard?('codebase', 'Sable')
+    refute policy.guard?('env', 'quill')
+  end
+
+  def test_an_unknown_guard_raises()
+    assert_raises(Policy::Error) { load("access:\n  - guard: nope\n") }
   end
 
   def test_a_malformed_policy_raises()
@@ -119,7 +164,7 @@ class PolicyTest < Minitest::Test
     Policy.load(path)
   end
 
-  def request(tool, input = {})
-    { 'tool_name' => tool, 'tool_input' => input, 'profile_name' => 'marlow' }
+  def request(tool, input = {}, profile = 'marlow')
+    { 'tool_name' => tool, 'tool_input' => input, 'profile_name' => profile }
   end
 end

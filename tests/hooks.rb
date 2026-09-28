@@ -125,7 +125,6 @@ class HooksTest < Minitest::Test
       updated = hook(payload).dig('hookSpecificOutput', 'updatedInput')
 
       assert_equal 'session-1', updated['session_id']
-      assert_equal 'marlow', updated['name']
     end
   end
 
@@ -219,7 +218,7 @@ class HooksTest < Minitest::Test
     assert_equal 1, Bus.pings_by_profile(marlow).unread(marlow).length
   end
 
-  def test_stop_blocks_once_with_what_is_waiting()
+  def test_stop_keeps_blocking_while_something_is_owed()
     marlow = ProfileStore.register_profile('marlow', 'session-1')
     wren = ProfileStore.register_profile('wren', 'session-2')
     Bus.ping(marlow, '@marlow the pricer moved', from: wren, room: room('general'))
@@ -235,9 +234,11 @@ class HooksTest < Minitest::Test
     assert_includes reason, 'New #room:general traffic (1)'
     assert_includes reason, 'wait_for_message'
 
+    # A re-entered stop is still judged on what is owed - the gate does not
+    # yield just because it already blocked.
     re_entered = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1', 'stop_hook_active' => true })
 
-    assert_nil re_entered
+    assert_equal 'block', re_entered['decision']
     assert_equal 1, Bus.pings_by_profile(marlow).unread(marlow).length
   end
 

@@ -49,6 +49,32 @@ class PermissionsTest < Minitest::Test
     assert @marlow.can_exec?('git status')
   end
 
+  def test_the_codebase_guard_bans_root_edits_for_everyone_not_exempt()
+    quill = ProfileStore.register_profile('quill', 'session-3')
+    sable = ProfileStore.register_profile('sable', 'session-4')
+    source_file = File.join(@root, 'source', 'hooks.rb')
+
+    refute quill.can_write?(File.join(@root, 'README.md'))
+    refute quill.can_write?(source_file)
+    refute Unclaimed.new().can_write?(source_file)
+
+    # sable, wren and marlow are on the default template's except list.
+    assert sable.can_write?(source_file)
+    assert @wren.can_write?(source_file)
+    assert @marlow.can_write?(source_file)
+
+    # Reading the codebase is not editing it.
+    assert quill.can_read?(source_file)
+  end
+
+  def test_a_workspace_file_without_guards_leaves_access_open()
+    File.write(Config.policy_path, "access: []\nrules: []\n")
+    Policy.reset!
+
+    assert @marlow.can_write?(File.join(@root, 'README.md'))
+    assert @marlow.can_read?(File.join(@project, '.env'))
+  end
+
   def test_room_files_are_gated_by_membership()
     write_room('general', owner: 'marlow')
     dir = File.join(@project, '.devin', 'autonom-coord', 'rooms', 'general')

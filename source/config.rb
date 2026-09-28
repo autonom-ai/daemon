@@ -4,6 +4,7 @@ module Config
   FILE = 'autonom-config.json'
   DEVIN_DIR = '.devin'
   ROOMS_DIR = 'autonom-coord/rooms'
+  POLICY_FILE = 'autonom-policy.yml'
 
   Feature = Struct.new(:enabled, :backend) do
     def enabled?
@@ -27,6 +28,10 @@ module Config
 
   def rooms_dir
     File.join(dir, ROOMS_DIR)
+  end
+
+  def policy_path
+    File.join(dir, POLICY_FILE)
   end
 
   def project

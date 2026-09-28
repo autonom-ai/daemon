@@ -7,7 +7,7 @@ require_relative '../policy'
 require_relative 'inbox'
 
 # A room is a folder on the bus: its message stream, the profiles that may use
-# it, and the screening policy its owners add on top of the master.
+# it, and the screening policy its owners add on top of the workspace policy.
 #
 #   rooms/<name>/messages.jsonl   the stream (same shape as any inbox)
 #   rooms/<name>/policy.yml       the room's own rules; restrict-only
@@ -84,7 +84,7 @@ class Room
     inbox.wait(profile, timeout: timeout)
   end
 
-  def policy_rules
+  def policy
     Policy.load(policy_path)
   end
 

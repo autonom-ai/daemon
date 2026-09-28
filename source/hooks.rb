@@ -84,7 +84,12 @@ module Hooks
     policy = Config.policy
     if policy.enabled?
       jev.backend = policy.backend if policy.backend.is_a?(String)
-      denied, reason = Policy.decide([Policy.master], policy_request(tool, input, profile), jev: jev)
+      # TODO: a room's own policy.yml never reaches a plain tool call - it is
+      # enforced only on room-scoped MCP calls (see Server#deny_room_policy),
+      # because a call carries no room context. Enforcing it here needs a
+      # focus_room tool so a session can declare its active room and that
+      # room's policy can join this chain.
+      denied, reason = Policy.decide([Policy.workspace], policy_request(tool, input, profile), jev: jev)
       return block(reason || 'The policy check denied this request') if denied
     end
 
@@ -120,10 +125,6 @@ module Hooks
   # unread message is the only thing that blocks: an agent with nothing owed
   # is allowed to stop and wait.
   def stop(event)
-    # A stop hook that keeps blocking re-enters itself; one re-prompt is the
-    # point, a loop is not.
-    return nil if event['stop_hook_active']
-
     profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
 
