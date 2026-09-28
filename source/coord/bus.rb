@@ -5,11 +5,15 @@ require 'securerandom'
 require_relative '../config'
 require_relative '../profile_store'
 require_relative 'inbox'
-require_relative 'room'
 
 module Bus
+  ROOM_PREFIX = 'room'
+  DMS_PREFIX = 'dms'
+  PINGS_PREFIX = 'pings'
+  DMS_FILE = 'dms.jsonl'
+  PINGS_FILE = 'pings.jsonl'
   CURSORS_FILE = 'cursors.json'
-  DESCRIPTION_KEY = 'description'
+  MAX_ENTRY = 400
 
   class Error < StandardError
   end
@@ -64,11 +68,7 @@ module Bus
       end
     end
 
-    # A wake that lands before the wait is not lost: the flag is already set
-    # when the wait starts, so it returns without sleeping. A wait with files
-    # to watch sleeps in slices and looks at them in between, so a write from
-    # another process lands within a slice; a wait with nothing to watch
-    # sleeps the whole timeout in one go.
+    # Sleeps until slice change.
     def park(ticket, timeout, watch, baseline)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
       slice = FIRST_SLICE
@@ -86,9 +86,7 @@ module Bus
       end
     end
 
-    # What the watched files looked like when the wait began: size catches an
-    # append, mtime and inode catch a rewrite or a replaced file, and a file
-    # that is not there yet is a state like any other - its arrival is a change.
+    # Detects when a file has been replaced, added, or modified.
     def fingerprint(paths)
       paths.map do |path|
         stat = File.stat(path)
@@ -109,28 +107,40 @@ module Bus
 
     Dir.children(dir).filter_map do |entry|
       entry.delete_suffix('.jsonl') if entry.end_with?('.jsonl')
-    end.sort.map { |name| Room.new(name, description(room_path(name))) }
+    end.sort.map { |name| Inbox.new("#{ROOM_PREFIX}:#{name}", room_path(name)) }
   end
 
-  def inbox(profile)
-    Inbox.new(profile)
-  end
-
-  def unread(profile)
-    mailbox = inbox(profile)
-    {
-      'pings' => mailbox.unread_pings,
-      'inbox' => mailbox.unread,
-      'rooms' => rooms.to_h { |room| [room.name, room.unread(profile)] }
-    }
-  end
-
-  def room_name(name)
+  def room_by_name(name)
     name = name.to_s.strip.sub(/\A#/, '').downcase
-    name = default_room if name.empty?
-    raise Error, 'Invalid room name' unless ProfileStore.valid_name?(name)
+    return nil unless ProfileStore.valid_name?(name)
 
-    name
+    rooms.find { |room| room.name == "#{ROOM_PREFIX}:#{name}" }
+  end
+
+  def dms_by_profile(profile)
+    Inbox.new(
+      "#{DMS_PREFIX}:#{profile.name}",
+      stream_path(profile.directory, DMS_FILE),
+      watch: [pings_path(profile)]
+    )
+  end
+
+  def dms_by_name(name)
+    profile = ProfileStore.profile_by_name(name)
+    raise Error, "Unknown profile: #{name}" unless profile
+
+    dms_by_profile(profile)
+  end
+
+  def pings_by_profile(profile)
+    Inbox.new("#{PINGS_PREFIX}:#{profile.name}", pings_path(profile))
+  end
+
+  def pings_by_name(name)
+    profile = ProfileStore.profile_by_name(name)
+    raise Error, "Unknown profile: #{name}" unless profile
+
+    pings_by_profile(profile)
   end
 
   def default_room
@@ -138,8 +148,12 @@ module Bus
     ProfileStore.valid_name?(name) ? name : nil
   end
 
-  def room_path(name)
-    stream_path(Config.rooms_dir, "#{room_name(name)}.jsonl")
+  def unread(profile)
+    {
+      'pings' => pings_by_profile(profile).unread(profile),
+      'dms' => dms_by_profile(profile).unread(profile),
+      'rooms' => rooms.to_h { |room| [room.name, room.unread(profile)] }
+    }
   end
 
   def read(path)
@@ -152,13 +166,6 @@ module Bus
     end
   rescue SystemCallError => error
     raise Error, "Could not read chat stream: #{error.class}"
-  end
-
-  def head(path)
-    line = File.exist?(path) ? File.open(path) { |file| file.gets } : nil
-    line ? JSON.parse(line) : nil
-  rescue JSON::ParserError, SystemCallError
-    nil
   end
 
   def append(path, entry)
@@ -179,6 +186,38 @@ module Bus
     }
     entry['to'] = to.name if to
     entry['room'] = room.name if room
+    entry
+  end
+
+  def format_entries(entries)
+    entries.map do |entry|
+      room = entry['room'] ? " in ##{entry['room']}" : ''
+      "[#{clock(entry['ts'])}] #{entry['from']}#{room}: #{clip(entry['text'], MAX_ENTRY)}"
+    end
+  end
+
+  def post(room, text, from:)
+    entry = entry(from: from, text: text)
+    append(room.path, entry)
+    wake_source(room.name)
+    entry
+  end
+
+  def dm(to, text, from:)
+    inbox = dms_by_profile(to)
+    entry = entry(from: from, text: text, to: to)
+    append(inbox.path, entry)
+    wake(to, inbox.name)
+    entry
+  end
+
+  def ping(profile, text, from:, room: nil)
+    inbox = pings_by_profile(profile)
+    entry = entry(from: from, text: text, room: room)
+    append(inbox.path, entry)
+    # A ping interrupts anything: it ends an inbox wait and any room wait
+    # this person is parked in.
+    wake_agent(profile)
     entry
   end
 
@@ -245,9 +284,12 @@ module Bus
 
   private
 
-  def description(path)
-    head = head(path)
-    head && head[DESCRIPTION_KEY]
+  def room_path(name)
+    stream_path(Config.rooms_dir, "#{name}.jsonl")
+  end
+
+  def pings_path(profile)
+    stream_path(profile.directory, PINGS_FILE)
   end
 
   def cursors(profile)
@@ -266,5 +308,14 @@ module Bus
     parsed.is_a?(Hash) ? parsed : {}
   rescue JSON::ParserError
     {}
+  end
+
+  def clock(ts)
+    Time.at(ts.to_i / 1000.0).strftime('%H:%M:%S')
+  end
+
+  def clip(text, max)
+    text = text.to_s
+    text.length <= max ? text : "#{text[0, max - 1]}…"
   end
 end

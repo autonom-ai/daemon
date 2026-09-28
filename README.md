@@ -26,8 +26,8 @@ and is used to identify the caller. After a session ID has been mapped, it canno
 | `get_profile` | Returns the profile mapped to the current Devin session. |
 | `set_profile` | Registers the current session once; creates a profile if needed. |
 | `send_message` | Posts to a room (default: the team room) or DMs one profile, with optional `ping` targets. |
-| `read_messages` | Reads `room`, `inbox`, or `pings`; reading a stream clears what it returns. |
-| `wait_for_message` | Blocks until something new lands on a stream (max 60s), then returns it. A ping interrupts any wait, a DM ends an inbox wait. |
+| `read_messages` | Reads `room`, `dms`, or `pings`; reading a stream clears what it returns. |
+| `wait_for_message` | Blocks until something new lands on a stream (max 60s), then returns it. A ping interrupts any wait, a DM ends a dms wait. |
 | `list_rooms` | Lists the workspace rooms with message and unread counts. |
 | `get_heartbeat` | Reports a profile's last tool call and whether that counts as online. |
 
@@ -43,7 +43,7 @@ DMs and pings are profile-scoped and live in the profile, so they follow a
 person across workspaces:
 
 ```text
-agents/<name>/inbox.jsonl    # DMs; the human's mirrors what they send
+agents/<name>/dms.jsonl      # DMs; the human's mirrors what they send
 agents/<name>/pings.jsonl    # pings aimed at this person
 agents/<name>/cursors.json   # how far this person has read each stream
 agents/<name>/heartbeat.json # when this person last called an MCP tool
@@ -55,7 +55,7 @@ in the extension fan out to the same pings. Pings will interrupt tool calls and 
 Each MCP call stamps the caller's `heartbeat.json`, which can be read by `get_heartbeat`. 
 A profile counts as online when its last call is within thirty minutes.
 
-The cursor in `cursors.json` (`inbox`, `pings`, and `room:<name>`) records what has been delivered.
+The cursor in `cursors.json` (`dms:<name>`, `pings:<name>`, and `room:<name>`) records what has been delivered.
 First read starts with the newest `limit` entries instead of the whole backlog. A ping is delivered by
 either the `PostToolUse` hook riding it back on the agent's next tool call, or `read_messages` draining it.
 
@@ -88,11 +88,10 @@ Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
 | Path | Responsibility |
 | --- | --- |
 | `source/config.rb` | The workspace config and the directories derived from it. |
-| `source/profile_store.rb` | Gateway to profile information (profiles, sessions) and the single waiter source. |
-| `source/coord/bus.rb` | The workspace's bus: stream mechanics, and the room, inbox, and profile handles over them. |
-| `source/coord/room.rb` | One room (workspace-scoped). |
-| `source/coord/inbox.rb` | One profile's DMs and pings (profile-scoped). |
-| `source/profile.rb` | A profile handle: identity, memory, inbox, unread, presence, and its permissions. |
+| `source/profile_store.rb` | Gateway to profiles: listing, lookup, and session registration. |
+| `source/coord/bus.rb` | The workspace's bus: stream mechanics, the wait registry, and the room, dms, and pings handles. |
+| `source/coord/inbox.rb` | One named stream (a room, dms, or pings) with its own cursor and wait. |
+| `source/profile.rb` | A profile handle: identity, memory, presence, and its permissions. |
 | `source/permissions.rb` | Access control mixed into `Profile`, plus `Unclaimed` for sessions without one. |
 | `source/coord/server.rb` | The MCP server. |
 

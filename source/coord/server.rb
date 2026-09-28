@@ -8,8 +8,8 @@ module Coord
   class Server
     INFO = { 'name' => 'autonom-coord-mcp', 'version' => '0.1.0' }.freeze
     PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
-    SOURCES = %w[room inbox pings].freeze
-    WAIT_SOURCES = %w[room inbox].freeze
+    SOURCES = %w[room dms pings].freeze
+    WAIT_SOURCES = %w[room dms].freeze
     DEFAULT_LIMIT = 50
     MAX_LIMIT = 500
     DEFAULT_WAIT = 30
@@ -116,7 +116,7 @@ module Coord
         {
           'name' => 'send_message',
           'description' => 'Send a chat message. Pass `to` to DM one profile (the DM sits in their ' \
-                           'inbox and does not ping), or `room` for a room message (defaults to the ' \
+                           'dms and does not ping), or `room` for a room message (defaults to the ' \
                            'team room). `ping` names profiles to notify - each gets an unread ping, ' \
                            'delivered on their next tool call.',
           'inputSchema' => {
@@ -138,8 +138,8 @@ module Coord
         {
           'name' => 'read_messages',
           'description' => 'Read chat messages. `source` picks the stream: `room` (a room, default the team ' \
-                           'room), `inbox` (DMs), or `pings` (unread pings; reading clears them). Reading a ' \
-                           'stream clears what it returns.',
+                           'room), `dms` (direct messages), or `pings` (unread pings; reading clears them). ' \
+                           'Reading a stream clears what it returns.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
@@ -153,9 +153,9 @@ module Coord
         {
           'name' => 'wait_for_message',
           'description' => 'Block until something new arrives, then return it: `room` (a room, default the ' \
-                           'team room) or `inbox` (DMs). Returns as soon as there is anything unread, and ' \
-                           'empty when the timeout runs out. Reading clears what it returns. A ping ' \
-                           'interrupts any wait and a DM ends an inbox wait; pings are not waitable.',
+                           'team room) or `dms` (direct messages). Returns as soon as there is anything ' \
+                           'unread, and empty when the timeout runs out. Reading clears what it returns. A ' \
+                           'ping interrupts any wait and a DM ends a dms wait; pings are not waitable.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
@@ -235,15 +235,15 @@ module Coord
       targets = ping_targets(args['ping'], from)
       if args['to'].to_s.empty?
         room = room_named(args['room'])
-        entry = room.post(text, from: from)
-        targets.each { |target| Bus.inbox(target).ping(text, from: from, room: room) }
+        entry = Bus.post(room, text, from: from)
+        targets.each { |target| Bus.ping(target, text, from: from, room: room) }
         { 'room' => room.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
       else
         to = ProfileStore.profile_by_name(args['to'])
         raise ProfileStore::Error, "Unknown profile: #{args['to']}" unless to
 
-        entry = Bus.inbox(to).dm(text, from: from)
-        targets.each { |target| Bus.inbox(target).ping(text, from: from) }
+        entry = Bus.dm(to, text, from: from)
+        targets.each { |target| Bus.ping(target, text, from: from) }
         { 'to' => to.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
       end
     end
@@ -265,8 +265,8 @@ module Coord
       source, room = read_target(args)
       raise ProfileStore::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
 
-      if source == 'inbox'
-        Bus.inbox(profile).wait(timeout: wait_timeout(args))
+      if source == 'dms'
+        Bus.dms_by_profile(profile).wait(profile, timeout: wait_timeout(args))
       else
         room.wait(profile, timeout: wait_timeout(args))
       end
@@ -279,7 +279,6 @@ module Coord
         entries = room.messages
         {
           'name' => room.name,
-          'description' => room.description,
           'count' => entries.length,
           'unread' => room.unread(profile).length,
           'lastTs' => entries.last&.fetch('ts', nil)
@@ -323,19 +322,21 @@ module Coord
     end
 
     def room_named(name)
-      wanted = Bus.room_name(name)
-      room = Bus.rooms.find { |candidate| candidate.name == wanted }
-      raise ProfileStore::Error, "Unknown room: #{wanted}" unless room
+      name = Bus.default_room if name.to_s.empty?
+      raise ProfileStore::Error, 'A room is required' if name.to_s.empty?
+
+      room = Bus.room_by_name(name)
+      raise ProfileStore::Error, "Unknown room: #{name}" unless room
 
       room
     end
 
     def read_stream(profile, source, room, limit)
       case source
-      when 'inbox'
-        { 'source' => 'inbox', 'messages' => Bus.inbox(profile).read(limit: limit) }
+      when 'dms'
+        { 'source' => 'dms', 'messages' => Bus.dms_by_profile(profile).read(profile, limit: limit) }
       when 'pings'
-        { 'source' => 'pings', 'messages' => Bus.inbox(profile).read_pings() }
+        { 'source' => 'pings', 'messages' => Bus.pings_by_profile(profile).read(profile) }
       else
         {
           'source' => 'room',

@@ -58,9 +58,9 @@ jobs:
               const said = await bus.say("general", "hello from CI @marlow");
               if (String(said.pinged) !== "marlow") throw new Error("mention did not ping marlow");
               const ping = JSON.parse(readFileSync("/tmp/ci-root/agents/marlow/pings.jsonl", "utf8").trim());
-              if (ping.room !== "general" || ping.from !== "ci") throw new Error("ping did not land");
+              if (ping.room !== "room:general" || ping.from !== "ci") throw new Error("ping did not land");
               await bus.dm("marlow", "psst");
-              const dm = JSON.parse(readFileSync("/tmp/ci-root/agents/marlow/inbox.jsonl", "utf8").trim());
+              const dm = JSON.parse(readFileSync("/tmp/ci-root/agents/marlow/dms.jsonl", "utf8").trim());
               if (dm.to !== "marlow") throw new Error("dm did not land");
               const texts = (await bus.state()).messages.map((message) => message.text);
               if (!texts.includes("hello from CI @marlow") || !texts.includes("psst"))
