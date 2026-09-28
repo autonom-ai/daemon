@@ -70,9 +70,15 @@ function chatDir(projectDir)
     return path.join(projectDir, ".devin", "autonom-coord");
 }
 
+function roomDir(projectDir, room)
+{
+    return path.join(chatDir(projectDir), "rooms", normalizeRoom(room));
+}
+
+// A room is a folder; its stream is messages.jsonl inside it.
 function roomFile(projectDir, room)
 {
-    return path.join(chatDir(projectDir), "rooms", `${normalizeRoom(room)}.jsonl`);
+    return path.join(roomDir(projectDir, room), "messages.jsonl");
 }
 
 function roomNames(projectDir, defaultRoom)
@@ -80,9 +86,9 @@ function roomNames(projectDir, defaultRoom)
     const names = new Set([normalizeRoom(defaultRoom)]);
     const dir = path.join(chatDir(projectDir), "rooms");
     if (existsSync(dir))
-        for (const name of readdirSync(dir))
-            if (name.endsWith(".jsonl"))
-                names.add(name.slice(0, -".jsonl".length));
+        for (const entry of readdirSync(dir, { withFileTypes: true }))
+            if (entry.isDirectory() && NAME_PATTERN.test(entry.name))
+                names.add(entry.name);
     return [...names].filter(Boolean);
 }
 
@@ -265,7 +271,7 @@ async function openBus({ projectDir, coordRoot })
     function decorate(kind, file, entry)
     {
         if (kind === "room")
-            return { ...entry, stream: "room", room: path.basename(file, ".jsonl") };
+            return { ...entry, stream: "room", room: path.basename(path.dirname(file)) };
         return { ...entry, stream: kind };
     }
 

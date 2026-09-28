@@ -4,6 +4,7 @@ require 'tmpdir'
 
 require_relative '../source/config'
 require_relative '../source/profile_store'
+require_relative '../source/policy'
 require_relative '../source/coord/bus'
 
 module CoreTest
@@ -14,6 +15,9 @@ module CoreTest
     @previous_root = ProfileStore.root
     ENV['DEVIN_PROJECT_DIR'] = @project
     ProfileStore.root = @root
+    FileUtils.mkdir_p(File.join(@root, 'templates'))
+    FileUtils.cp(File.join(ProfileStore::ROOT, 'templates', 'policy.yml'), File.join(@root, 'templates', 'policy.yml'))
+    Policy.reset!
     write_config(config)
   end
 
@@ -29,10 +33,16 @@ module CoreTest
     File.write(File.join(@project, '.devin', 'autonom-config.json'), JSON.generate(values))
   end
 
-  def write_room(name)
-    path = File.join(@project, '.devin', 'autonom-coord', 'rooms', "#{name}.jsonl")
-    FileUtils.mkdir_p(File.dirname(path))
-    File.write(path, '')
+  def write_room(name, owner: 'marlow', admins: [], involved: nil)
+    dir = File.join(@project, '.devin', 'autonom-coord', 'rooms', name)
+    FileUtils.mkdir_p(dir)
+    File.write(File.join(dir, 'messages.jsonl'), '')
+    File.write(File.join(dir, 'policy.yml'), "rules: []\n")
+    File.write(
+      File.join(dir, 'profiles.json'),
+      JSON.generate('owner' => owner, 'admins' => admins, 'involved' => involved)
+    )
+    dir
   end
 
   def room(name)

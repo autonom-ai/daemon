@@ -32,7 +32,7 @@ class ServerTest < Minitest::Test
     set_result = result(responses, 3)
 
     assert_equal %w[get_profiles get_profile set_profile send_message read_messages wait_for_message list_rooms
-                    create_room delete_room get_heartbeat],
+                    create_room delete_room set_room_involved add_room_admin remove_room_admin get_heartbeat],
                  listed_tools.map { |tool| tool['name'] }
     assert_equal 'marlow', set_result['name']
     assert_equal set_result, result(responses, 4)
@@ -222,6 +222,67 @@ class ServerTest < Minitest::Test
     )
 
     assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')
+  end
+
+  def test_a_private_room_is_hidden_and_refuses_non_members()
+    exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
+      call(3, 'set_room_involved', 'name' => 'general', 'involved' => ['marlow'], 'session_id' => 'session-1')
+    )
+
+    listed = result(exchange(call(4, 'list_rooms', 'session_id' => 'session-2')), 4)
+
+    refute_includes listed.map { |room| room['name'] }, 'room:general'
+
+    responses = exchange(
+      call(5, 'send_message', 'text' => 'hi', 'room' => 'general', 'session_id' => 'session-2'),
+      call(6, 'read_messages', 'source' => 'room', 'room' => 'general', 'session_id' => 'session-2')
+    )
+
+    assert responses.find { |response| response['id'] == 5 }.dig('result', 'isError')
+    assert responses.find { |response| response['id'] == 6 }.dig('result', 'isError')
+
+    sent = result(exchange(call(7, 'send_message', 'text' => 'hi', 'room' => 'general', 'session_id' => 'session-1')), 7)
+
+    assert_includes sent['result'], 'room:general'
+  end
+
+  def test_only_the_original_owner_changes_admins()
+    exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
+      call(3, 'set_profile', 'name' => 'quill', 'session_id' => 'session-3'),
+      call(4, 'add_room_admin', 'name' => 'general', 'profile' => 'wren', 'session_id' => 'session-1')
+    )
+
+    # An admin may administer the room's membership...
+    administered = result(
+      exchange(call(5, 'set_room_involved', 'name' => 'general', 'involved' => %w[marlow wren], 'session_id' => 'session-2')),
+      5
+    )
+
+    assert_equal 'room:general', administered['name']
+
+    # ...but only the original owner may change the admins.
+    refused = exchange(call(6, 'add_room_admin', 'name' => 'general', 'profile' => 'quill', 'session_id' => 'session-2'))
+
+    assert refused.find { |response| response['id'] == 6 }.dig('result', 'isError')
+  end
+
+  def test_only_the_owner_or_admin_deletes_a_room()
+    exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2')
+    )
+
+    refused = exchange(call(3, 'delete_room', 'name' => 'general', 'session_id' => 'session-2'))
+
+    assert refused.find { |response| response['id'] == 3 }.dig('result', 'isError')
+
+    deleted = result(exchange(call(4, 'delete_room', 'name' => 'general', 'session_id' => 'session-1')), 4)
+
+    assert_equal 'Deleted room room:general', deleted['result']
   end
 
   private

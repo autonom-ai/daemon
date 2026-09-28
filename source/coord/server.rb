@@ -1,5 +1,7 @@
 require_relative '../config'
 require_relative '../profile_store'
+require_relative '../policy'
+require_relative '../jev'
 require_relative 'bus'
 
 require 'json'
@@ -185,7 +187,8 @@ module Coord
         },
         {
           'name' => 'delete_room',
-          'description' => 'Delete a workspace room and its messages. This cannot be undone.',
+          'description' => 'Delete a workspace room and its messages. Only the room\'s owner or admins may. ' \
+                           'This cannot be undone.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
@@ -193,6 +196,50 @@ module Coord
               'session_id' => session
             },
             'required' => ['name']
+          }
+        },
+        {
+          'name' => 'set_room_involved',
+          'description' => 'Set which profiles may use a room. Pass `null` (or omit) for everyone in the clone; ' \
+                           'a list makes it private, and two names is a DM. The room\'s owner and admins may set this.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'name' => { 'type' => 'string', 'description' => 'The room to change.' },
+              'involved' => {
+                'type' => ['array', 'null'],
+                'items' => { 'type' => 'string' },
+                'description' => 'Profile names allowed in the room, or null for everyone.'
+              },
+              'session_id' => session
+            },
+            'required' => ['name']
+          }
+        },
+        {
+          'name' => 'add_room_admin',
+          'description' => 'Make a profile an admin of a room. Only the room\'s original owner may change its admins.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'name' => { 'type' => 'string', 'description' => 'The room to change.' },
+              'profile' => { 'type' => 'string', 'description' => 'The profile to add as an admin.' },
+              'session_id' => session
+            },
+            'required' => ['name', 'profile']
+          }
+        },
+        {
+          'name' => 'remove_room_admin',
+          'description' => 'Remove a profile from a room\'s admins. Only the room\'s original owner may change its admins.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'name' => { 'type' => 'string', 'description' => 'The room to change.' },
+              'profile' => { 'type' => 'string', 'description' => 'The admin to remove.' },
+              'session_id' => session
+            },
+            'required' => ['name', 'profile']
           }
         },
         {
@@ -235,8 +282,13 @@ module Coord
       when 'create_room'
         create_room(args, session)
       when 'delete_room'
-        # TODO: Room ownership, permissions, and descriptions.
         delete_room(args, session)
+      when 'set_room_involved'
+        set_room_involved(args, session)
+      when 'add_room_admin'
+        add_room_admin(args, session)
+      when 'remove_room_admin'
+        remove_room_admin(args, session)
       when 'get_heartbeat'
         get_heartbeat(args)
       else
@@ -262,10 +314,11 @@ module Coord
 
       targets = ping_targets(args['ping'], from)
       if args['to'].to_s.empty?
-        room = room_named(args['room'])
+        room = room_named(args['room'], from)
+        deny_room_policy(room, from, 'send_message', args)
         Bus.post(room, text, from: from)
         targets.each { |target| Bus.ping(target, text, from: from, room: room) }
-        { 'result' => "Sent message to #{room.name} with #{targets.length} pings" }
+        { 'result' => "Sent message to #{room.stream} with #{targets.length} pings" }
       else
         to = ProfileStore.profile_by_name(args['to'])
         raise ProfileStore::Error, "Unknown profile: #{args['to']}" unless to
@@ -278,16 +331,18 @@ module Coord
 
     def read_messages(args, session)
       profile = registered_profile(session)
-      source, room = read_target(args)
+      source, room = read_target(args, profile)
+      deny_room_policy(room, profile, 'read_messages', args) if room
       read_stream(profile, source, room, limit(args))
     end
 
     # Wait behavior is somewhat complex but documented in Bus.
     def wait_for_message(args, session)
       profile = registered_profile(session)
-      source, room = read_target(args)
+      source, room = read_target(args, profile)
       raise ProfileStore::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
 
+      deny_room_policy(room, profile, 'wait_for_message', args) if room
       inbox = source == 'dms' ? Bus.dms_by_profile(profile) : room
       inbox.wait(profile, timeout: wait_timeout(args)) if inbox.unread(profile).empty?
       read_stream(profile, source, room, limit(args))
@@ -295,24 +350,46 @@ module Coord
 
     def list_rooms(session)
       profile = registered_profile(session)
-      Bus.rooms.map { |room| room_entry(room, profile) }
+      Bus.visible_rooms(profile).map { |room| room_entry(room, profile) }
     end
 
     def create_room(args, session)
       profile = registered_profile(session)
-      room_entry(Bus.create_room(args['name']), profile)
+      room_entry(Bus.create_room(args['name'], owner: profile.name), profile)
     end
 
     def delete_room(args, session)
-      registered_profile(session)
-      room = Bus.delete_room(args['name'])
-      { 'result' => "Deleted room #{room.name}" }
+      profile = registered_profile(session)
+      room = administered_room(args['name'], profile)
+      Bus.delete_room(room.name)
+      { 'result' => "Deleted room #{room.stream}" }
+    end
+
+    def set_room_involved(args, session)
+      profile = registered_profile(session)
+      room = administered_room(args['name'], profile)
+      room.set_involved(involved_names(args['involved']))
+      room_entry(room, profile)
+    end
+
+    def add_room_admin(args, session)
+      profile = registered_profile(session)
+      room = owned_room(args['name'], profile)
+      room.add_admin(known_profile(args['profile']).name)
+      room_entry(room, profile)
+    end
+
+    def remove_room_admin(args, session)
+      profile = registered_profile(session)
+      room = owned_room(args['name'], profile)
+      room.remove_admin(known_profile(args['profile']).name)
+      room_entry(room, profile)
     end
 
     def room_entry(room, profile)
       entries = room.messages
       {
-        'name' => room.name,
+        'name' => room.stream,
         'count' => entries.length,
         'unread' => room.unread(profile).length,
         'lastTs' => entries.last&.fetch('ts', nil)
@@ -335,23 +412,65 @@ module Coord
       profile && { 'name' => profile.name, 'directory' => profile.directory }
     end
 
-    def read_target(args)
+    def read_target(args, profile)
       source = args['source'].to_s
       source = 'room' if source.empty?
       raise ProfileStore::Error, "Unknown source: #{source}" unless SOURCES.include?(source)
       return [source, nil] unless source == 'room'
 
-      [source, room_named(args['room'])]
+      [source, room_named(args['room'], profile)]
     end
 
-    def room_named(name)
+    def room_named(name, profile)
       name = Bus.default_room if name.to_s.empty?
       raise ProfileStore::Error, 'A room is required' if name.to_s.empty?
 
       room = Bus.room_by_name(name)
       raise ProfileStore::Error, "Unknown room: #{name}" unless room
+      raise ProfileStore::Error, "Unknown room: #{name}" unless room.visible?(profile.name)
 
       room
+    end
+
+    # Admin operations report a room as unknown to anyone who cannot perform
+    # them, so a private room's existence is not leaked.
+    def administered_room(name, profile)
+      room = Bus.room_by_name(name)
+      raise ProfileStore::Error, "Unknown room: #{name}" unless room && room.administrator?(profile.name)
+
+      room
+    end
+
+    def owned_room(name, profile)
+      room = Bus.room_by_name(name)
+      raise ProfileStore::Error, "Unknown room: #{name}" unless room && room.original_owner?(profile.name)
+
+      room
+    end
+
+    def known_profile(name)
+      profile = ProfileStore.profile_by_name(name)
+      raise ProfileStore::Error, "Unknown profile: #{name}" unless profile
+
+      profile
+    end
+
+    def involved_names(value)
+      return nil if value.nil?
+      raise ProfileStore::Error, 'Involved must be a list of profiles or null' unless value.is_a?(Array)
+
+      value.map { |name| known_profile(name).name }
+    end
+
+    def deny_room_policy(room, profile, tool, args)
+      rules = room.policy_rules
+      return if rules.empty?
+
+      request = { 'tool_name' => tool, 'tool_input' => args, 'profile_name' => profile.name }
+      denied, reason = Policy.decide([rules], request, jev: JEV)
+      raise ProfileStore::Error, (reason || 'The room policy denied this request') if denied
+    rescue Policy::Error, JEV::Error => error
+      raise ProfileStore::Error, "The room policy could not be checked: #{error.class}"
     end
 
     def read_stream(profile, source, room, limit)

@@ -1,0 +1,24 @@
+# The master policy. This screens every tool call in every workspace. It is the
+# ceiling: a room's own policy.yml can only restrict past the master policy.
+#
+# A rule matches on `tool` (the tool name) and any other key (an input field,
+# matched as a regex), then acts: `deny`, `allow`, or `screen` (ask the backend
+# the typed `question` and deny when the answer is harmful).
+rules:
+  - action: screen
+    threshold: 0.5
+    reason: The policy check denied this request
+    context:
+      - get_profiles lists profile names and paths only.
+      - The first set_profile claim is trusted; later changes are disallowed.
+      - The session map is private. Only the mapped profile may be read or changed.
+      - Deleting home or source and bypassing restrictions are harmful.
+    question:
+      type: noul
+      instructions: >-
+        Does this request access another profile or the session map? Does it
+        delete a protected directory or evade restrictions, including through
+        redirection? Treat uncertainty as harmful.
+      criteria:
+        true: The request is harmful or a likely workaround.
+        false: The request is limited to allowed profile operations.

@@ -3,7 +3,7 @@
   "displayName": "Autonom Team Room",
   "description": "The human's seat on the autonom coord bus: rooms, DMs, and pings in a Devin Desktop tab.",
   "publisher": "cet",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "engines": {
     "vscode": "^1.85.0"

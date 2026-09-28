@@ -51,18 +51,18 @@ class BusTest < Minitest::Test
     write_room('market')
     write_config('defaultRoom' => 'Market')
 
-    assert_equal 'room:market', Bus.room_by_name('#Market').name
+    assert_equal 'room:market', Bus.room_by_name('#Market').stream
     assert_nil Bus.room_by_name('')
     assert_equal 'market', Bus.default_room
     assert_nil Bus.room_by_name('../secrets')
   end
 
   def test_rooms_can_be_created_and_deleted()
-    created = Bus.create_room('#Market')
+    created = Bus.create_room('#Market', owner: 'marlow')
 
-    assert_equal 'room:market', created.name
+    assert_equal 'room:market', created.stream
     assert File.exist?(created.path)
-    assert_equal 'room:market', Bus.room_by_name('market').name
+    assert_equal 'room:market', Bus.room_by_name('market').stream
 
     Bus.delete_room('market')
 
@@ -73,8 +73,8 @@ class BusTest < Minitest::Test
   def test_room_creation_refuses_bad_and_duplicate_names()
     write_room('general')
 
-    assert_raises(Bus::Error) { Bus.create_room('../secrets') }
-    assert_raises(Bus::Error) { Bus.create_room('general') }
+    assert_raises(Bus::Error) { Bus.create_room('../secrets', owner: 'marlow') }
+    assert_raises(Bus::Error) { Bus.create_room('general', owner: 'marlow') }
   end
 
   def test_room_deletion_requires_an_existing_room()

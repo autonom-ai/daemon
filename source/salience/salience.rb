@@ -128,7 +128,7 @@ module Salience
 
   def briefing(profile)
     profiles = ProfileStore.profiles
-    rooms = Bus.rooms
+    rooms = Bus.visible_rooms(profile)
     lines = identity_lines(profile)
     lines.concat(team_lines(profile, profiles, rooms))
     lines.concat(room_lines(rooms))
@@ -167,7 +167,7 @@ module Salience
   def team_lines(profile, profiles, rooms)
     teammates = profiles.map(&:name)
     teammates = teammates.reject { |name| name.casecmp?(profile ? profile.name : '') }
-    room_names = rooms.map { |room| "##{room.name}" }
+    room_names = rooms.map { |room| "##{room.stream}" }
     lines = [
       '',
       'This workspace is worked by a team. The rooms are where the team actually is: talk there,',

@@ -48,4 +48,25 @@ class PermissionsTest < Minitest::Test
     refute @marlow.can_exec?('pwd', dir: File.join(@wren.directory, 'memories'))
     assert @marlow.can_exec?('git status')
   end
+
+  def test_room_files_are_gated_by_membership()
+    write_room('general', owner: 'marlow')
+    dir = File.join(@project, '.devin', 'autonom-coord', 'rooms', 'general')
+
+    assert @marlow.can_read?(File.join(dir, 'messages.jsonl'))
+    assert @marlow.can_write?(File.join(dir, 'messages.jsonl'))
+    assert @wren.can_read?(File.join(dir, 'messages.jsonl'))
+    assert @marlow.can_write?(File.join(dir, 'policy.yml'))
+    assert @wren.can_read?(File.join(dir, 'policy.yml'))
+    refute @wren.can_write?(File.join(dir, 'policy.yml'))
+    refute @wren.can_read?(File.join(dir, 'profiles.json'))
+    refute @marlow.can_read?(File.join(dir, 'profiles.json'))
+  end
+
+  def test_a_hidden_room_is_excluded_from_search()
+    write_room('secret', owner: 'marlow', involved: ['marlow'])
+
+    refute @wren.can_search?(@project)
+    assert @marlow.can_search?(@project)
+  end
 end

@@ -20,11 +20,11 @@ class InboxTest < Minitest::Test
   def test_rooms_lists_what_exists()
     write_room('market')
 
-    assert_equal %w[room:general room:market], Bus.rooms.map(&:name)
+    assert_equal %w[room:general room:market], Bus.rooms.map(&:stream)
   end
 
   def test_a_room_inbox_owns_its_name_and_path()
-    assert_equal 'room:general', @room.name
+    assert_equal 'room:general', @room.stream
     assert File.file?(@room.path)
     assert_nil room('nobody')
   end
