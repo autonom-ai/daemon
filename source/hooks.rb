@@ -81,6 +81,12 @@ module Hooks
     reason = denial(tool, input, session, profile)
     return block(reason) if reason
 
+    # An unread ping is an interrupt, not a note: while any are pending the
+    # only tool call that runs is the read that drains them.
+    if profile && Config.salience.enabled? && pings_unread?(profile) && !reads_pings?(tool, input)
+      return block('You have unread pings - read them first: call read_messages with source "pings"')
+    end
+
     policy = Config.policy
     if policy.enabled?
       jev.backend = policy.backend if policy.backend.is_a?(String)
@@ -107,23 +113,24 @@ module Hooks
     { 'tool_name' => tool, 'tool_input' => input, 'profile_name' => profile && profile.name }
   end
 
-  # Every tool call is a chance to deliver what the agent has not seen: an
-  # unread ping rides back as context, and reading it advances the cursor so
-  # it is delivered exactly once. A failure here must never break the tool.
+  def pings_unread?(profile)
+    !Bus.pings_by_profile(profile).unread(profile).empty?
+  end
+
+  def reads_pings?(tool, input)
+    tool == 'mcp__autonom-coord-mcp__read_messages' && input['source'].to_s == 'pings'
+  end
+
   def post_tool_use(event)
     profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
 
-    pings = Bus.pings_by_profile(profile).read(profile)
+    pings = Bus.pings_by_profile(profile).unread(profile)
     return nil if pings.empty?
 
     context('PostToolUse', Salience.ping_lines(pings).join("\n"))
   end
 
-  # Stop - the team does not idle. A turn that ends is a teammate nobody can
-  # reach, so the hook refuses the stop and hands back what is waiting. An
-  # unread message is the only thing that blocks: an agent with nothing owed
-  # is allowed to stop and wait.
   def stop(event)
     profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile

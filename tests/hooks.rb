@@ -151,7 +151,7 @@ class HooksTest < Minitest::Test
     assert_equal 0, @jev.calls
   end
 
-  def test_unread_pings_ride_back_once_after_a_tool_call()
+  def test_unread_pings_ride_back_until_read()
     marlow = ProfileStore.register_profile('marlow', 'session-1')
     wren = ProfileStore.register_profile('wren', 'session-2')
     Bus.ping(marlow, '@marlow check the pricer', from: wren, room: room('general'))
@@ -161,7 +161,53 @@ class HooksTest < Minitest::Test
     assert_includes context, 'Unread pings (1)'
     assert_includes context, 'wren in #room:general'
     assert_includes context, '@marlow check the pricer'
+
+    # The injection is a peek: ignoring it does not consume it, so it rides
+    # back after every tool call until read_messages drains the mailbox.
+    refute_nil hook(post_event)
+    assert_equal 1, Bus.pings_by_profile(marlow).unread(marlow).length
+
+    Bus.pings_by_profile(marlow).read(marlow)
+
     assert_nil hook(post_event)
+  end
+
+  def test_unread_pings_gate_tool_calls_until_read()
+    marlow = ProfileStore.register_profile('marlow', 'session-1')
+    Bus.ping(marlow, 'look', from: ProfileStore.register_profile('wren', 'session-2'))
+
+    blocked = hook(event('exec', 'command' => 'git status'))
+
+    assert_equal 'block', blocked['decision']
+    assert_includes blocked['reason'], 'pings'
+    assert_equal 1, Bus.pings_by_profile(marlow).unread(marlow).length
+    assert_equal 0, @jev.calls
+
+    # Any other tool is gated too - a dms read does not drain pings.
+    assert_equal 'block', hook(event('mcp__autonom-coord-mcp__read_messages', 'source' => 'dms'))['decision']
+
+    # The read that drains the mailbox is never gated, and still gets its
+    # session id injected.
+    updated = hook(event('mcp__autonom-coord-mcp__read_messages', 'source' => 'pings'))
+      .dig('hookSpecificOutput', 'updatedInput')
+
+    assert_equal 'session-1', updated['session_id']
+
+    Bus.pings_by_profile(marlow).read(marlow)
+
+    assert_nil hook(event('exec', 'command' => 'git status'))
+
+    # The pings read and the retried exec each screened once.
+    assert_equal 2, @jev.calls
+  end
+
+  def test_the_gate_respects_the_salience_switch()
+    marlow = ProfileStore.register_profile('marlow', 'session-1')
+    Bus.ping(marlow, 'look', from: ProfileStore.register_profile('wren', 'session-2'))
+    write_config('salience' => false)
+
+    assert_nil hook(event('exec', 'command' => 'git status'))
+    assert_equal 1, Bus.pings_by_profile(marlow).unread(marlow).length
   end
 
   def test_post_tool_use_never_blocks_a_tool()
@@ -171,13 +217,7 @@ class HooksTest < Minitest::Test
     assert_nil hook(post_event)
   end
 
-  def test_pings_wait_for_a_tool_to_finish()
-    marlow = ProfileStore.register_profile('marlow', 'session-1')
-    Bus.ping(marlow, 'look', from: ProfileStore.register_profile('wren', 'session-2'))
 
-    assert_nil hook(event('exec', 'command' => 'git status'))
-    assert_equal 1, Bus.pings_by_profile(marlow).read(marlow).length
-  end
 
   def test_session_start_carries_identity_memory_and_rooms()
     write_config('project' => 'jobs', 'memory' => true)
