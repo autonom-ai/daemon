@@ -29,14 +29,14 @@ module CoreTest
     File.write(File.join(@project, '.devin', 'autonom-config.json'), JSON.generate(values))
   end
 
-  def write_room(name, description = nil)
+  def write_room(name)
     path = File.join(@project, '.devin', 'autonom-coord', 'rooms', "#{name}.jsonl")
     FileUtils.mkdir_p(File.dirname(path))
-    File.write(path, description ? "#{JSON.generate('description' => description)}\n" : '')
+    File.write(path, '')
   end
 
   def room(name)
-    Bus.rooms.find { |candidate| candidate.name == name }
+    Bus.room_by_name(name)
   end
 
   def profile(name)

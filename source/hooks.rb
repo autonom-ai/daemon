@@ -113,7 +113,7 @@ module Hooks
   def team_lines(profile)
     teammates = ProfileStore.profiles.map(&:name)
     teammates = teammates.reject { |name| name.casecmp?(profile ? profile.name : '') }
-    rooms = Bus.rooms.map { |room| room.description ? "##{room.name} (#{room.description})" : "##{room.name}" }
+    rooms = Bus.rooms.map { |room| "##{room.name}" }
     lines = [
       '',
       'This workspace is worked by a team. The rooms are where the team actually is: talk there,',
@@ -129,7 +129,7 @@ module Hooks
     entries = Bus.rooms.flat_map(&:messages).sort_by { |entry| entry['ts'].to_i }.last(RECENT_ROOM)
     return ['', 'No room has traffic yet - introducing yourself is a fine first move.'] if entries.empty?
 
-    ['', 'Recent traffic:', *Salience.format_entries(entries)]
+    ['', 'Recent traffic:', *Bus.format_entries(entries)]
   end
 
   def prior_lines(profile)
@@ -196,14 +196,14 @@ module Hooks
     profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
 
-    pings = Bus.inbox(profile).read_pings()
+    pings = Bus.pings_by_profile(profile).read(profile)
     return nil if pings.empty?
 
     context(
       'PostToolUse',
       [
         "Unread pings (#{pings.length}) - reply in the room when you get a turn:",
-        *Salience.format_entries(pings)
+        *Bus.format_entries(pings)
       ].join("\n")
     )
   end

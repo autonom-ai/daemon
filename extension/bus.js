@@ -1,7 +1,7 @@
 // The extension host's view of one workspace's chat.
 //
 // Rooms are workspace-scoped - <project>/.devin/autonom-coord/rooms/<room>.jsonl.
-// DMs and pings are profile-scoped - <coordRoot>/agents/<name>/inbox.jsonl and
+// DMs and pings are profile-scoped - <coordRoot>/agents/<name>/dms.jsonl and
 // pings.jsonl - so they follow a person across workspaces. The human is a
 // profile like anyone else; the Ruby core reads and writes the same files.
 
@@ -91,9 +91,9 @@ function profileDir(coordRoot, name)
     return path.join(coordRoot, "agents", name);
 }
 
-function inboxFile(coordRoot, name)
+function dmsFile(coordRoot, name)
 {
-    return path.join(profileDir(coordRoot, name), "inbox.jsonl");
+    return path.join(profileDir(coordRoot, name), "dms.jsonl");
 }
 
 function pingsFile(coordRoot, name)
@@ -119,12 +119,13 @@ function readCursors(coordRoot, name)
     }
 }
 
-// The same cursor file the Ruby core keeps: pings up to this count have been
-// delivered. The human's pings are delivered here (notification + badge); an
-// agent's are delivered on its next tool call.
+// The same cursor file the Ruby core keeps, keyed by the profile's pings
+// stream: pings up to this count have been delivered. The human's pings are
+// delivered here (notification + badge); an agent's are delivered on its next
+// tool call.
 function pingCursor(coordRoot, name)
 {
-    const value = Math.floor(Number(readCursors(coordRoot, name).pings));
+    const value = Math.floor(Number(readCursors(coordRoot, name)[`pings:${name}`]));
     return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
@@ -132,7 +133,7 @@ function advancePingCursor(coordRoot, name, count)
 {
     const file = cursorsFile(coordRoot, name);
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    writeFileSync(file, `${JSON.stringify({ ...readCursors(coordRoot, name), pings: count })}\n`, "utf8");
+    writeFileSync(file, `${JSON.stringify({ ...readCursors(coordRoot, name), [`pings:${name}`]: count })}\n`, "utf8");
 }
 
 // displayName + color from agents/<id>/identity.md - the room renders people by
@@ -204,7 +205,7 @@ function fanout(ctx, text, room)
 {
     const targets = mentionTargets(ctx.coordRoot, text, ctx.human);
     for (const target of targets)
-        appendJsonl(pingsFile(ctx.coordRoot, target), chatEntry(ctx.human, text, room ? { room } : undefined));
+        appendJsonl(pingsFile(ctx.coordRoot, target), chatEntry(ctx.human, text, room ? { room: `room:${room}` } : undefined));
     return targets;
 }
 
@@ -220,7 +221,7 @@ async function openBus({ projectDir, coordRoot })
     };
     ensureProfile(coordRoot, ctx.human);
 
-    // One watched file per stream - every room and the human's inbox - each
+    // One watched file per stream - every room and the human's dms - each
     // carrying the kind it decorates entries with. The human's pings are read
     // whole, against their cursor, so a ping that lands while the extension is
     // closed is still delivered on the next open.
@@ -229,7 +230,7 @@ async function openBus({ projectDir, coordRoot })
         const files = new Map();
         for (const name of roomNames(projectDir, ctx.teamRoom))
             files.set(roomFile(projectDir, name), "room");
-        files.set(inboxFile(coordRoot, ctx.human), "dm");
+        files.set(dmsFile(coordRoot, ctx.human), "dm");
         return files;
     }
 
@@ -357,7 +358,7 @@ async function openBus({ projectDir, coordRoot })
         for (const room of rooms)
             for (const entry of readJsonl(roomFile(projectDir, room.name)))
                 messages.push({ ...entry, stream: "room", room: room.name });
-        for (const entry of readJsonl(inboxFile(coordRoot, ctx.human)))
+        for (const entry of readJsonl(dmsFile(coordRoot, ctx.human)))
             messages.push({ ...entry, stream: "dm" });
         messages.sort((a, b) => a.ts - b.ts);
         return {
@@ -379,16 +380,16 @@ async function openBus({ projectDir, coordRoot })
         return { entry: decorate("room", roomFile(projectDir, name), entry), pinged: fanout(ctx, text, name) };
     }
 
-    // A DM lands in the recipient's inbox and mirrors into the human's own, so
+    // A DM lands in the recipient's dms and mirrors into the human's own, so
     // the 1:1 view shows both directions. It pings nobody unless the text
     // names someone with @.
     async function dm(to, text)
     {
         const entry = chatEntry(ctx.human, text, { to });
-        appendJsonl(inboxFile(coordRoot, to), entry);
-        appendJsonl(inboxFile(coordRoot, ctx.human), entry);
+        appendJsonl(dmsFile(coordRoot, to), entry);
+        appendJsonl(dmsFile(coordRoot, ctx.human), entry);
         activity.set(ctx.human, entry.ts);
-        return { entry: decorate("dm", inboxFile(coordRoot, ctx.human), entry), pinged: fanout(ctx, text, null) };
+        return { entry: decorate("dm", dmsFile(coordRoot, ctx.human), entry), pinged: fanout(ctx, text, null) };
     }
 
     seedActivity();

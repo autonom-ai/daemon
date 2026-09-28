@@ -18,25 +18,25 @@ class SalienceTest < Minitest::Test
   end
 
   def test_unread_lines_reports_undrained_signals()
-    Bus.inbox(@marlow).ping('ping text', from: @wren, room: room('general'))
-    Bus.inbox(@marlow).dm('dm text', from: @wren)
-    room('general').post('room text', from: @wren)
+    Bus.ping(@marlow, 'ping text', from: @wren, room: room('general'))
+    Bus.dm(@marlow, 'dm text', from: @wren)
+    Bus.post(room('general'), 'room text', from: @wren)
 
     lines = Salience.unread_lines(Bus.unread(@marlow))
 
     assert lines.any? { |line| line.include?('Unread pings (1)') }
     assert lines.any? { |line| line.include?('Unread direct messages (1)') }
-    assert lines.any? { |line| line.include?('New #general traffic (1)') }
+    assert lines.any? { |line| line.include?('New #room:general traffic (1)') }
     assert lines.any? { |line| line.include?('ping text') }
     assert lines.any? { |line| line.include?('dm text') }
     assert lines.any? { |line| line.include?('room text') }
-    assert_equal 1, Bus.inbox(@marlow).unread_pings.length
+    assert_equal 1, Bus.pings_by_profile(@marlow).unread(@marlow).length
   end
 
   def test_a_direct_message_outranks_room_traffic()
-    Bus.inbox(@marlow).ping('ping text', from: @wren, room: room('general'))
-    Bus.inbox(@marlow).dm('dm text', from: @wren)
-    room('general').post('room text', from: @wren)
+    Bus.ping(@marlow, 'ping text', from: @wren, room: room('general'))
+    Bus.dm(@marlow, 'dm text', from: @wren)
+    Bus.post(room('general'), 'room text', from: @wren)
 
     focus = Salience.focus(Salience.impulses(Bus.unread(@marlow)))
 
@@ -48,7 +48,7 @@ class SalienceTest < Minitest::Test
   end
 
   def test_room_traffic_alone_is_a_coordinate_impulse()
-    room('general').post('anyone around?', from: @wren)
+    Bus.post(room('general'), 'anyone around?', from: @wren)
 
     focus = Salience.focus(Salience.impulses(Bus.unread(@marlow)))
 
@@ -57,7 +57,7 @@ class SalienceTest < Minitest::Test
   end
 
   def test_stop_text_is_one_complete_message()
-    Bus.inbox(@marlow).ping('ping text', from: @wren, room: room('general'))
+    Bus.ping(@marlow, 'ping text', from: @wren, room: room('general'))
 
     text = Salience.stop_text(@marlow)
 

@@ -9,28 +9,27 @@ class RoomTest < Minitest::Test
     setup_core()
     @marlow = ProfileStore.register_profile('marlow', 'session-1')
     @wren = ProfileStore.register_profile('wren', 'session-2')
-    write_room('general', 'Where the team talks.')
+    write_room('general')
   end
 
   def teardown()
     teardown_core()
   end
 
-  def test_a_room_carries_its_description()
-    assert_equal 'Where the team talks.', room('general').description
-
-    write_room('bare')
-    assert_nil room('bare').description
-  end
-
   def test_rooms_lists_what_exists()
     write_room('market')
 
-    assert_equal %w[general market], Bus.rooms.map(&:name)
+    assert_equal %w[room:general room:market], Bus.rooms.map(&:name)
   end
 
-  def test_messages_skip_the_description_line()
-    room('general').post('hello', from: @marlow)
+  def test_a_room_inbox_owns_its_name_and_path()
+    assert_equal 'room:general', room('general').name
+    assert File.file?(room('general').path)
+    assert_nil room('nobody')
+  end
+
+  def test_messages_are_read_from_the_room_file()
+    Bus.post(room('general'), 'hello', from: @marlow)
 
     assert_equal ['hello'], room('general').messages.map { |entry| entry['text'] }
     assert_equal 'marlow', room('general').messages.first['from']
@@ -38,8 +37,8 @@ class RoomTest < Minitest::Test
   end
 
   def test_reading_a_room_is_cursored_per_profile()
-    room('general').post('first', from: @wren)
-    room('general').post('second', from: @wren)
+    Bus.post(room('general'), 'first', from: @wren)
+    Bus.post(room('general'), 'second', from: @wren)
 
     assert_equal 2, room('general').unread(@marlow).length
     assert_equal ['first', 'second'], room('general').read(@marlow).map { |entry| entry['text'] }
@@ -57,7 +56,7 @@ class RoomTest < Minitest::Test
     end
     sleep 0.2
 
-    room('general').post('hello', from: @marlow)
+    Bus.post(room('general'), 'hello', from: @marlow)
     waiters.each { |waiter| waiter.join(3) }
 
     assert_equal %w[marlow wren], [woken.pop, woken.pop].sort
@@ -75,7 +74,7 @@ class RoomTest < Minitest::Test
     end
     sleep 0.2
 
-    Bus.inbox(@wren).ping('look', from: @marlow, room: room('general'))
+    Bus.ping(@wren, 'look', from: @marlow, room: room('general'))
 
     assert_equal 'wren', woken.pop
     assert woken.empty?
@@ -99,7 +98,7 @@ class RoomTest < Minitest::Test
     writer.close
     sleep 0.3
 
-    room('general').post('hello', from: @marlow)
+    Bus.post(room('general'), 'hello', from: @marlow)
 
     elapsed = IO.select([reader], nil, nil, 10) ? reader.gets.to_f : nil
     kill_child(child)

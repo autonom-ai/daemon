@@ -10,6 +10,7 @@ class ServerTest < Minitest::Test
 
   def setup()
     setup_core()
+    write_config('defaultRoom' => 'general')
     write_room('general')
     @server = Coord::Server.new
   end
@@ -44,13 +45,13 @@ class ServerTest < Minitest::Test
       call(4, 'read_messages', 'source' => 'pings', 'session_id' => 'session-2'),
       call(5, 'read_messages', 'source' => 'room', 'session_id' => 'session-2'),
       call(6, 'send_message', 'text' => 'psst', 'to' => 'marlow', 'session_id' => 'session-2'),
-      call(7, 'read_messages', 'source' => 'inbox', 'session_id' => 'session-1'),
+      call(7, 'read_messages', 'source' => 'dms', 'session_id' => 'session-1'),
       call(8, 'send_message', 'text' => 'hi', 'ping' => ['nobody'], 'session_id' => 'session-1')
     )
 
     sent = result(responses, 3)
 
-    assert_equal 'general', sent['room']
+    assert_equal 'room:general', sent['room']
     assert_equal 'marlow', sent['entry']['from']
     assert_equal ['wren'], sent['pinged']
     assert_equal ['hello team'], result(responses, 4)['messages'].map { |ping| ping['text'] }
@@ -83,7 +84,7 @@ class ServerTest < Minitest::Test
     assert_equal ['first'], result(responses, 4)['messages'].map { |entry| entry['text'] }
     rooms = result(responses, 6)
 
-    assert_equal ['general'], rooms.map { |room| room['name'] }
+    assert_equal ['room:general'], rooms.map { |room| room['name'] }
     assert_equal 2, rooms.first['count']
     assert_equal 1, rooms.first['unread']
     assert_equal 2, result(responses, 7).first['unread']
@@ -118,7 +119,7 @@ class ServerTest < Minitest::Test
     )
     writer = Thread.new do
       sleep 0.3
-      room('general').post('late line', from: profile('marlow'))
+      Bus.post(room('general'), 'late line', from: profile('marlow'))
     end
 
     responses = exchange(call(3, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
@@ -134,7 +135,7 @@ class ServerTest < Minitest::Test
     )
     pinger = Thread.new do
       sleep 0.3
-      Bus.inbox(profile('wren')).ping('look', from: profile('marlow'), room: room('general'))
+      Bus.ping(profile('wren'), 'look', from: profile('marlow'), room: room('general'))
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -146,18 +147,18 @@ class ServerTest < Minitest::Test
     assert_empty result(responses, 3)['messages']
   end
 
-  def test_a_dm_wakes_an_inbox_wait()
+  def test_a_dm_wakes_a_dms_wait()
     exchange(
       call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
       call(2, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1')
     )
     sender = Thread.new do
       sleep 0.3
-      Bus.inbox(profile('wren')).dm('psst', from: profile('marlow'))
+      Bus.dm(profile('wren'), 'psst', from: profile('marlow'))
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    responses = exchange(call(3, 'wait_for_message', 'source' => 'inbox', 'timeout' => 5, 'session_id' => 'session-2'))
+    responses = exchange(call(3, 'wait_for_message', 'source' => 'dms', 'timeout' => 5, 'session_id' => 'session-2'))
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     sender.join
 

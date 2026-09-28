@@ -8,7 +8,6 @@ require_relative '../coord/bus'
 # Impulses are the shared vocabulary between what the bus notices and what
 # the hooks say. A kind is one of KINDS; the rest is presentation.
 module Salience
-  MAX_ENTRY = 400
   MAX_CONTEXT = 2400
 
   KINDS = {
@@ -70,13 +69,13 @@ module Salience
   # so a signal is offered until it is answered or explicitly dropped.
   def impulses(unread, last_message: nil, memory: nil)
     ret = []
-    direct = unread['pings'].last(3) + unread['inbox'].last(3)
-    ret << impulse('Respond', format_entries(direct).join("\n")) unless direct.empty?
+    direct = unread['pings'].last(3) + unread['dms'].last(3)
+    ret << impulse('Respond', Bus.format_entries(direct).join("\n")) unless direct.empty?
 
     rooms = unread['rooms'].flat_map do |room, entries|
       entries.last(3).map { |entry| entry.merge('room' => room) }
     end
-    ret << impulse('Coordinate', format_entries(rooms.last(4)).join("\n")) unless rooms.empty?
+    ret << impulse('Coordinate', Bus.format_entries(rooms.last(4)).join("\n")) unless rooms.empty?
     ret << impulse('Continue', last_message) unless last_message.to_s.strip.empty?
     ret << impulse('Explore', memory) unless memory.to_s.strip.empty?
     ret
@@ -92,7 +91,7 @@ module Salience
   def unread_lines(unread)
     lines = []
     append_entries(lines, 'Unread pings', unread['pings'])
-    append_entries(lines, 'Unread direct messages', unread['inbox'])
+    append_entries(lines, 'Unread direct messages', unread['dms'])
     unread['rooms'].each do |room, entries|
       append_entries(lines, "New ##{room} traffic", entries)
     end
@@ -122,23 +121,12 @@ module Salience
     lines.join("\n")
   end
 
-  def format_entries(entries)
-    entries.map do |entry|
-      room = entry['room'] ? " in ##{entry['room']}" : ''
-      "[#{clock(entry['ts'])}] #{entry['from']}#{room}: #{clip(entry['text'], MAX_ENTRY)}"
-    end
-  end
-
   private
 
   def append_entries(lines, label, entries)
     return if entries.empty?
 
-    lines.concat(['', "#{label} (#{entries.length}):", *format_entries(entries)])
-  end
-
-  def clock(ts)
-    Time.at(ts.to_i / 1000.0).strftime('%H:%M:%S')
+    lines.concat(['', "#{label} (#{entries.length}):", *Bus.format_entries(entries)])
   end
 
   def clip(text, max)
