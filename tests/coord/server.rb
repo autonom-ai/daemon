@@ -97,8 +97,11 @@ class ServerTest < Minitest::Test
       call(5, 'send_message', 'text' => 'second', 'session_id' => 'session-1')
     )
 
-    responses = exchange(call(6, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-2'))
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    responses = exchange(call(6, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
+    assert_operator elapsed, :<, 1.5
     assert_equal ['second'], result(responses, 6)['messages'].map { |entry| entry['text'] }
   end
 
