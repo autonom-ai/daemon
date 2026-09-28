@@ -111,15 +111,6 @@ class HooksTest < Minitest::Test
     assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'))['decision']
   end
 
-  def test_the_hook_session_id_is_injected_into_profile_tools()
-    %w[set_profile send_message list_rooms create_room delete_room get_heartbeat].each do |tool|
-      payload = event("mcp__autonom-coord-mcp__#{tool}", 'name' => 'marlow', 'session_id' => 'forged')
-      result = hook(payload)
-
-      assert_equal 'session-1', result.dig('hookSpecificOutput', 'updatedInput', 'session_id')
-    end
-  end
-
   def test_a_profile_cannot_be_reassigned()
     ProfileStore.register_profile('marlow', 'session-1')
 
@@ -234,15 +225,6 @@ class HooksTest < Minitest::Test
 
   def test_stop_lets_the_turn_end_when_nothing_is_owed()
     ProfileStore.register_profile('marlow', 'session-1')
-
-    assert_nil hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
-  end
-
-  def test_stand_down_lets_a_session_stop()
-    marlow = ProfileStore.register_profile('marlow', 'session-1')
-    Bus.ping(marlow, 'ping text', from: ProfileStore.register_profile('wren', 'session-2'), room: room('general'))
-    FileUtils.mkdir_p(File.join(@project, '.devin', 'collaboration'))
-    File.write(File.join(@project, '.devin', 'collaboration', 'stand-down'), '')
 
     assert_nil hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
   end

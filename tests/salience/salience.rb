@@ -69,4 +69,35 @@ class SalienceTest < Minitest::Test
   def test_stop_text_is_nil_when_nothing_is_waiting()
     assert_nil Salience.stop_text(@marlow)
   end
+
+  def test_briefing_carries_identity_memory_team_and_room()
+    write_config('project' => 'jobs', 'memory' => true)
+    File.write(File.join(@marlow.directory, 'identity.md'), "---\ndisplayName: Marlow\n---\n\nI read the kill columns.\n")
+    FileUtils.mkdir_p(File.join(@marlow.directory, 'memories'))
+    File.write(File.join(@marlow.directory, 'memories', 'memory.md'), "# marlow - memory\n\n## Now\n\nChecking the pricer.\n")
+    Bus.post(room('general'), 'hello team', from: @wren)
+
+    text = Salience.briefing(@marlow)
+
+    assert_includes text, 'You are Marlow (marlow)'
+    assert_includes text, 'I read the kill columns.'
+    assert_includes text, 'Checking the pricer.'
+    assert_includes text, 'Rooms: #room:general'
+    assert_includes text, 'Teammates: wren'
+    assert_includes text, 'hello team'
+  end
+
+  def test_briefing_asks_an_unclaimed_tab_to_claim_a_name()
+    assert_includes Salience.briefing(nil), 'Claim your name with set_profile'
+  end
+
+  def test_ping_lines_format_unread_pings()
+    Bus.ping(@marlow, '@marlow check the pricer', from: @wren, room: room('general'))
+
+    text = Salience.ping_lines(Bus.pings_by_profile(@marlow).unread(@marlow)).join("\n")
+
+    assert_includes text, 'Unread pings (1)'
+    assert_includes text, 'wren in #room:general'
+    assert_includes text, '@marlow check the pricer'
+  end
 end
