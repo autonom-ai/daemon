@@ -44,21 +44,21 @@ module JEV
     end
 
     # A tool input as a backend should see it: content-bearing fields dropped,
-    # credentials in a command redacted.
-    def scrub(value, key = nil)
+    # credentials in a command redacted. `expose` names fields a policy rule
+    # deliberately lets through - a screen cannot judge content it cannot see.
+    def scrub(value, expose = [])
       case value
       when Hash
         value.each_with_object({}) do |(field, item), ret|
-          next if field.to_s.match?(
+          name = field.to_s
+          next if name.match?(
             /content|text|body|data|patch|diff|source|cell|secret|password|token|session_id|old_string|new_string/i
-          )
+          ) && expose.none? { |exposed| exposed.to_s.casecmp?(name) }
 
-          ret[field.to_s] = scrub(item, field.to_s)
+          ret[name] = name == 'command' && item.is_a?(String) ? redact(item) : scrub(item, expose)
         end
       when Array
-        value.map { |item| scrub(item) }
-      when String
-        key == 'command' ? redact(value) : value
+        value.map { |item| scrub(item, expose) }
       else
         value
       end

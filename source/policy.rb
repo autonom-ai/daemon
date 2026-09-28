@@ -142,6 +142,10 @@ module Policy
 
       @match = raw['match'].is_a?(Hash) ? raw['match'] : {}
       @except = Policy.exempt_list(raw['except'], source)
+      @expose = raw['expose']
+      raise Error, "Policy expose must be a list of input fields: #{source}" unless @expose.nil? || @expose.is_a?(Array)
+
+      @expose = Array(@expose).map(&:to_s)
       @reason = raw['reason']
       @context = raw['context']
       @question = raw['question']
@@ -185,7 +189,7 @@ module Policy
     def harmful?(request, jev:)
       state = {
         'tool_name' => request['tool_name'],
-        'tool_input' => JEV::Common.scrub(request['tool_input'] || {}),
+        'tool_input' => JEV::Common.scrub(request['tool_input'] || {}, @expose),
         'profile_name' => request['profile_name'],
         'policy' => @context || @question['instructions']
       }

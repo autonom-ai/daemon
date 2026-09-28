@@ -92,4 +92,20 @@ class JevTest < Minitest::Test
     assert_includes serialized, '[REDACTED]'
     assert_includes serialized, '/tmp/note.md'
   end
+
+  def test_scrub_keeps_only_the_fields_a_rule_exposes
+    scrubbed = JEV::Common.scrub(
+      {
+        'text' => 'a message with a key sk-abcdefghijklmnop',
+        'patch' => 'private patch content',
+        'nested' => { 'text' => 'inner', 'token' => 'abc' }
+      },
+      ['text']
+    )
+
+    assert_equal 'a message with a key sk-abcdefghijklmnop', scrubbed['text']
+    assert_equal 'inner', scrubbed.dig('nested', 'text')
+    refute scrubbed.key?('patch')
+    refute scrubbed['nested'].key?('token')
+  end
 end

@@ -7,15 +7,16 @@ class PolicyTest < Minitest::Test
   include CoreTest
 
   class FakeJev
-    attr_reader :calls
+    attr_reader :calls, :state
 
     def initialize(harmful: false)
       @harmful = harmful
       @calls = 0
     end
 
-    def decide(_state, _questions)
+    def decide(state, _questions)
       @calls += 1
+      @state = state
       { 'harmful' => { 'noul' => @harmful ? 1.0 : 0.0 } }
     end
   end
@@ -146,6 +147,49 @@ class PolicyTest < Minitest::Test
     assert policy.guard?('codebase', 'quill')
     refute policy.guard?('codebase', 'Sable')
     refute policy.guard?('env', 'quill')
+  end
+
+  def test_a_screen_judges_only_the_fields_a_rule_exposes()
+    policy = load(<<~'YAML')
+      rules:
+        - action: screen
+          expose: [text]
+          question:
+            type: noul
+            instructions: is it bad
+            criteria:
+              true: yes
+              false: no
+    YAML
+
+    Policy.decide([policy], request('send_message', 'text' => 'sekrit', 'room' => 'general'), jev: @jev)
+
+    assert_equal 'sekrit', @jev.state.dig('tool_input', 'text')
+    assert_equal 'general', @jev.state.dig('tool_input', 'room')
+  end
+
+  def test_a_screen_without_expose_never_sees_text()
+    policy = load(<<~'YAML')
+      rules:
+        - action: screen
+          question:
+            type: noul
+            instructions: is it bad
+            criteria:
+              true: yes
+              false: no
+    YAML
+
+    Policy.decide([policy], request('send_message', 'text' => 'sekrit', 'room' => 'general'), jev: @jev)
+
+    refute @jev.state['tool_input'].key?('text')
+    assert_equal 'general', @jev.state.dig('tool_input', 'room')
+  end
+
+  def test_expose_must_be_a_list()
+    assert_raises(Policy::Error) do
+      load("rules:\n  - action: deny\n    expose: text\n")
+    end
   end
 
   def test_an_unknown_guard_raises()

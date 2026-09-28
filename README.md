@@ -106,6 +106,8 @@ file privacy, profile and session-map isolation, the room file ladder, exec
 path and deletion checks, and the codebase edit ban - and `except` exempts
 profiles from a single guard or rule. Rules match on the tool name and input
 fields, then `deny`, `allow`, or `screen` (ask the backend a typed question).
+Content-bearing fields are scrubbed before a request reaches the backend - a
+screen rule's `expose` list names the input fields it is allowed to judge.
 A room's `policy.yml` adds rules on top and can only restrict: composition is
 a meet, so a room's `allow` never outranks a `deny` or `screen`.
 
