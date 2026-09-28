@@ -20,6 +20,12 @@ module Hooks
     mcp__autonom-coord-mcp__create_room
     mcp__autonom-coord-mcp__delete_room
     mcp__autonom-coord-mcp__get_heartbeat
+    mcp__circles__spawn
+    mcp__circles__move
+    mcp__circles__impulse
+    mcp__circles__emote
+    mcp__circles__leave
+    mcp__circles__look
   ].freeze
 
   DENIED = 'Access to this profile or protected file is blocked'
@@ -38,9 +44,6 @@ module Hooks
       post_tool_use(event)
     when 'Stop'
       stop(event)
-    when 'SubagentStop'
-      # Avoid subagents waiting forever.
-      nil
     end
   rescue JEV::Error, Policy::Error
     block('The policy check is unavailable; request blocked')
@@ -50,6 +53,8 @@ module Hooks
       block('Profile access could not be verified')
     when 'SessionStart'
       context('SessionStart', 'Profile context could not be loaded; ask the user before registering a profile.')
+    when 'Stop'
+      block('Could not verify what is waiting; try again')
     end
   end
 
@@ -124,6 +129,8 @@ module Hooks
   def post_tool_use(event)
     profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
+
+    Salience::Activity.record(profile, event['tool_name'], event['tool_input'])
 
     pings = Bus.pings_by_profile(profile).unread(profile)
     return nil if pings.empty?

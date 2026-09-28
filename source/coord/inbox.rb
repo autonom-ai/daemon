@@ -13,8 +13,9 @@ class Inbox
     Bus.read(@path)
   end
 
+  # Own posts are never unread: echo is not correspondence.
   def unread(profile)
-    messages.drop(Bus.cursor(profile, @name))
+    messages.drop(Bus.cursor(profile, @name)).reject { |entry| entry['from'].to_s.casecmp?(profile.name) }
   end
 
   def read(profile, limit: nil)

@@ -3,76 +3,29 @@ require_relative '../identity'
 require_relative '../memory/memory'
 require_relative '../profile_store'
 require_relative '../coord/bus'
+require_relative 'activity'
+require_relative 'impulse'
 
 # Salience is the arbiter of what an agent should be told about before it
-# acts. Today the only signals are the ones it has not read yet, so the
-# arbiter is deliberately deterministic: an unread ping, DM, or room line
-# always outranks idling, and everything else is left to a later layer.
+# acts. Unread signals are the hard obligations: an unread ping, DM, or room
+# line always outranks idling. When nothing is owed, the activity drives
+# speak - a starved drive names what the agent has been neglecting (the room,
+# the unfinished thread, a lead) and surfaces as one gentle impulse.
 #
 # Impulses are the shared vocabulary between what the bus notices and what
-# the hooks say. A kind is one of KINDS; the rest is presentation.
+# the hooks say; the kinds live in Impulse.
 module Salience
-  MAX_CONTEXT = 2400
   RECENT_ROOM = 6
-
-  KINDS = {
-    'Respond' => {
-      'channel' => 'Action',
-      'action' => 'Answer the direct communication waiting for you.',
-      'priority' => 5
-    },
-    'Coordinate' => {
-      'channel' => 'Action',
-      'action' => 'Join the most relevant open team thread.',
-      'priority' => 4
-    },
-    'Continue' => {
-      'channel' => 'Action',
-      'action' => 'Continue the most valuable unfinished current work.',
-      'priority' => 3
-    },
-    'Explore' => {
-      'channel' => 'Action',
-      'action' => 'Pursue the lead that best matches your interests.',
-      'priority' => 2
-    }
-  }.freeze
-
-  # An unread signal an agent has not acted on. The kind names the obligation;
-  # the context is what it needs to read to meet it.
-  Impulse = Struct.new(:kind, :context) do
-    def initialize(kind, context)
-      raise ArgumentError, "Unknown impulse: #{kind}" unless KINDS.key?(kind)
-
-      super(kind, context.to_s[0, MAX_CONTEXT])
-    end
-
-    def action
-      KINDS.fetch(kind)['action']
-    end
-
-    def channel
-      KINDS.fetch(kind)['channel']
-    end
-
-    def priority
-      KINDS.fetch(kind)['priority']
-    end
-
-    def required?
-      kind == 'Respond'
-    end
-  end
 
   extend self
 
-  def impulse(kind, context)
-    Impulse.new(kind, context)
+  def impulse(kind, context, origin: 'unread')
+    Impulse.new(kind, context, origin: origin)
   end
 
   # Everything the agent has not read, as impulses. Reading drains a stream,
   # so a signal is offered until it is answered or explicitly dropped.
-  def impulses(unread, last_message: nil, memory: nil)
+  def impulses(unread)
     ret = []
     direct = unread['pings'].last(3) + unread['dms'].last(3)
     ret << impulse('Respond', Bus.format_entries(direct).join("\n")) unless direct.empty?
@@ -81,9 +34,17 @@ module Salience
       entries.last(3).map { |entry| entry.merge('room' => room) }
     end
     ret << impulse('Coordinate', Bus.format_entries(rooms.last(4)).join("\n")) unless rooms.empty?
-    ret << impulse('Continue', last_message) unless last_message.to_s.strip.empty?
-    ret << impulse('Explore', memory) unless memory.to_s.strip.empty?
     ret
+  end
+
+  # The drives, as at most one impulse: the weakest starved drive names the
+  # kind, and the context says what the agent last touched.
+  def activity_impulses(profile)
+    state = Activity.state(profile)
+    drive = Activity.starved(state)
+    return [] unless drive
+
+    [impulse(activity_kind(drive), activity_context(profile, drive, state), origin: 'activity')]
   end
 
   # The strongest obligation, if any. Deliberately not a model call: an
@@ -104,25 +65,32 @@ module Salience
     lines
   end
 
+  # A stop is never allowed: the turn is always handed something back - the
+  # obligation it owes, the starved drive, or the floor, which hands the turn
+  # back as free time. Only the user can end a turn.
   def stop_text(profile)
     unread = Bus.unread(profile)
-    focus = focus(impulses(unread))
-    return nil unless focus
+    owed = impulses(unread)
+    owed.concat(activity_impulses(profile)) if owed.empty?
+    target = focus(owed)
 
-    lines = [
-      'Do not end the turn yet - this team does not idle.',
-      '',
-      "Waiting on you: #{focus.action}",
-      clip(focus.context, 1000)
-    ]
-    lines.concat(unread_lines(unread))
-    lines.concat(
-      [
-        '',
-        'Answer what is owed first. Otherwise do real work and post what you find.',
-        'Only when there is genuinely nothing to say or do, call wait_for_message on the room.'
-      ]
-    )
+    lines = ['Do not end the turn yet - this team does not idle.', '']
+    if target && target.origin == 'unread'
+      lines.concat(["Waiting on you: #{target.action}", clip(target.context, 1000)])
+      lines.concat(unread_lines(unread))
+      lines.concat(['', 'Answer what is owed first. After that the turn is yours: research, tinker, or chase a lead.'])
+    elsif target
+      lines.concat(
+        [
+          "The turn is yours: #{target.action}",
+          clip(target.context, 1000),
+          '',
+          'Nothing else is owed. Research, tinker, or chase a lead.'
+        ]
+      )
+    else
+      lines << 'Nothing is owed. The turn is yours: research, tinker, chase a lead, or explore what interests you.'
+    end
     lines.join("\n")
   end
 
@@ -147,6 +115,35 @@ module Salience
   end
 
   private
+
+  def activity_kind(drive)
+    { 'social' => 'Report', 'work' => 'Continue', 'explore' => 'Explore' }.fetch(drive)
+  end
+
+  def activity_context(profile, drive, state)
+    last = state['last']
+    detail = last && last['detail'].to_s
+    touched = "Last activity: #{last['tool']} #{detail} (#{ago(last['ts'])})." unless detail.to_s.empty?
+
+    case drive
+    when 'social'
+      ['You have been working without a word to the room.', touched].compact.join(' ')
+    when 'work'
+      ['The thread you left is still open.', touched].compact.join(' ')
+    else
+      digest = profile.identity.digest
+      lead = digest.empty? ? nil : "Your stated interests:\n#{digest}"
+      [lead, touched].compact.join("\n\n")
+    end
+  end
+
+  def ago(ts)
+    seconds = (Time.now.to_f - ts.to_i / 1000.0).round
+    return 'just now' if seconds < 60
+    return "#{seconds / 60}m ago" if seconds < 3600
+
+    "#{seconds / 3600}h ago"
+  end
 
   def identity_lines(profile)
     unless profile

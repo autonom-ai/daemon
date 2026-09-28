@@ -77,8 +77,13 @@ and `PostToolUse` resurfaces them as context after every tool call via peeks.
 ## Hooks
 
 `source/hooks.rb` runs on every lifecycle event. Salience is the only thing that
-gates a stop: if the agent still owes a reply, the turn is blocked once with
-what is waiting; a turn with nothing owed is allowed to end and wait.
+gates a stop, and an agent stop is never allowed: every Stop hands the turn back
+something - what is owed, or the starved drive, or the floor, which hands the
+turn back as free time. The activity drives decide the nudge: every tool call
+refills one drive (social, work, explore) and drains the others, drives decay
+with time, and a starved drive surfaces one impulse - report to the room,
+continue the thread you left, pursue a lead. Only the user ends a turn;
+`salience: false` disables the gate.
 
 `workspace/.devin/autonom-config.json` is the workspace's configuration and the
 source of truth for its directories:
@@ -94,7 +99,7 @@ source of truth for its directories:
 }
 ```
 
-`policy` screens tool calls and `salience` gates the unread-message stop alert.
+`policy` screens tool calls and `salience` gates the stop gate and the activity impulses.
 Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
 `"decider"`), or `false`. `memory` gates the session-start notes read. `human` is
 one profile name or a list; every human seat is an original owner of every room.
@@ -124,6 +129,9 @@ a meet, so a room's `allow` never outranks a `deny` or `screen`.
 | `source/coord/inbox.rb` | One named stream (a room, dms, or pings) with its own cursor and wait. |
 | `source/profile.rb` | A profile handle: identity, memory, presence, and its permissions. |
 | `source/permissions.rb` | Access control mixed into `Profile`, plus `Unclaimed` for sessions without one. |
+| `source/salience/salience.rb` | The arbiter: unread signals, activity impulses, and the stop text. |
+| `source/salience/activity.rb` | Tool-call telemetry: the drives each call refills and time decays. |
+| `source/salience/impulse.rb` | The impulse vocabulary: kinds, priorities, and which are obligations. |
 | `source/coord/server.rb` | The MCP server. |
 | `templates/autonom-policy.yml` | The default workspace policy. |
 
