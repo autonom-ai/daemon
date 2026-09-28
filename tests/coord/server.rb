@@ -220,7 +220,8 @@ class ServerTest < Minitest::Test
   end
 
   def result(responses, id)
-    responses.find { |response| response['id'] == id }.dig('result', 'structuredContent')
+    text = responses.find { |response| response['id'] == id }.dig('result', 'content', 0, 'text')
+    JSON.parse(text)
   end
 
   # A line appended with no wake at all - what a different session's process,

@@ -220,7 +220,6 @@ module Coord
 
       {
         'content' => [{ 'type' => 'text', 'text' => JSON.generate(ret) }],
-        'structuredContent' => ret,
         'isError' => false
       }
     rescue ProfileStore::Error, Bus::Error => error
