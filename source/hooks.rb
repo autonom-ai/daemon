@@ -1,8 +1,5 @@
 require_relative 'config'
-require_relative 'identity'
-require_relative 'memory/memory'
 require_relative 'permissions'
-require_relative 'profile'
 require_relative 'profile_store'
 require_relative 'salience/salience'
 require_relative 'jev'
@@ -11,21 +8,6 @@ require_relative 'coord/bus'
 require 'json'
 
 module Hooks
-  SESSION_TOOLS = %w[
-    mcp__autonom-coord-mcp__get_profiles
-    mcp__autonom-coord-mcp__get_profile
-    mcp__autonom-coord-mcp__set_profile
-    mcp__autonom-coord-mcp__send_message
-    mcp__autonom-coord-mcp__read_messages
-    mcp__autonom-coord-mcp__wait_for_message
-    mcp__autonom-coord-mcp__list_rooms
-    mcp__autonom-coord-mcp__create_room
-    mcp__autonom-coord-mcp__delete_room
-    mcp__autonom-coord-mcp__get_heartbeat
-  ].freeze
-
-  RECENT_ROOM = 6
-
   # The policy screen: what a tool call is judged against, and the bar its
   # answer has to cross to count as harmful.
   POLICY = [
@@ -76,7 +58,7 @@ module Hooks
     when 'PreToolUse'
       block('Profile access could not be verified')
     when 'SessionStart'
-      context_error
+      context('SessionStart', 'Profile context could not be loaded; ask the user before registering a profile.')
     end
   end
 
@@ -86,57 +68,7 @@ module Hooks
   # remembers, who else is here, and what the room has been saying.
   def session_start(event)
     profile = ProfileStore.profile_by_session(event['session_id'])
-    lines = []
-    lines.concat(identity_lines(profile))
-    lines.concat(team_lines(profile))
-    lines.concat(room_lines)
-    lines.concat(prior_lines(profile))
-    context('SessionStart', lines.join("\n"))
-  end
-
-  def identity_lines(profile)
-    unless profile
-      return [
-        'No profile is registered for this session yet. Claim your name with set_profile - get_profiles',
-        'lists the names already taken. If you were not given a profile name, ask the user before registering.'
-      ]
-    end
-
-    identity = profile.identity.get()
-    lines = ["You are #{identity ? identity['display_name'] : profile.name} (#{profile.name}) - profile at #{profile.directory}."]
-    lines << identity['personality'] if identity && !identity['personality'].empty?
-    if Config.memory.enabled?
-      memory = profile.memory.get()
-      lines.concat(['', 'Your memory:', memory]) unless memory.empty?
-    end
-    lines
-  end
-
-  def team_lines(profile)
-    teammates = ProfileStore.profiles.map(&:name)
-    teammates = teammates.reject { |name| name.casecmp?(profile ? profile.name : '') }
-    rooms = Bus.rooms.map { |room| "##{room.name}" }
-    lines = [
-      '',
-      'This workspace is worked by a team. The rooms are where the team actually is: talk there,',
-      'coordinate there, post what you find.'
-    ]
-    lines << (rooms.empty? ? 'No rooms yet.' : "Rooms: #{rooms.join(', ')}.")
-    lines << "Default room: ##{Bus.default_room}." if Bus.default_room
-    lines << (teammates.empty? ? 'Nobody else is registered yet.' : "Teammates: #{teammates.join(', ')}.")
-    lines
-  end
-
-  def room_lines
-    entries = Bus.rooms.flat_map(&:messages).sort_by { |entry| entry['ts'].to_i }.last(RECENT_ROOM)
-    return ['', 'No room has traffic yet - introducing yourself is a fine first move.'] if entries.empty?
-
-    ['', 'Recent traffic:', *Bus.format_entries(entries)]
-  end
-
-  def prior_lines(profile)
-    priors = Identity.priors(ProfileStore.profiles, skip: profile && profile.name)
-    priors.empty? ? [] : ['', "Your teammates' stated leanings:", priors.join("\n\n")]
+    context('SessionStart', Salience.briefing(profile))
   end
 
   # UserPromptSubmit - a nudge, not a delivery: cursors stay where the agent
@@ -164,14 +96,7 @@ module Hooks
       return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
     end
 
-    return nil unless SESSION_TOOLS.include?(tool) && !session.to_s.empty?
-
-    {
-      'hookSpecificOutput' => {
-        'hookEventName' => 'PreToolUse',
-        'updatedInput' => { 'session_id' => session }
-      }
-    }
+    nil
   end
 
   # The screen: the frontend asks the backend one typed question about the
@@ -201,19 +126,13 @@ module Hooks
     pings = Bus.pings_by_profile(profile).read(profile)
     return nil if pings.empty?
 
-    context(
-      'PostToolUse',
-      [
-        "Unread pings (#{pings.length}) - reply in the room when you get a turn:",
-        *Bus.format_entries(pings)
-      ].join("\n")
-    )
+    context('PostToolUse', Salience.ping_lines(pings).join("\n"))
   end
 
   # Stop - the team does not idle. A turn that ends is a teammate nobody can
   # reach, so the hook refuses the stop and hands back what is waiting. An
   # unread message is the only thing that blocks: an agent with nothing owed
-  # is allowed to stop and wait. The stand-down marker is the release valve.
+  # is allowed to stop and wait.
   def stop(event)
     # A stop hook that keeps blocking re-enters itself; one re-prompt is the
     # point, a loop is not.
@@ -222,17 +141,12 @@ module Hooks
     profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
 
-    return nil if stand_down?
     return nil unless Config.salience.enabled?
 
     reason = Salience.stop_text(profile)
     return nil unless reason
 
     { 'decision' => 'block', 'reason' => reason }
-  end
-
-  def stand_down?
-    File.exist?(File.join(Config.dir, 'collaboration', 'stand-down'))
   end
 
   def denial(tool, input, session, profile)
@@ -291,15 +205,6 @@ module Hooks
 
   def block(reason)
     { 'decision' => 'block', 'reason' => reason }
-  end
-
-  def context_error
-    {
-      'hookSpecificOutput' => {
-        'hookEventName' => 'SessionStart',
-        'additionalContext' => 'Profile context could not be loaded; ask the user before registering a profile.'
-      }
-    }
   end
 end
 

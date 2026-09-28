@@ -1,3 +1,7 @@
+require_relative '../config'
+require_relative '../identity'
+require_relative '../memory/memory'
+require_relative '../profile_store'
 require_relative '../coord/bus'
 
 # Salience is the arbiter of what an agent should be told about before it
@@ -9,6 +13,7 @@ require_relative '../coord/bus'
 # the hooks say. A kind is one of KINDS; the rest is presentation.
 module Salience
   MAX_CONTEXT = 2400
+  RECENT_ROOM = 6
 
   KINDS = {
     'Respond' => {
@@ -121,7 +126,70 @@ module Salience
     lines.join("\n")
   end
 
+  def briefing(profile)
+    profiles = ProfileStore.profiles
+    rooms = Bus.rooms
+    lines = identity_lines(profile)
+    lines.concat(team_lines(profile, profiles, rooms))
+    lines.concat(room_lines(rooms))
+    lines.concat(prior_lines(profile, profiles))
+    lines.join("\n")
+  end
+
+  def ping_lines(pings)
+    [
+      "Unread pings (#{pings.length}) - reply in the room when you get a turn:",
+      *Bus.format_entries(pings)
+    ]
+  end
+
   private
+
+  def identity_lines(profile)
+    unless profile
+      return [
+        'No profile is registered for this session yet. Claim your name with set_profile - get_profiles',
+        'lists the names already taken. If you were not given a profile name, ask the user before registering.'
+      ]
+    end
+
+    identity = profile.identity.get()
+    lines = ["You are #{identity ? identity['display_name'] : profile.name} (#{profile.name}) - " \
+             "profile at #{profile.directory}."]
+    lines << identity['personality'] if identity && !identity['personality'].empty?
+    if Config.memory.enabled?
+      memory = profile.memory.get()
+      lines.concat(['', 'Your memory:', memory]) unless memory.empty?
+    end
+    lines
+  end
+
+  def team_lines(profile, profiles, rooms)
+    teammates = profiles.map(&:name)
+    teammates = teammates.reject { |name| name.casecmp?(profile ? profile.name : '') }
+    room_names = rooms.map { |room| "##{room.name}" }
+    lines = [
+      '',
+      'This workspace is worked by a team. The rooms are where the team actually is: talk there,',
+      'coordinate there, post what you find.'
+    ]
+    lines << (room_names.empty? ? 'No rooms yet.' : "Rooms: #{room_names.join(', ')}.")
+    lines << "Default room: ##{Bus.default_room}." if Bus.default_room
+    lines << (teammates.empty? ? 'Nobody else is registered yet.' : "Teammates: #{teammates.join(', ')}.")
+    lines
+  end
+
+  def room_lines(rooms)
+    entries = rooms.flat_map(&:messages).sort_by { |entry| entry['ts'].to_i }.last(RECENT_ROOM)
+    return ['', 'No room has traffic yet - introducing yourself is a fine first move.'] if entries.empty?
+
+    ['', 'Recent traffic:', *Bus.format_entries(entries)]
+  end
+
+  def prior_lines(profile, profiles)
+    priors = Identity.priors(profiles, skip: profile && profile.name)
+    priors.empty? ? [] : ['', "Your teammates' stated leanings:", priors.join("\n\n")]
+  end
 
   def append_entries(lines, label, entries)
     return if entries.empty?
