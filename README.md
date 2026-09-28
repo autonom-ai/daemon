@@ -98,11 +98,16 @@ Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
 `"decider"`), or `false`. `memory` gates the session-start notes read. `human` is
 one profile name or a list; every human seat is an original owner of every room.
 
-The screening itself is data, not code. `templates/policy.yml` is the master
-policy - an ordered list of rules that match on the tool name and input fields,
-then `deny`, `allow`, or `screen` (ask the backend a typed question). A room's
-`policy.yml` adds rules on top and can only restrict: composition is a meet, so
-a room's `allow` never outranks the master's `deny` or `screen`.
+The screening itself is data, not code. `.devin/autonom-policy.yml` is the
+workspace's policy; a workspace without one runs on
+`templates/autonom-policy.yml`, the default template setup copies in. The
+`access` list names the guards the core enforces before any rule runs - env
+file privacy, profile and session-map isolation, the room file ladder, exec
+path and deletion checks, and the codebase edit ban - and `except` exempts
+profiles from a single guard or rule. Rules match on the tool name and input
+fields, then `deny`, `allow`, or `screen` (ask the backend a typed question).
+A room's `policy.yml` adds rules on top and can only restrict: composition is
+a meet, so a room's `allow` never outranks a `deny` or `screen`.
 
 ## Source layout
 
@@ -117,7 +122,7 @@ a room's `allow` never outranks the master's `deny` or `screen`.
 | `source/profile.rb` | A profile handle: identity, memory, presence, and its permissions. |
 | `source/permissions.rb` | Access control mixed into `Profile`, plus `Unclaimed` for sessions without one. |
 | `source/coord/server.rb` | The MCP server. |
-| `templates/policy.yml` | The master policy. |
+| `templates/autonom-policy.yml` | The default workspace policy. |
 
 ## Profile storage
 

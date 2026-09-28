@@ -463,11 +463,11 @@ module Coord
     end
 
     def deny_room_policy(room, profile, tool, args)
-      rules = room.policy_rules
-      return if rules.empty?
+      policy = room.policy
+      return if policy.rules.empty?
 
       request = { 'tool_name' => tool, 'tool_input' => args, 'profile_name' => profile.name }
-      denied, reason = Policy.decide([rules], request, jev: JEV)
+      denied, reason = Policy.decide([policy], request, jev: JEV)
       raise ProfileStore::Error, (reason || 'The room policy denied this request') if denied
     rescue Policy::Error, JEV::Error => error
       raise ProfileStore::Error, "The room policy could not be checked: #{error.class}"

@@ -2,6 +2,7 @@ require 'json'
 require 'shellwords'
 
 require_relative 'config'
+require_relative 'policy'
 require_relative 'profile_store'
 
 module Permissions
@@ -19,11 +20,13 @@ module Permissions
     path = resolve(path, Config.project_dir)
     agents = resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
     prefix = path.end_with?(File::SEPARATOR) ? path : "#{path}#{File::SEPARATOR}"
-    return false if agents.start_with?(prefix)
+    return false if guard?('profiles') && agents.start_with?(prefix)
 
     # A search rooted at or above a hidden room would read its messages, and a
     # search cannot filter its own results - so it fails closed.
-    !hidden_room_dirs.any? { |dir| dir == path || dir.start_with?(prefix) }
+    return false if guard?('rooms') && hidden_room_dirs.any? { |dir| dir == path || dir.start_with?(prefix) }
+
+    true
   end
 
   def can_glob?(pattern, path:)
@@ -32,21 +35,28 @@ module Permissions
 
     base = resolve(path, Config.project_dir)
     glob = File.expand_path(pattern, base)
-    agents = resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
-    restricted = [
-      agents,
-      File.join(agents, 'sessions.json'),
-      File.join(agents, 'sessions.json.lock'),
-      *Dir.glob(File.join(agents, '.sessions-*'))
-    ]
-    ProfileStore.profiles.each do |profile|
-      next if @name && profile.name.casecmp?(@name)
+    restricted = []
+    if guard?('profiles')
+      agents = resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
+      restricted.concat(
+        [
+          agents,
+          File.join(agents, 'sessions.json'),
+          File.join(agents, 'sessions.json.lock'),
+          *Dir.glob(File.join(agents, '.sessions-*'))
+        ]
+      )
+      ProfileStore.profiles.each do |profile|
+        next if @name && profile.name.casecmp?(@name)
 
-      restricted.concat(Dir.glob(File.join(profile.directory, '**', '*'), File::FNM_DOTMATCH))
+        restricted.concat(Dir.glob(File.join(profile.directory, '**', '*'), File::FNM_DOTMATCH))
+      end
     end
-    hidden_room_dirs.each do |dir|
-      restricted << dir
-      restricted.concat(Dir.glob(File.join(dir, '**', '*'), File::FNM_DOTMATCH))
+    if guard?('rooms')
+      hidden_room_dirs.each do |dir|
+        restricted << dir
+        restricted.concat(Dir.glob(File.join(dir, '**', '*'), File::FNM_DOTMATCH))
+      end
     end
 
     flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
@@ -61,6 +71,7 @@ module Permissions
     dir ||= Config.project_dir
     return false unless cmd.is_a?(String)
     return false unless can_read?(dir)
+    return true unless guard?('exec')
     return false if deletes_protected?(cmd, dir: dir)
 
     shell_paths(cmd).all? { |path| can_read?(path) && can_write?(path) }
@@ -73,14 +84,14 @@ module Permissions
 
     path = resolve(path, Config.project_dir)
     name = File.basename(path)
-    return false if name == '.env' || name.start_with?('.env.')
+    return false if guard?('env') && (name == '.env' || name.start_with?('.env.'))
 
-    room = room_access(path, write: write)
+    room = guard?('rooms') ? room_access(path, write: write) : nil
     return room unless room.nil?
 
     root = resolve(ProfileStore.root, Config.project_dir)
     agents = resolve(File.join(root, 'agents'), Config.project_dir)
-    if path == agents || path.start_with?("#{agents}#{File::SEPARATOR}")
+    if guard?('profiles') && under?(path, agents)
       relative = path.delete_prefix("#{agents}#{File::SEPARATOR}")
       return false if relative.empty? || store_file?(relative)
 
@@ -89,10 +100,17 @@ module Permissions
     end
 
     name = profile_name(path)
-    return true unless name
-    return false if store_file?(name)
+    if guard?('profiles') && name
+      return false if store_file?(name)
 
-    @name && @name.casecmp?(name)
+      return @name && @name.casecmp?(name)
+    end
+
+    # The codebase itself is not a scratch space; the guards above have
+    # already claimed the writable corners under it.
+    return false if write && guard?('codebase') && under?(path, root)
+
+    true
   end
 
   # A path inside a room folder, or nil when it is not one. `messages.jsonl`
@@ -151,6 +169,16 @@ module Permissions
 
   def rooms_root
     resolve(Config.rooms_dir, Config.project_dir)
+  end
+
+  # A named guard from the workspace policy applies to this actor unless the
+  # policy exempts the profile.
+  def guard?(name)
+    Policy.workspace.guard?(name, @name)
+  end
+
+  def under?(path, dir)
+    path == dir || path.start_with?("#{dir}#{File::SEPARATOR}")
   end
 
   def shell_paths(cmd)
