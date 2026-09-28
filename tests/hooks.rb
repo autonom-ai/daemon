@@ -36,6 +36,14 @@ class HooksTest < Minitest::Test
     teardown_core()
   end
 
+  # The entrypoint must load in a clean process. The suite preloads profile_store,
+  # so a require cycle between permissions and profile_store only shows up here.
+  def test_the_hook_entrypoint_loads_in_a_clean_process()
+    hooks = File.expand_path('../source/hooks.rb', __dir__)
+
+    assert system('ruby', '-e', "require #{hooks.inspect}", out: File::NULL, err: File::NULL)
+  end
+
   def test_direct_profile_access_is_denied_before_jev()
     path = File.join(@root, 'agents', 'wren', 'memories', 'notes.md')
     patch = ['*** Begin Patch', "*** Update File: #{path}", '+note', '*** End Patch'].join("\n")

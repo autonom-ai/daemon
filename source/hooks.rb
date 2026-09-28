@@ -1,6 +1,6 @@
 require_relative 'config'
-require_relative 'permissions'
 require_relative 'profile_store'
+require_relative 'permissions'
 require_relative 'salience/salience'
 require_relative 'jev'
 require_relative 'coord/bus'
