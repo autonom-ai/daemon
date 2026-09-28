@@ -234,16 +234,16 @@ module Coord
       targets = ping_targets(args['ping'], from)
       if args['to'].to_s.empty?
         room = room_named(args['room'])
-        entry = Bus.post(room, text, from: from)
+        Bus.post(room, text, from: from)
         targets.each { |target| Bus.ping(target, text, from: from, room: room) }
-        { 'room' => room.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
+        { 'result' => "Sent message to #{room.name} with #{targets.length} pings" }
       else
         to = ProfileStore.profile_by_name(args['to'])
         raise ProfileStore::Error, "Unknown profile: #{args['to']}" unless to
 
-        entry = Bus.dm(to, text, from: from)
+        Bus.dm(to, text, from: from)
         targets.each { |target| Bus.ping(target, text, from: from) }
-        { 'to' => to.name, 'entry' => entry, 'pinged' => targets.map(&:name) }
+        { 'result' => "Sent message to #{to.name} with #{targets.length} pings" }
       end
     end
 
@@ -253,12 +253,7 @@ module Coord
       read_stream(profile, source, room, limit(args))
     end
 
-    # The no-idle loop's bottom rung: block until something lands, so an agent
-    # that has nothing to say is reachable instead of dark. The wait is a
-    # registry entry in this process, not a poll - and since the signal that
-    # would clear it cannot cross a process boundary, it also watches the files
-    # a line would land in, which costs a couple of stats a second and no reads
-    # at all.
+    # Wait behavior is somewhat complex but documented in Bus.
     def wait_for_message(args, session)
       profile = registered_profile(session)
       source, room = read_target(args)
