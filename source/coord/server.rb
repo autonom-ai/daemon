@@ -259,11 +259,8 @@ module Coord
       source, room = read_target(args)
       raise ProfileStore::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
 
-      if source == 'dms'
-        Bus.dms_by_profile(profile).wait(profile, timeout: wait_timeout(args))
-      else
-        room.wait(profile, timeout: wait_timeout(args))
-      end
+      inbox = source == 'dms' ? Bus.dms_by_profile(profile) : room
+      inbox.wait(profile, timeout: wait_timeout(args)) if inbox.unread(profile).empty?
       read_stream(profile, source, room, limit(args))
     end
 
