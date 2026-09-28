@@ -26,6 +26,8 @@ access:
 # A rule matches on `tool` (the tool name) and any other key (an input field,
 # matched as a regex), then acts: `deny`, `allow`, or `screen` (ask the
 # backend the typed `question` and deny when the answer is harmful).
+# Content-bearing fields are scrubbed before a request reaches the backend; a
+# screen rule's `expose` list names the input fields it is allowed to judge.
 rules:
   - action: screen
     threshold: 0.5
