@@ -59,18 +59,6 @@
           }
         ]
       }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ruby \"{{COORD_ROOT}}/source/hooks.rb\"",
-            "timeout": 20
-          }
-        ]
-      }
     ]
   }
 }

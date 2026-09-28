@@ -93,7 +93,7 @@ module Hooks
     {
       'hookSpecificOutput' => {
         'hookEventName' => 'PreToolUse',
-        'updatedInput' => input.merge('session_id' => session)
+        'updatedInput' => { 'session_id' => session.to_s }
       }
     }
   end
