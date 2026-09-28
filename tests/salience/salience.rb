@@ -63,11 +63,72 @@ class SalienceTest < Minitest::Test
 
     assert_includes text, 'Do not end the turn yet'
     assert_includes text, 'Unread pings (1)'
-    assert_includes text, 'call wait_for_message on the room'
+    assert_includes text, 'Answer what is owed first'
   end
 
-  def test_stop_text_is_nil_when_nothing_is_waiting()
-    assert_nil Salience.stop_text(@marlow)
+  def test_stop_text_hands_the_turn_back_as_free_time_when_nothing_is_owed()
+    text = Salience.stop_text(@marlow)
+
+    assert_includes text, 'Do not end the turn yet'
+    assert_includes text, 'Nothing is owed'
+    assert_includes text, 'The turn is yours'
+    refute_includes text, 'wait_for_message'
+  end
+
+  def test_a_starved_social_drive_is_a_report_impulse()
+    8.times { Salience::Activity.record(@marlow, 'edit', { 'file_path' => 'source/x.rb' }) }
+
+    impulses = Salience.activity_impulses(@marlow)
+
+    assert_equal 1, impulses.length
+    assert_equal 'Report', impulses.first.kind
+    assert_equal 'activity', impulses.first.origin
+    refute impulses.first.required?
+    assert_includes impulses.first.context, 'source/x.rb'
+  end
+
+  def test_a_starved_work_drive_is_a_continue_impulse()
+    5.times { Salience::Activity.record(@marlow, 'read', {}) }
+    3.times { Salience::Activity.record(@marlow, 'mcp__autonom-coord-mcp__send_message', {}) }
+
+    impulse = Salience.activity_impulses(@marlow).first
+
+    assert_equal 'Continue', impulse.kind
+  end
+
+  def test_a_starved_explore_drive_is_an_explore_impulse()
+    File.write(
+      File.join(@marlow.directory, 'identity.md'),
+      "---\ndisplayName: Marlow\n---\n\n## Interests\n\n- kill columns\n"
+    )
+    8.times { Salience::Activity.record(@marlow, 'edit', {}) }
+    2.times { Salience::Activity.record(@marlow, 'mcp__autonom-coord-mcp__send_message', {}) }
+
+    impulse = Salience.activity_impulses(@marlow).first
+
+    assert_equal 'Explore', impulse.kind
+    assert_includes impulse.context, 'kill columns'
+  end
+
+  def test_stop_text_surfaces_one_activity_impulse_when_nothing_is_owed()
+    8.times { Salience::Activity.record(@marlow, 'edit', { 'file_path' => 'source/x.rb' }) }
+
+    text = Salience.stop_text(@marlow)
+
+    assert_includes text, 'Do not end the turn yet'
+    assert_includes text, 'The turn is yours'
+    assert_includes text, 'Tell the room what you are doing'
+    assert_includes text, 'source/x.rb'
+  end
+
+  def test_unread_still_outranks_a_starved_drive()
+    Bus.ping(@marlow, 'ping text', from: @wren, room: room('general'))
+    8.times { Salience::Activity.record(@marlow, 'edit', {}) }
+
+    text = Salience.stop_text(@marlow)
+
+    assert_includes text, 'Unread pings (1)'
+    refute_includes text, 'Tell the room what you are doing'
   end
 
   def test_briefing_carries_identity_memory_team_and_room()

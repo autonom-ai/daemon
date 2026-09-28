@@ -36,14 +36,20 @@ class InboxTest < Minitest::Test
     assert_equal 'marlow', @room.messages.first['from']
   end
 
-  def test_reads_are_cursored_per_profile_and_do_not_advance_on_unread()
+  def test_reads_are_cursored_per_profile_and_own_posts_are_not_unread()
     Bus.post(@room, 'first', from: @wren)
     Bus.post(@room, 'second', from: @wren)
 
     assert_equal 2, @room.unread(@marlow).length
     assert_equal ['first', 'second'], @room.read(@marlow).map { |entry| entry['text'] }
     assert_empty @room.unread(@marlow)
-    assert_equal 2, @room.unread(@wren).length
+
+    # A profile's own posts are never its unread.
+    assert_empty @room.unread(@wren)
+
+    Bus.post(@room, 'third', from: @marlow)
+
+    assert_equal ['third'], @room.unread(@wren).map { |entry| entry['text'] }
 
     Bus.dm(@wren, 'psst', from: @marlow)
     dms = Bus.dms_by_profile(@wren)

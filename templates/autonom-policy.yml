@@ -23,6 +23,7 @@ access:
   # maintain it are exempt.
   - guard: codebase
     except: [sable, wren, marlow]
+    
 # A rule matches on `tool` (the tool name) and any other key (an input field,
 # matched as a regex), then acts: `deny`, `allow`, or `screen` (ask the
 # backend the typed `question` and deny when the answer is harmful).

@@ -272,7 +272,7 @@ class HooksTest < Minitest::Test
     assert_includes reason, 'Unread pings (1)'
     assert_includes reason, '@marlow the pricer moved'
     assert_includes reason, 'New #room:general traffic (1)'
-    assert_includes reason, 'wait_for_message'
+    assert_includes reason, 'Answer what is owed first'
 
     # A re-entered stop is still judged on what is owed - the gate does not
     # yield just because it already blocked.
@@ -282,10 +282,43 @@ class HooksTest < Minitest::Test
     assert_equal 1, Bus.pings_by_profile(marlow).unread(marlow).length
   end
 
-  def test_stop_lets_the_turn_end_when_nothing_is_owed()
+  def test_stop_never_ends_the_turn()
     ProfileStore.register_profile('marlow', 'session-1')
 
-    assert_nil hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
+    result = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
+
+    assert_equal 'block', result['decision']
+    assert_includes result['reason'], 'Do not end the turn yet'
+
+    re_entered = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1', 'stop_hook_active' => true })
+
+    assert_equal 'block', re_entered['decision']
+  end
+
+  def test_an_activity_impulse_blocks_every_stop()
+    marlow = ProfileStore.register_profile('marlow', 'session-1')
+    8.times { Salience::Activity.record(marlow, 'edit', { 'file_path' => 'source/x.rb' }) }
+
+    result = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1' })
+
+    assert_equal 'block', result['decision']
+    assert_includes result['reason'], 'Tell the room'
+
+    re_entered = hook({ 'hook_event_name' => 'Stop', 'session_id' => 'session-1', 'stop_hook_active' => true })
+
+    assert_equal 'block', re_entered['decision']
+    assert_includes re_entered['reason'], 'Tell the room'
+  end
+
+  def test_a_tool_call_feeds_the_activity_drives()
+    marlow = ProfileStore.register_profile('marlow', 'session-1')
+
+    hook(post_event)
+    state = Salience::Activity.state(marlow)
+
+    assert_equal 1, state['calls']
+    assert_equal 'exec', state['last']['tool']
+    assert_equal 'git status', state['last']['detail']
   end
 
   def test_a_subagent_stop_is_never_blocked()

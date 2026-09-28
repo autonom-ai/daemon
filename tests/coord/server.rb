@@ -106,7 +106,9 @@ class ServerTest < Minitest::Test
     assert_equal ['room:general'], rooms.map { |room| room['name'] }
     assert_equal 2, rooms.first['count']
     assert_equal 1, rooms.first['unread']
-    assert_equal 2, result(responses, 7).first['unread']
+
+    # marlow's own two posts are not his unread.
+    assert_equal 0, result(responses, 7).first['unread']
   end
 
   def test_wait_for_message_returns_what_is_already_unread()
