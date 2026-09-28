@@ -1,6 +1,6 @@
 require 'minitest/autorun'
 
-require_relative 'common'
+require_relative '../support'
 
 class BusTest < Minitest::Test
   include CoreTest
@@ -47,7 +47,7 @@ class BusTest < Minitest::Test
     assert_raises(Bus::Error) { Bus.stream_path(dir, 'inbox.jsonl') }
   end
 
-  def test_room_names_normalize_and_a_bare_name_means_the_default_room()
+  def test_room_names_normalize_and_look_up_an_existing_room()
     write_room('market')
     write_config('defaultRoom' => 'Market')
 

@@ -1,6 +1,6 @@
 require 'minitest/autorun'
 
-require_relative 'common'
+require_relative 'support'
 require_relative '../source/identity'
 
 class IdentityTest < Minitest::Test

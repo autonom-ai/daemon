@@ -1,6 +1,6 @@
 require 'minitest/autorun'
 
-require_relative 'common'
+require_relative 'support'
 
 class ProfileStoreTest < Minitest::Test
   include CoreTest

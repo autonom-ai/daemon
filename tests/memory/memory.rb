@@ -1,7 +1,7 @@
 require 'minitest/autorun'
 
-require_relative 'common'
-require_relative '../source/memory/memory'
+require_relative '../support'
+require_relative '../../source/memory/memory'
 
 class MemoryTest < Minitest::Test
   include CoreTest

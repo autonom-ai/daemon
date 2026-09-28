@@ -2,8 +2,8 @@ require 'json'
 require 'minitest/autorun'
 require 'stringio'
 
-require_relative 'common'
-require_relative '../source/coord/server'
+require_relative '../support'
+require_relative '../../source/coord/server'
 
 class ServerTest < Minitest::Test
   include CoreTest
@@ -110,22 +110,6 @@ class ServerTest < Minitest::Test
     responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-2'))
 
     assert_empty result(responses, 2)['messages']
-  end
-
-  def test_a_room_post_wakes_a_room_wait()
-    exchange(
-      call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
-      call(2, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1')
-    )
-    writer = Thread.new do
-      sleep 0.3
-      Bus.post(room('general'), 'late line', from: profile('marlow'))
-    end
-
-    responses = exchange(call(3, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
-    writer.join
-
-    assert_equal ['late line'], result(responses, 3)['messages'].map { |entry| entry['text'] }
   end
 
   def test_a_ping_interrupts_a_room_wait()

@@ -1,7 +1,7 @@
 require 'json'
 require 'minitest/autorun'
 
-require_relative 'common'
+require_relative 'support'
 require_relative '../source/hooks'
 
 class HooksTest < Minitest::Test
