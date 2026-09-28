@@ -49,14 +49,12 @@ class ServerTest < Minitest::Test
       call(8, 'send_message', 'text' => 'hi', 'ping' => ['nobody'], 'session_id' => 'session-1')
     )
 
-    sent = result(responses, 3)
-
-    assert_equal 'room:general', sent['room']
-    assert_equal 'marlow', sent['entry']['from']
-    assert_equal ['wren'], sent['pinged']
+    assert_equal 'Sent message to room:general with 1 pings', result(responses, 3)['result']
     assert_equal ['hello team'], result(responses, 4)['messages'].map { |ping| ping['text'] }
     assert_equal ['hello team'], result(responses, 5)['messages'].map { |entry| entry['text'] }
-    assert_equal %w[wren marlow], result(responses, 6)['entry'].values_at('from', 'to')
+    assert_equal 'marlow', result(responses, 5)['messages'].first['from']
+    assert_equal 'Sent message to marlow with 0 pings', result(responses, 6)['result']
+    assert_equal %w[wren marlow], result(responses, 7)['messages'].first.values_at('from', 'to')
     assert_equal ['psst'], result(responses, 7)['messages'].map { |entry| entry['text'] }
     assert responses.find { |response| response['id'] == 8 }.dig('result', 'isError')
   end
