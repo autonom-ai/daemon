@@ -111,6 +111,16 @@ class HooksTest < Minitest::Test
     assert_equal 'block', Hooks.call(event('exec', 'command' => 'git status'))['decision']
   end
 
+  def test_the_hook_session_id_is_injected_into_profile_tools()
+    %w[set_profile send_message list_rooms create_room delete_room get_heartbeat].each do |tool|
+      payload = event("mcp__autonom-coord-mcp__#{tool}", 'name' => 'marlow', 'session_id' => 'forged')
+      updated = hook(payload).dig('hookSpecificOutput', 'updatedInput')
+
+      assert_equal 'session-1', updated['session_id']
+      assert_equal 'marlow', updated['name']
+    end
+  end
+
   def test_a_profile_cannot_be_reassigned()
     ProfileStore.register_profile('marlow', 'session-1')
 

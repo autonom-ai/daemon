@@ -8,6 +8,19 @@ require_relative 'coord/bus'
 require 'json'
 
 module Hooks
+  SESSION_TOOLS = %w[
+    mcp__autonom-coord-mcp__get_profiles
+    mcp__autonom-coord-mcp__get_profile
+    mcp__autonom-coord-mcp__set_profile
+    mcp__autonom-coord-mcp__send_message
+    mcp__autonom-coord-mcp__read_messages
+    mcp__autonom-coord-mcp__wait_for_message
+    mcp__autonom-coord-mcp__list_rooms
+    mcp__autonom-coord-mcp__create_room
+    mcp__autonom-coord-mcp__delete_room
+    mcp__autonom-coord-mcp__get_heartbeat
+  ].freeze
+
   # The policy screen: what a tool call is judged against, and the bar its
   # answer has to cross to count as harmful.
   POLICY = [
@@ -96,7 +109,14 @@ module Hooks
       return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
     end
 
-    nil
+    return nil unless SESSION_TOOLS.include?(tool) && !session.to_s.empty?
+
+    {
+      'hookSpecificOutput' => {
+        'hookEventName' => 'PreToolUse',
+        'updatedInput' => input.merge('session_id' => session)
+      }
+    }
   end
 
   # The screen: the frontend asks the backend one typed question about the
