@@ -19,6 +19,8 @@ module Hooks
     mcp__autonom-coord-mcp__read_messages
     mcp__autonom-coord-mcp__wait_for_message
     mcp__autonom-coord-mcp__list_rooms
+    mcp__autonom-coord-mcp__create_room
+    mcp__autonom-coord-mcp__delete_room
     mcp__autonom-coord-mcp__get_heartbeat
   ].freeze
 

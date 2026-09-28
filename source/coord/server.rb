@@ -172,6 +172,30 @@ module Coord
           'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session } }
         },
         {
+          'name' => 'create_room',
+          'description' => 'Create a workspace room. Names are case-insensitive and stored lowercase.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'name' => { 'type' => 'string', 'description' => 'The room name to create.' },
+              'session_id' => session
+            },
+            'required' => ['name']
+          }
+        },
+        {
+          'name' => 'delete_room',
+          'description' => 'Delete a workspace room and its messages. This cannot be undone.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'name' => { 'type' => 'string', 'description' => 'The room name to delete.' },
+              'session_id' => session
+            },
+            'required' => ['name']
+          }
+        },
+        {
           'name' => 'get_heartbeat',
           'description' => 'Get a profile\'s heartbeat: when it last called a tool, and whether that is recent ' \
                            'enough to count as online. Every MCP call stamps the caller, so presence is a fact ' \
@@ -208,15 +232,20 @@ module Coord
         wait_for_message(args, session)
       when 'list_rooms'
         list_rooms(session)
+      when 'create_room'
+        create_room(args, session)
+      when 'delete_room'
+        # TODO: Room ownership, permissions, and descriptions.
+        delete_room(args, session)
       when 'get_heartbeat'
         get_heartbeat(args)
       else
         return tool_error('Unknown profile tool')
       end
 
-      # Every call is a sign of life, stamped after the tool ran so a
-      # registration counts as the caller's first heartbeat.
-      stamp_heartbeat(session)
+      # Update heartbeat.
+      profile = ProfileStore.profile_by_session(session) rescue nil
+      profile&.touch_heartbeat()
 
       {
         'content' => [{ 'type' => 'text', 'text' => JSON.generate(ret) }],
@@ -266,15 +295,28 @@ module Coord
 
     def list_rooms(session)
       profile = registered_profile(session)
-      Bus.rooms.map do |room|
-        entries = room.messages
-        {
-          'name' => room.name,
-          'count' => entries.length,
-          'unread' => room.unread(profile).length,
-          'lastTs' => entries.last&.fetch('ts', nil)
-        }
-      end
+      Bus.rooms.map { |room| room_entry(room, profile) }
+    end
+
+    def create_room(args, session)
+      profile = registered_profile(session)
+      room_entry(Bus.create_room(args['name']), profile)
+    end
+
+    def delete_room(args, session)
+      registered_profile(session)
+      room = Bus.delete_room(args['name'])
+      { 'result' => "Deleted room #{room.name}" }
+    end
+
+    def room_entry(room, profile)
+      entries = room.messages
+      {
+        'name' => room.name,
+        'count' => entries.length,
+        'unread' => room.unread(profile).length,
+        'lastTs' => entries.last&.fetch('ts', nil)
+      }
     end
 
     def get_heartbeat(args)
@@ -287,16 +329,6 @@ module Coord
         'lastHeartbeat' => heartbeat,
         'online' => heartbeat.positive? && (Time.now.to_f * 1000).round - heartbeat < ONLINE_MS
       }
-    end
-
-    # Presence rides on ordinary use, so a heartbeat needs no timer: the
-    # caller's own profile is stamped by whatever tool it just called. A
-    # session that has not registered yet has nobody to stamp.
-    def stamp_heartbeat(session)
-      profile = ProfileStore.profile_by_session(session)
-      profile&.touch_heartbeat()
-    rescue ProfileStore::Error
-      nil
     end
 
     def profile_entry(profile)

@@ -29,6 +29,8 @@ and is used to identify the caller. After a session ID has been mapped, it canno
 | `read_messages` | Reads `room`, `dms`, or `pings`; reading a stream clears what it returns. |
 | `wait_for_message` | Blocks until something new lands on a stream (max 60s), then returns it. A ping interrupts any wait, a DM ends a dms wait. |
 | `list_rooms` | Lists the workspace rooms with message and unread counts. |
+| `create_room` | Creates a workspace room. |
+| `delete_room` | Deletes a workspace room and its messages. |
 | `get_heartbeat` | Reports a profile's last tool call and whether that counts as online. |
 
 ## Chat
