@@ -28,18 +28,30 @@ and is used to identify the caller. After a session ID has been mapped, it canno
 | `send_message` | Posts to a room (default: the team room) or DMs one profile, with optional `ping` targets. |
 | `read_messages` | Reads `room`, `dms`, or `pings`; reading a stream clears what it returns. |
 | `wait_for_message` | Blocks until something new lands on a stream (max 60s), then returns it. A ping interrupts any wait, a DM ends a dms wait. |
-| `list_rooms` | Lists the workspace rooms with message and unread counts. |
-| `create_room` | Creates a workspace room. |
-| `delete_room` | Deletes a workspace room and its messages. |
+| `list_rooms` | Lists the rooms this profile may use, with message and unread counts. Private rooms are hidden. |
+| `create_room` | Creates a room; the caller becomes its original owner. |
+| `delete_room` | Deletes a room and its messages. Owner or admin only. |
+| `set_room_involved` | Sets which profiles may use a room (`null` is everyone; two names is a DM). Owner or admin only. |
+| `add_room_admin` / `remove_room_admin` | Change a room's admins. Original owner only. |
 | `get_heartbeat` | Reports a profile's last tool call and whether that counts as online. |
 
 ## Chat
 
-Rooms are workspace-scoped and live under the project:
+Rooms are workspace-scoped and are folders under the project. A room carries its
+stream, the screening policy its owners add, and its membership - and
+`profiles.json` is private to the core, like `sessions.json`:
 
 ```text
-<workspace>/.devin/autonom-coord/rooms/<room>.jsonl
+<workspace>/.devin/autonom-coord/rooms/<room>/messages.jsonl
+<workspace>/.devin/autonom-coord/rooms/<room>/policy.yml
+<workspace>/.devin/autonom-coord/rooms/<room>/profiles.json
 ```
+
+A room's authority is a ladder: the original owner (the creator; every human
+seat is always an original owner) manages the admins, the original owner and
+admins administer the room, and `involved` profiles may read and write. An
+`involved` list that is `null` is everyone in the clone; a list makes the room
+private and hides it from non-members.
 
 DMs and pings are profile-scoped and live in the profile, so they follow a
 person across workspaces:
@@ -83,7 +95,14 @@ source of truth for its directories:
 
 `policy` screens tool calls and `salience` gates the unread-message stop alert.
 Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
-`"decider"`), or `false`. `memory` gates the session-start notes read.
+`"decider"`), or `false`. `memory` gates the session-start notes read. `human` is
+one profile name or a list; every human seat is an original owner of every room.
+
+The screening itself is data, not code. `templates/policy.yml` is the master
+policy - an ordered list of rules that match on the tool name and input fields,
+then `deny`, `allow`, or `screen` (ask the backend a typed question). A room's
+`policy.yml` adds rules on top and can only restrict: composition is a meet, so
+a room's `allow` never outranks the master's `deny` or `screen`.
 
 ## Source layout
 
@@ -91,11 +110,14 @@ Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
 | --- | --- |
 | `source/config.rb` | The workspace config and the directories derived from it. |
 | `source/profile_store.rb` | Gateway to profiles: listing, lookup, and session registration. |
+| `source/policy.rb` | The screening policy format: rules, matching, and the restrict-only composition. |
 | `source/coord/bus.rb` | The workspace's bus: stream mechanics, the wait registry, and the room, dms, and pings handles. |
+| `source/coord/room.rb` | A room folder: its stream, its policy, and its owner/admin/involved ladder. |
 | `source/coord/inbox.rb` | One named stream (a room, dms, or pings) with its own cursor and wait. |
 | `source/profile.rb` | A profile handle: identity, memory, presence, and its permissions. |
 | `source/permissions.rb` | Access control mixed into `Profile`, plus `Unclaimed` for sessions without one. |
 | `source/coord/server.rb` | The MCP server. |
+| `templates/policy.yml` | The master policy. |
 
 ## Profile storage
 

@@ -1,3 +1,4 @@
+require 'json'
 require 'shellwords'
 
 require_relative 'config'
@@ -9,7 +10,7 @@ module Permissions
   end
 
   def can_write?(path)
-    can_access?(path)
+    can_access?(path, write: true)
   end
 
   def can_search?(path)
@@ -18,7 +19,11 @@ module Permissions
     path = resolve(path, Config.project_dir)
     agents = resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
     prefix = path.end_with?(File::SEPARATOR) ? path : "#{path}#{File::SEPARATOR}"
-    !agents.start_with?(prefix)
+    return false if agents.start_with?(prefix)
+
+    # A search rooted at or above a hidden room would read its messages, and a
+    # search cannot filter its own results - so it fails closed.
+    !hidden_room_dirs.any? { |dir| dir == path || dir.start_with?(prefix) }
   end
 
   def can_glob?(pattern, path:)
@@ -38,6 +43,10 @@ module Permissions
       next if @name && profile.name.casecmp?(@name)
 
       restricted.concat(Dir.glob(File.join(profile.directory, '**', '*'), File::FNM_DOTMATCH))
+    end
+    hidden_room_dirs.each do |dir|
+      restricted << dir
+      restricted.concat(Dir.glob(File.join(dir, '**', '*'), File::FNM_DOTMATCH))
     end
 
     flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
@@ -59,14 +68,17 @@ module Permissions
 
   private
 
-  def can_access?(path)
+  def can_access?(path, write: false)
     return false unless path.is_a?(String) && !path.empty?
 
     path = resolve(path, Config.project_dir)
-    root = resolve(ProfileStore.root, Config.project_dir)
     name = File.basename(path)
     return false if name == '.env' || name.start_with?('.env.')
 
+    room = room_access(path, write: write)
+    return room unless room.nil?
+
+    root = resolve(ProfileStore.root, Config.project_dir)
     agents = resolve(File.join(root, 'agents'), Config.project_dir)
     if path == agents || path.start_with?("#{agents}#{File::SEPARATOR}")
       relative = path.delete_prefix("#{agents}#{File::SEPARATOR}")
@@ -81,6 +93,64 @@ module Permissions
     return false if store_file?(name)
 
     @name && @name.casecmp?(name)
+  end
+
+  # A path inside a room folder, or nil when it is not one. `messages.jsonl`
+  # is visible to everyone in the room; `policy.yml` is visible but only an
+  # owner or admin may write it; `profiles.json` is never a tool's business.
+  def room_access(path, write:)
+    root = rooms_root
+    prefix = "#{root}#{File::SEPARATOR}"
+    return nil unless path == root || path.start_with?(prefix)
+    return false if path == root
+
+    room_name, file = path.delete_prefix(prefix).split(File::SEPARATOR)
+    return false if room_name.nil? || file.nil?
+
+    membership = room_membership(room_name)
+    return false unless membership
+
+    case file
+    when 'messages.jsonl' then membership[:visible]
+    when 'policy.yml' then membership[:visible] && (!write || membership[:administrator])
+    else false
+    end
+  end
+
+  # Membership read straight from the room's profiles.json. Permissions cannot
+  # depend on the Bus (that would close a require cycle), so the ladder lives
+  # here as well - it is the same ladder Room enforces.
+  def room_membership(room_name)
+    return nil if @name.to_s.empty?
+
+    data = JSON.parse(File.read(File.join(rooms_root, room_name, 'profiles.json')))
+    return nil unless data.is_a?(Hash)
+
+    owner = data['owner'].to_s
+    original = (!owner.empty? && owner.casecmp?(@name)) || Config.humans.any? { |human| human.casecmp?(@name) }
+    admin = Array(data['admins']).any? { |name| name.to_s.casecmp?(@name) }
+    involved = data['involved']
+    member = involved.nil? || Array(involved).any? { |name| name.to_s.casecmp?(@name) }
+    { administrator: original || admin, visible: original || admin || member }
+  rescue SystemCallError, JSON::ParserError
+    nil
+  end
+
+  def hidden_room_dirs
+    root = rooms_root
+    return [] unless File.directory?(root)
+
+    Dir.children(root).filter_map do |entry|
+      dir = File.join(root, entry)
+      next unless File.directory?(dir)
+
+      membership = room_membership(entry)
+      dir unless membership && membership[:visible]
+    end
+  end
+
+  def rooms_root
+    resolve(Config.rooms_dir, Config.project_dir)
   end
 
   def shell_paths(cmd)

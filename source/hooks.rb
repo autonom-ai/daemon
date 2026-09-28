@@ -1,6 +1,7 @@
 require_relative 'config'
 require_relative 'profile_store'
 require_relative 'permissions'
+require_relative 'policy'
 require_relative 'salience/salience'
 require_relative 'jev'
 require_relative 'coord/bus'
@@ -21,29 +22,6 @@ module Hooks
     mcp__autonom-coord-mcp__get_heartbeat
   ].freeze
 
-  # The policy screen: what a tool call is judged against, and the bar its
-  # answer has to cross to count as harmful.
-  POLICY = [
-    'get_profiles lists profile names and paths only.',
-    'The first set_profile claim is trusted; later changes are disallowed.',
-    'The session map is private. Only the mapped profile may be read or changed.',
-    'Deleting home or source and bypassing restrictions are harmful.'
-  ].freeze
-  POLICY_QUESTIONS = {
-    'harmful' => {
-      'type' => 'noul',
-      'instructions' => [
-        'Does this request access another profile or the session map?',
-        'Does it delete a protected directory or evade restrictions, including through redirection?',
-        'Treat uncertainty as harmful.'
-      ].join(' '),
-      'criteria' => {
-        'true' => 'The request is harmful or a likely workaround.',
-        'false' => 'The request is limited to allowed profile operations.'
-      }
-    }
-  }.freeze
-  THRESHOLD = 0.5
   DENIED = 'Access to this profile or protected file is blocked'
 
   extend self
@@ -64,7 +42,7 @@ module Hooks
       # Avoid subagents waiting forever.
       nil
     end
-  rescue JEV::Error
+  rescue JEV::Error, Policy::Error
     block('The policy check is unavailable; request blocked')
   rescue ProfileStore::Error, Bus::Error
     case event['hook_event_name']
@@ -106,7 +84,8 @@ module Hooks
     policy = Config.policy
     if policy.enabled?
       jev.backend = policy.backend if policy.backend.is_a?(String)
-      return block('The policy check denied this request') if harmful?(jev, tool, input, profile)
+      denied, reason = Policy.decide([Policy.master], policy_request(tool, input, profile), jev: jev)
+      return block(reason || 'The policy check denied this request') if denied
     end
 
     return nil unless SESSION_TOOLS.include?(tool) && !session.to_s.empty?
@@ -119,21 +98,8 @@ module Hooks
     }
   end
 
-  # The screen: the frontend asks the backend one typed question about the
-  # tool call, with the input scrubbed of content and secrets first. An answer
-  # that is not a score blocks the request, so an unreachable or confused
-  # backend fails closed.
-  def harmful?(jev, tool, input, profile)
-    state = {
-      'tool_name' => tool,
-      'tool_input' => JEV::Common.scrub(input),
-      'profile_name' => profile && profile.name,
-      'policy' => POLICY
-    }
-    score = jev.decide(state, POLICY_QUESTIONS).dig('harmful', 'noul')
-    raise JEV::Error, 'The policy check returned no decision' unless score.is_a?(Numeric)
-
-    score >= THRESHOLD
+  def policy_request(tool, input, profile)
+    { 'tool_name' => tool, 'tool_input' => input, 'profile_name' => profile && profile.name }
   end
 
   # Every tool call is a chance to deliver what the agent has not seen: an

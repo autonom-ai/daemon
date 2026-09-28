@@ -5,9 +5,9 @@ require 'securerandom'
 require_relative '../config'
 require_relative '../profile_store'
 require_relative 'inbox'
+require_relative 'room'
 
 module Bus
-  ROOM_PREFIX = 'room'
   DMS_PREFIX = 'dms'
   PINGS_PREFIX = 'pings'
   DMS_FILE = 'dms.jsonl'
@@ -106,26 +106,32 @@ module Bus
     return [] unless File.directory?(dir)
 
     Dir.children(dir).filter_map do |entry|
-      entry.delete_suffix('.jsonl') if entry.end_with?('.jsonl')
-    end.sort.map { |name| Inbox.new("#{ROOM_PREFIX}:#{name}", room_path(name)) }
+      next unless ProfileStore.valid_name?(entry)
+
+      path = File.join(dir, entry)
+      next unless File.directory?(path) && !File.symlink?(path)
+
+      Room.new(entry, path)
+    end.sort_by(&:name)
   end
 
   def room_by_name(name)
     name = room_name(name)
     return nil unless name
 
-    rooms.find { |room| room.name == "#{ROOM_PREFIX}:#{name}" }
+    rooms.find { |room| room.name == name }
   end
 
-  def create_room(name)
+  def visible_rooms(profile)
+    rooms.select { |room| room.visible?(profile && profile.name) }
+  end
+
+  def create_room(name, owner:)
     name = room_name(name)
     raise Error, 'Invalid room name' unless name
     raise Error, "Room already exists: #{name}" if room_by_name(name)
 
-    path = room_path(name)
-    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
-    File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o600) {}
-    Inbox.new("#{ROOM_PREFIX}:#{name}", path)
+    Room.create(name, room_directory(name), owner: owner)
   rescue SystemCallError => error
     raise Error, "Could not create room: #{error.class}"
   end
@@ -134,8 +140,8 @@ module Bus
     room = room_by_name(name)
     raise Error, "Unknown room: #{name}" unless room
 
-    File.unlink(room.path)
-    wake_source(room.name)
+    FileUtils.remove_entry(room.directory)
+    wake_source(room.stream)
     room
   rescue SystemCallError => error
     raise Error, "Could not delete room: #{error.class}"
@@ -176,7 +182,7 @@ module Bus
     {
       'pings' => pings_by_profile(profile).unread(profile),
       'dms' => dms_by_profile(profile).unread(profile),
-      'rooms' => rooms.to_h { |room| [room.name, room.unread(profile)] }
+      'rooms' => visible_rooms(profile).to_h { |room| [room.stream, room.unread(profile)] }
     }
   end
 
@@ -209,7 +215,7 @@ module Bus
       'text' => text.to_s
     }
     entry['to'] = to.name if to
-    entry['room'] = room.name if room
+    entry['room'] = room.stream if room
     entry
   end
 
@@ -223,7 +229,7 @@ module Bus
   def post(room, text, from:)
     entry = entry(from: from, text: text)
     append(room.path, entry)
-    wake_source(room.name)
+    wake_source(room.stream)
     entry
   end
 
@@ -313,8 +319,15 @@ module Bus
     ProfileStore.valid_name?(name) ? name : nil
   end
 
-  def room_path(name)
-    stream_path(Config.rooms_dir, "#{name}.jsonl")
+  def room_directory(name)
+    dir = Config.rooms_dir
+    raise Error, 'Room directory must not be a symlink' if File.symlink?(dir)
+
+    FileUtils.mkdir_p(dir, mode: 0o700)
+    path = File.join(dir, name)
+    raise Error, 'Room directory must not be a symlink' if File.symlink?(path)
+
+    path
   end
 
   def pings_path(profile)

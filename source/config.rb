@@ -37,6 +37,12 @@ module Config
     raw['human']
   end
 
+  # Every human seat is an original owner of every room. A workspace names one
+  # or more; a single string is the common case.
+  def humans
+    Array(raw['human']).map { |name| name.to_s.strip }.reject(&:empty?)
+  end
+
   def default_room
     raw['defaultRoom']
   end
