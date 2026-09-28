@@ -112,7 +112,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_the_hook_session_id_is_injected_into_profile_tools()
-    %w[set_profile send_message get_heartbeat].each do |tool|
+    %w[set_profile send_message list_rooms create_room delete_room get_heartbeat].each do |tool|
       payload = event("mcp__autonom-coord-mcp__#{tool}", 'name' => 'marlow', 'session_id' => 'forged')
       result = hook(payload)
 

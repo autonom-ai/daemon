@@ -111,10 +111,34 @@ module Bus
   end
 
   def room_by_name(name)
-    name = name.to_s.strip.sub(/\A#/, '').downcase
-    return nil unless ProfileStore.valid_name?(name)
+    name = room_name(name)
+    return nil unless name
 
     rooms.find { |room| room.name == "#{ROOM_PREFIX}:#{name}" }
+  end
+
+  def create_room(name)
+    name = room_name(name)
+    raise Error, 'Invalid room name' unless name
+    raise Error, "Room already exists: #{name}" if room_by_name(name)
+
+    path = room_path(name)
+    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
+    File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o600) {}
+    Inbox.new("#{ROOM_PREFIX}:#{name}", path)
+  rescue SystemCallError => error
+    raise Error, "Could not create room: #{error.class}"
+  end
+
+  def delete_room(name)
+    room = room_by_name(name)
+    raise Error, "Unknown room: #{name}" unless room
+
+    File.unlink(room.path)
+    wake_source(room.name)
+    room
+  rescue SystemCallError => error
+    raise Error, "Could not delete room: #{error.class}"
   end
 
   def dms_by_profile(profile)
@@ -283,6 +307,11 @@ module Bus
   end
 
   private
+
+  def room_name(name)
+    name = name.to_s.strip.sub(/\A#/, '').downcase
+    ProfileStore.valid_name?(name) ? name : nil
+  end
 
   def room_path(name)
     stream_path(Config.rooms_dir, "#{name}.jsonl")

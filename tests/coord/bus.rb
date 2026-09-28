@@ -57,6 +57,30 @@ class BusTest < Minitest::Test
     assert_nil Bus.room_by_name('../secrets')
   end
 
+  def test_rooms_can_be_created_and_deleted()
+    created = Bus.create_room('#Market')
+
+    assert_equal 'room:market', created.name
+    assert File.exist?(created.path)
+    assert_equal 'room:market', Bus.room_by_name('market').name
+
+    Bus.delete_room('market')
+
+    assert_nil Bus.room_by_name('market')
+    refute File.exist?(created.path)
+  end
+
+  def test_room_creation_refuses_bad_and_duplicate_names()
+    write_room('general')
+
+    assert_raises(Bus::Error) { Bus.create_room('../secrets') }
+    assert_raises(Bus::Error) { Bus.create_room('general') }
+  end
+
+  def test_room_deletion_requires_an_existing_room()
+    assert_raises(Bus::Error) { Bus.delete_room('nowhere') }
+  end
+
   def test_reads_are_cursored_and_a_first_read_starts_with_a_window()
     path = File.join(@root, 'stream.jsonl')
     3.times { |index| Bus.append(path, Bus.entry(from: @wren, text: "line #{index}")) }

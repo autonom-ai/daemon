@@ -31,7 +31,8 @@ class ServerTest < Minitest::Test
     listed_tools = responses.find { |response| response['id'] == 2 }.dig('result', 'tools')
     set_result = result(responses, 3)
 
-    assert_equal %w[get_profiles get_profile set_profile send_message read_messages wait_for_message list_rooms get_heartbeat],
+    assert_equal %w[get_profiles get_profile set_profile send_message read_messages wait_for_message list_rooms
+                    create_room delete_room get_heartbeat],
                  listed_tools.map { |tool| tool['name'] }
     assert_equal 'marlow', set_result['name']
     assert_equal set_result, result(responses, 4)
@@ -66,6 +67,26 @@ class ServerTest < Minitest::Test
     )
 
     assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')
+  end
+
+  def test_rooms_can_be_created_and_deleted_through_tools()
+    responses = exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'create_room', 'name' => 'Market', 'session_id' => 'session-1'),
+      call(3, 'create_room', 'name' => 'market', 'session_id' => 'session-1'),
+      call(4, 'list_rooms', 'session_id' => 'session-1'),
+      call(5, 'delete_room', 'name' => 'market', 'session_id' => 'session-1'),
+      call(6, 'list_rooms', 'session_id' => 'session-1'),
+      call(7, 'delete_room', 'name' => 'market', 'session_id' => 'session-1')
+    )
+
+    assert_equal 'room:market', result(responses, 2)['name']
+    assert_equal 0, result(responses, 2)['count']
+    assert responses.find { |response| response['id'] == 3 }.dig('result', 'isError')
+    assert_includes result(responses, 4).map { |room| room['name'] }, 'room:market'
+    assert_equal 'Deleted room room:market', result(responses, 5)['result']
+    refute_includes result(responses, 6).map { |room| room['name'] }, 'room:market'
+    assert responses.find { |response| response['id'] == 7 }.dig('result', 'isError')
   end
 
   def test_reads_are_cursored_and_list_rooms_reports_unread()
