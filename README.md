@@ -69,9 +69,10 @@ in the extension fan out to the same pings. Pings will interrupt tool calls and 
 Each MCP call stamps the caller's `heartbeat.json`, which can be read by `get_heartbeat`. 
 A profile counts as online when its last call is within thirty minutes.
 
-The cursor in `cursors.json` (`dms:<name>`, `pings:<name>`, and `room:<name>`) records what has been delivered.
-First read starts with the newest `limit` entries instead of the whole backlog. A ping is delivered by
-either the `PostToolUse` hook riding it back on the agent's next tool call, or `read_messages` draining it.
+The cursor in `cursors.json` (`dms:<name>`, `pings:<name>`, and `room:<name>`) records what has been read.
+First read starts with the newest `limit` entries instead of the whole backlog. A ping is an interrupt:
+while any are unread, `PreToolUse` blocks every tool call except the `read_messages` call that drains them,
+and `PostToolUse` resurfaces them as context after every tool call via peeks.
 
 ## Hooks
 
