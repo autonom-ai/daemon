@@ -33,10 +33,16 @@
 
 * { box-sizing: border-box; }
 
+html { height: 100%; }
+
+/* The host injects `body { padding: 0 20px }` inside a cascade layer; an
+   unlayered rule outranks any layer, so this is what makes the room fill the
+   tab edge to edge instead of floating in a gutter. */
 body
 {
     margin: 0;
-    height: 100vh;
+    padding: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
     background: var(--bg);
@@ -86,18 +92,29 @@ main { flex: 1; display: flex; min-height: 0; }
 
 aside
 {
-    width: 280px;
-    min-width: 280px;
+    width: 264px;
+    min-width: 264px;
     background: var(--panel);
     border-right: 1px solid var(--line);
-    overflow-y: auto;
-    padding: 14px 12px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    min-height: 0;
 }
 
-aside section { margin-bottom: 18px; }
+/* Sections scroll; the status bar stays pinned to the bottom. */
+.sidebar-scroll
+{
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+aside section { margin-bottom: 16px; }
+aside section:last-child { margin-bottom: 0; }
 aside h2
 {
     font-size: 11px;
@@ -110,13 +127,14 @@ aside h2
 
 .status-bar
 {
-    margin-top: auto;
-    padding: 10px 8px 0;
+    flex: none;
+    padding: 9px 12px;
     border-top: 1px solid var(--line);
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 8px;
+    background: var(--panel);
 }
 
 ul { list-style: none; margin: 0; padding: 0; }
@@ -151,6 +169,17 @@ ul { list-style: none; margin: 0; padding: 0; }
 .dms li.active { box-shadow: inset 2px 0 0 var(--accent); }
 .dms li.offline { opacity: 0.5; }
 .rooms li.active { box-shadow: inset 2px 0 0 var(--accent); }
+
+.rooms li.empty,
+.dms li.empty
+{
+    color: var(--faint);
+    font-style: italic;
+    cursor: default;
+}
+
+.rooms li.empty:hover,
+.dms li.empty:hover { background: transparent; color: var(--faint); }
 
 .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
 

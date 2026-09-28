@@ -75,9 +75,9 @@ function roomFile(projectDir, room)
     return path.join(chatDir(projectDir), "rooms", `${normalizeRoom(room)}.jsonl`);
 }
 
-function roomNames(projectDir, teamRoom)
+function roomNames(projectDir, defaultRoom)
 {
-    const names = new Set([normalizeRoom(teamRoom)]);
+    const names = new Set([normalizeRoom(defaultRoom)]);
     const dir = path.join(chatDir(projectDir), "rooms");
     if (existsSync(dir))
         for (const name of readdirSync(dir))
@@ -134,6 +134,14 @@ function advancePingCursor(coordRoot, name, count)
     const file = cursorsFile(coordRoot, name);
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     writeFileSync(file, `${JSON.stringify({ ...readCursors(coordRoot, name), [`pings:${name}`]: count })}\n`, "utf8");
+}
+
+// A profile is online when its last MCP call is recent - the same fact the
+// server reports through get_heartbeat. Every coord tool call stamps it.
+function heartbeat(coordRoot, name)
+{
+    const value = Math.floor(Number(readJson(path.join(profileDir(coordRoot, name), "heartbeat.json"), {})?.ts));
+    return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 // displayName + color from agents/<id>/identity.md - the room renders people by
@@ -216,7 +224,7 @@ async function openBus({ projectDir, coordRoot })
         projectDir,
         coordRoot,
         project: config.project ?? path.basename(projectDir),
-        teamRoom: config.teamRoom ?? "general",
+        defaultRoom: config.defaultRoom ?? "general",
         human: config.human ?? process.env.USER ?? "user",
     };
     ensureProfile(coordRoot, ctx.human);
@@ -228,7 +236,7 @@ async function openBus({ projectDir, coordRoot })
     function watched()
     {
         const files = new Map();
-        for (const name of roomNames(projectDir, ctx.teamRoom))
+        for (const name of roomNames(projectDir, ctx.defaultRoom))
             files.set(roomFile(projectDir, name), "room");
         files.set(dmsFile(coordRoot, ctx.human), "dm");
         return files;
@@ -236,17 +244,6 @@ async function openBus({ projectDir, coordRoot })
 
     const offsets = new Map();
     const pending = new Map();
-    const activity = new Map();
-
-    // One pass over the bus so a fresh extension does not blank every seat's
-    // presence until their next message.
-    function seedActivity()
-    {
-        for (const file of watched().keys())
-            for (const entry of readJsonl(file))
-                if (entry.from && entry.ts > (activity.get(entry.from) ?? 0))
-                    activity.set(entry.from, entry.ts);
-    }
 
     // Establish the pump's file offsets at open time, before anything can be
     // written: history comes from state(), and a message that lands while the
@@ -325,8 +322,6 @@ async function openBus({ projectDir, coordRoot })
                 {
                     continue;
                 }
-                if (entry.from && entry.ts > (activity.get(entry.from) ?? 0))
-                    activity.set(entry.from, entry.ts);
                 entries.push(decorate(kind, file, entry));
             }
         }
@@ -342,10 +337,10 @@ async function openBus({ projectDir, coordRoot })
         const now = Date.now();
         const agents = profiles(coordRoot).map((profile) =>
         {
-            const lastActive = activity.get(profile.id) ?? 0;
+            const lastActive = heartbeat(coordRoot, profile.id);
             return { ...profile, lastActive, online: now - lastActive < ONLINE_MS };
         });
-        const rooms = roomNames(projectDir, ctx.teamRoom).map((name) =>
+        const rooms = roomNames(projectDir, ctx.defaultRoom).map((name) =>
         {
             const roomEntries = readJsonl(roomFile(projectDir, name));
             return {
@@ -364,7 +359,7 @@ async function openBus({ projectDir, coordRoot })
         return {
             project: ctx.project,
             human: ctx.human,
-            teamRoom: ctx.teamRoom,
+            defaultRoom: ctx.defaultRoom,
             agents,
             rooms,
             messages: messages.slice(-HISTORY_LIMIT),
@@ -373,10 +368,9 @@ async function openBus({ projectDir, coordRoot })
 
     async function say(room, text)
     {
-        const name = normalizeRoom(room) || normalizeRoom(ctx.teamRoom);
+        const name = normalizeRoom(room) || normalizeRoom(ctx.defaultRoom);
         const entry = chatEntry(ctx.human, text);
         appendJsonl(roomFile(projectDir, name), entry);
-        activity.set(ctx.human, entry.ts);
         return { entry: decorate("room", roomFile(projectDir, name), entry), pinged: fanout(ctx, text, name) };
     }
 
@@ -388,11 +382,9 @@ async function openBus({ projectDir, coordRoot })
         const entry = chatEntry(ctx.human, text, { to });
         appendJsonl(dmsFile(coordRoot, to), entry);
         appendJsonl(dmsFile(coordRoot, ctx.human), entry);
-        activity.set(ctx.human, entry.ts);
         return { entry: decorate("dm", dmsFile(coordRoot, ctx.human), entry), pinged: fanout(ctx, text, null) };
     }
 
-    seedActivity();
     seedOffsets();
     return { ctx, projectDir, coordRoot, state, pump, say, dm };
 }

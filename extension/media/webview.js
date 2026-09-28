@@ -14,7 +14,7 @@ const state = {
     dm: null,
     human: "user",
     project: "team",
-    teamRoom: "general",
+    defaultRoom: "general",
     connected: false,
 };
 
@@ -206,16 +206,18 @@ function renderMessages(scroll = "force")
 
 function renderSidebar()
 {
-    el.rooms.innerHTML = state.rooms.map((room) =>
-    {
-        const last = room.lastTs ? state.seen[room.name] ?? 0 : Infinity;
-        const unread = (room.lastTs ?? 0) > last;
-        const active = state.room === room.name ? "active" : "";
-        return `<li class="${active} ${unread ? "unread" : ""}" data-room="${esc(room.name)}" title="${room.count} message${room.count === 1 ? "" : "s"}">
-            <span class="name">#${esc(room.name)}</span>
-            <span class="meta">${room.count} msgs</span>
-        </li>`;
-    }).join("");
+    el.rooms.innerHTML = state.rooms.length
+        ? state.rooms.map((room) =>
+        {
+            const last = room.lastTs ? state.seen[room.name] ?? 0 : Infinity;
+            const unread = (room.lastTs ?? 0) > last;
+            const active = state.room === room.name ? "active" : "";
+            return `<li class="${active} ${unread ? "unread" : ""}" data-room="${esc(room.name)}" title="${room.count} message${room.count === 1 ? "" : "s"}">
+                <span class="name">#${esc(room.name)}</span>
+                <span class="meta">${room.count} msgs</span>
+            </li>`;
+        }).join("")
+        : `<li class="empty">No rooms yet</li>`;
 
     renderDms();
 
@@ -238,16 +240,18 @@ function renderDms()
         .filter((agent) => agent.id !== state.human)
         .sort((a, b) => (b.lastActive ?? 0) - (a.lastActive ?? 0));
 
-    el.dms.innerHTML = shown.map((agent) =>
-    {
-        const unread = unreadFor(agent);
-        const active = state.dm === agent.id ? "active" : "";
-        const stale = agent.online ? "" : "offline";
-        return `<li class="${active} ${stale}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
-            <span class="name" data-color="${esc(seatColor(agent.id))}">${esc(displayName(agent.id))}</span>
-            <span class="meta">${unread ? `${unread} unread` : "1:1"}</span>
-        </li>`;
-    }).join("");
+    el.dms.innerHTML = shown.length
+        ? shown.map((agent) =>
+        {
+            const unread = unreadFor(agent);
+            const active = state.dm === agent.id ? "active" : "";
+            const stale = agent.online ? "" : "offline";
+            return `<li class="${active} ${stale}" data-dm="${esc(agent.id)}" title="1:1 with ${esc(displayName(agent.id))}">
+                <span class="name" data-color="${esc(seatColor(agent.id))}">${esc(displayName(agent.id))}</span>
+                <span class="meta">${unread ? `${unread} unread` : "1:1"}</span>
+            </li>`;
+        }).join("")
+        : `<li class="empty">No teammates yet</li>`;
     paintColors(el.dms);
 }
 
@@ -258,7 +262,7 @@ function destination()
 {
     if (state.dm)
         return { mode: "dm", name: state.dm };
-    return { mode: "room", name: state.room ?? state.teamRoom };
+    return { mode: "room", name: state.room ?? state.defaultRoom };
 }
 
 function openDm(seat)
@@ -287,11 +291,11 @@ function absorb(payload)
 {
     state.human = payload.human;
     state.project = payload.project ?? state.project;
-    state.teamRoom = payload.teamRoom;
+    state.defaultRoom = payload.defaultRoom;
     state.rooms = payload.rooms;
     state.agents = payload.agents;
     if (!state.room && !state.dm)
-        state.room = state.teamRoom;
+        state.room = state.defaultRoom;
     renderSidebar();
     renderBuild(payload);
 }
@@ -412,6 +416,18 @@ el.composer.addEventListener("submit", (event) =>
 {
     event.preventDefault();
     send();
+});
+
+// The composer is one target: clicking its padding, the hint row, or the space
+// under the text focuses the textarea rather than landing on dead space. Clicks
+// on the textarea itself, the send button, or a mention row keep their own
+// behavior.
+el.composer.addEventListener("mousedown", (event) =>
+{
+    if (event.target === el.text || event.target.closest("button, a, li"))
+        return;
+    event.preventDefault();
+    el.text.focus();
 });
 
 const mentionState = { open: false, items: [], active: 0, start: -1 };

@@ -1,7 +1,7 @@
 {
   "name": "autonom-coord",
-  "displayName": "Agent Coord Chat",
-  "description": "Unified chat interface for autonom sessions.",
+  "displayName": "Autonom Team Room",
+  "description": "The human's seat on the autonom coord bus: rooms, DMs, and pings in a Devin Desktop tab.",
   "publisher": "cet",
   "version": "0.3.0",
   "private": true,
@@ -19,34 +19,34 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "agentCoord",
+          "id": "autonomCoord",
           "title": "Team Room",
           "icon": "media/room.svg"
         }
       ]
     },
     "views": {
-      "agentCoord": [
+      "autonomCoord": [
         {
           "type": "webview",
-          "id": "agentCoord.chat",
+          "id": "autonomCoord.chat",
           "name": "Team Room"
         }
       ]
     },
     "commands": [
       {
-        "command": "agentCoord.focus",
+        "command": "autonomCoord.focus",
         "title": "Open the team room",
         "category": "Team Room"
       },
       {
-        "command": "agentCoord.openPanel",
+        "command": "autonomCoord.openPanel",
         "title": "Open the team room in a tab",
         "category": "Team Room"
       },
       {
-        "command": "agentCoord.refresh",
+        "command": "autonomCoord.refresh",
         "title": "Refresh",
         "category": "Team Room"
       }
@@ -54,12 +54,12 @@
     "configuration": {
       "title": "Team Room",
       "properties": {
-        "agentCoord.workspace": {
+        "autonomCoord.workspace": {
           "type": "string",
           "default": "",
           "description": "Workspace directory whose .devin/autonom-config.json wires it to a team. Empty means the open folder that has one."
         },
-        "agentCoord.coordRoot": {
+        "autonomCoord.coordRoot": {
           "type": "string",
           "default": "",
           "description": "Path to the autonom clone (profiles, DMs, pings)."

@@ -74,7 +74,7 @@ source of truth for its directories:
 {
   "project": "my-project",
   "human": "cet",
-  "teamRoom": "general",
+  "defaultRoom": "general",
   "policy": true,
   "salience": true,
   "memory": true

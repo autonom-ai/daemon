@@ -4,7 +4,7 @@
 // browser, no respawn wrapper. The webview is presentation only - it renders
 // what the host posts and sends back say/dm intents.
 //
-// The room opens as an editor tab (agentCoord.focus / agentCoord.openPanel).
+// The room opens as an editor tab (autonomCoord.focus / autonomCoord.openPanel).
 // The activity-bar view is a stable placeholder with a button to open that tab.
 
 const vscode = require("vscode");
@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { openBus } = require("./bus.js");
 
-const VIEW_ID = "agentCoord.chat";
+const VIEW_ID = "autonomCoord.chat";
 const MEDIA_DIR = path.join(__dirname, "media");
 const POLL_MS = 750;
 const RECONCILE_MS = 10_000;
@@ -33,7 +33,7 @@ let lastReconcile = 0;
 
 function findWorkspace()
 {
-    const configured = vscode.workspace.getConfiguration("agentCoord").get("workspace");
+    const configured = vscode.workspace.getConfiguration("autonomCoord").get("workspace");
     const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
     for (const dir of [...(configured ? [configured] : []), ...folders])
         if (dir && fs.existsSync(path.join(dir, ".devin", "autonom-config.json")))
@@ -43,7 +43,7 @@ function findWorkspace()
 
 function coordRootOf()
 {
-    return vscode.workspace.getConfiguration("agentCoord").get("coordRoot") ?? null;
+    return vscode.workspace.getConfiguration("autonomCoord").get("coordRoot") ?? null;
 }
 
 function postAll(message)
@@ -87,7 +87,7 @@ async function ensureBus()
     const coordRoot = coordRootOf();
     if (!coordRoot)
     {
-        busError = "agentCoord.coordRoot is not set.";
+        busError = "autonomCoord.coordRoot is not set.";
         postAll({ type: "toast", text: busError, tone: "bad" });
         scheduleReconnect();
         return null;
@@ -169,18 +169,25 @@ async function refresh()
     await pushState();
 }
 
+// Ping and room entries carry the bus's stream-qualified room name (`room:general`);
+// the human reads the bare name.
+function roomLabel(room)
+{
+    return String(room ?? "").replace(/^room:/, "");
+}
+
 // A ping names the human: the human's profile collects pings in the same
 // pings.jsonl every agent has, and the badge counts the ones they have not
 // looked at yet. Notifications carry the text itself.
 function notifyPing(ping)
 {
     const preview = (ping.text ?? "").length > 140 ? `${ping.text.slice(0, 140)}…` : ping.text;
-    const where = ping.room ? ` in #${ping.room}` : "";
+    const where = ping.room ? ` in #${roomLabel(ping.room)}` : "";
     vscode.window.showInformationMessage(`${ping.from}${where}: ${preview}`, "Open Team Room")
         .then((choice) =>
         {
             if (choice === "Open Team Room")
-                vscode.commands.executeCommand("agentCoord.focus");
+                vscode.commands.executeCommand("autonomCoord.focus");
         });
 }
 
@@ -325,7 +332,7 @@ class RoomViewProvider
         webviewView.webview.onDidReceiveMessage((message) =>
         {
             if (message.type === "openRoom")
-                vscode.commands.executeCommand("agentCoord.focus");
+                vscode.commands.executeCommand("autonomCoord.focus");
         });
         webviewView.onDidDispose(() =>
         {
@@ -343,7 +350,7 @@ function openPanel()
         panel.reveal();
         return;
     }
-    panel = vscode.window.createWebviewPanel("agentCoord.panel", "Team Room", vscode.ViewColumn.Active, { retainContextWhenHidden: true });
+    panel = vscode.window.createWebviewPanel("autonomCoord.panel", "Team Room", vscode.ViewColumn.Active, { retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.file(path.join(MEDIA_DIR, "room.svg"));
     panel.onDidDispose(() => { panel = null; });
     panel.onDidChangeViewState(() =>
@@ -363,9 +370,9 @@ function activate(context)
 {
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(VIEW_ID, new RoomViewProvider()),
-        vscode.commands.registerCommand("agentCoord.focus", openPanel),
-        vscode.commands.registerCommand("agentCoord.openPanel", openPanel),
-        vscode.commands.registerCommand("agentCoord.refresh", refresh),
+        vscode.commands.registerCommand("autonomCoord.focus", openPanel),
+        vscode.commands.registerCommand("autonomCoord.openPanel", openPanel),
+        vscode.commands.registerCommand("autonomCoord.refresh", refresh),
     );
 
     pollTimer = setInterval(poll, POLL_MS);

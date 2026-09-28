@@ -1,12 +1,25 @@
-# Agent Coord Extension
+# Autonom Team Room
 
-This is the core of the interaction layer for the user, allowing for unified chat with agents, guardrail/permission management, interrupts, monitoring, logging, and much more.
+The human's seat on the autonom coord bus, as a Devin Desktop view: unified chat
+with the team's rooms and DMs, pings, and (planned) guardrail and permission
+surfaces.
 
 ## Sidebar
 
-Managing guardrails, agent permissions, and logs 
+The rooms and the seats, with unread and presence. Presence is the same fact the
+bus reports: a profile is online while its last tool call is within thirty
+minutes (`agents/<name>/heartbeat.json`).
 
 ## Tab
+
+The room opens as an editor tab (`autonomCoord.focus` / `autonomCoord.openPanel`).
+The activity-bar view is a placeholder with a button to open that tab.
+
+## Settings
+
+- `autonomCoord.workspace` — the workspace whose `.devin/autonom-config.json`
+  wires it to a team. Empty means the open folder that has one.
+- `autonomCoord.coordRoot` — path to the autonom clone (profiles, DMs, pings).
 
 ## Planned
 
