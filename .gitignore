@@ -1,11 +1,11 @@
 node_modules/
+dist/
 agents/
 local/
 AGENTS.md
 .devin
 tools/
 .playwright-mcp/
-extension/*.vsix
 .env
 bin/*
 !bin/.gitkeep

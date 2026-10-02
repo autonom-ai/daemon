@@ -39,7 +39,11 @@ class IdentityTest < Minitest::Test
 
   def test_priors_digest_interests_and_skip_self()
     wren = ProfileStore.register_profile('wren', 'session-2')
-    write_identity(wren, "---\ndisplayName: Wren\n---\n\n## Interests\n\nembeddings, search quality\n\n## Disinterests\n\nresume formatting\n")
+    write_identity(
+      wren,
+      "---\ndisplayName: Wren\n---\n\n## Interests\n\nembeddings, search quality\n\n" \
+      "## Disinterests\n\nresume formatting\n"
+    )
     write_identity(@marlow, "---\ndisplayName: Marlow\n---\n\n## Voice\n\nblunt\n")
 
     priors = Identity.priors(ProfileStore.profiles, skip: 'marlow')

@@ -6,7 +6,7 @@ class RoomTest < Minitest::Test
   include CoreTest
 
   def setup()
-    setup_core('human' => 'cet')
+    setup_core()
     ProfileStore.register_profile('marlow', 'session-1')
     ProfileStore.register_profile('wren', 'session-2')
     ProfileStore.register_profile('quill', 'session-3')
@@ -27,12 +27,12 @@ class RoomTest < Minitest::Test
     assert_equal 'room:general', @room.stream
   end
 
-  def test_the_original_owner_and_humans_administer()
+  def test_the_original_owner_and_human_administer()
     assert @room.original_owner?('marlow')
-    assert @room.original_owner?('cet')
+    assert @room.original_owner?('human')
     refute @room.original_owner?('wren')
     assert @room.administrator?('marlow')
-    assert @room.administrator?('cet')
+    assert @room.administrator?('human')
     refute @room.administrator?('wren')
   end
 
@@ -64,6 +64,6 @@ class RoomTest < Minitest::Test
 
     refute @room.involved?('wren')
     refute @room.visible?('wren')
-    assert @room.original_owner?('cet')
+    assert @room.original_owner?('human')
   end
 end

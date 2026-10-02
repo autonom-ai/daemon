@@ -1,0 +1,26 @@
+# Required primary policy for every tool call. Copy this file to
+# <workspace>/.devin/policy.yml. There is no template fallback.
+# Room policy.yml files add restrict-only secondary rules.
+access:
+  - guard: env
+  - guard: profiles
+  - guard: rooms
+  - guard: policy
+  - guard: exec
+  - guard: codebase
+    except: [sable, wren, marlow]
+
+rules:
+  - action: screen
+    reason: The policy check denied this request
+    context:
+      - get_profiles lists profile names and paths only.
+      - The first set_profile claim is trusted; later changes are disallowed.
+      - The human profile is reserved and cannot be claimed by an agent session.
+      - The session map and primary policy are protected.
+      - Authorized owners and admins may set or remove room policy through autonom-policy.
+      - Deleting protected paths or bypassing restrictions is harmful.
+    question: >-
+      Does this request access another profile, the session map, or protected
+      policy state? Does it delete a protected directory or evade restrictions,
+      including through redirection? Treat uncertainty as harmful.

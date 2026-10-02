@@ -14,10 +14,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
+
+      - name: Install AI bridge dependencies
+        run: npm ci
+
+      - name: Check and build AI bridge
+        run: npm run check && npm run build
 
       - name: Syntax-check Ruby core and tests
         run: |
@@ -25,46 +32,5 @@ jobs:
             ruby -c "$file" || exit 1
           done
 
-      - name: Test Ruby profile core
+      - name: Test Ruby core
         run: ruby -Itests -e 'Dir["tests/**/*.rb"].sort.each { |file| require_relative file }'
-
-      # Every JS file parses - catches missing imports and syntax slips,
-      # the failure class this codebase actually produces.
-      - name: Syntax-check all JS
-        run: |
-          find . -name node_modules -prune -o -name '*.mjs' -print -o -name '*.js' -print | while read -r f; do
-            node --check "$f" || exit 1
-          done
-
-      # The extension host's bus client is plain Node (no vscode import), so the
-      # product contract - a wired workspace's rooms and profiles read and write
-      # the same files the Ruby core does - is testable here without an editor.
-      - name: Smoke-test the room bus client
-        run: |
-          WS=/tmp/ci-room
-          ROOT=/tmp/ci-root
-          rm -rf "$WS" "$ROOT"
-          mkdir -p "$WS/.devin" "$ROOT/agents/marlow"
-          printf -- '---\nname: marlow\ndisplayName: Marlow\n---\n\nTest persona.\n' > "$ROOT/agents/marlow/identity.md"
-          printf '{"project":"ci-room","human":"ci","teamRoom":"general"}\n' > "$WS/.devin/autonom-config.json"
-          node -e '
-            const { readFileSync } = require("node:fs");
-            const { openBus } = require("./extension/bus.js");
-            (async () => {
-              const bus = await openBus({ projectDir: "/tmp/ci-room", coordRoot: "/tmp/ci-root" });
-              const before = await bus.state();
-              if (!before.rooms.some((room) => room.name === "general")) throw new Error("no #general");
-              if (!before.agents.some((agent) => agent.id === "ci")) throw new Error("human profile missing");
-              const said = await bus.say("general", "hello from CI @marlow");
-              if (String(said.pinged) !== "marlow") throw new Error("mention did not ping marlow");
-              const ping = JSON.parse(readFileSync("/tmp/ci-root/agents/marlow/pings.jsonl", "utf8").trim());
-              if (ping.room !== "room:general" || ping.from !== "ci") throw new Error("ping did not land");
-              await bus.dm("marlow", "psst");
-              const dm = JSON.parse(readFileSync("/tmp/ci-root/agents/marlow/dms.jsonl", "utf8").trim());
-              if (dm.to !== "marlow") throw new Error("dm did not land");
-              const texts = (await bus.state()).messages.map((message) => message.text);
-              if (!texts.includes("hello from CI @marlow") || !texts.includes("psst"))
-                throw new Error("messages did not land");
-              console.log("bus ok:", texts.length, "message(s)");
-            })().catch((err) => { console.error(err); process.exit(1); });
-          '

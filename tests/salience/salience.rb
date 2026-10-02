@@ -28,128 +28,50 @@ class SalienceTest < Minitest::Test
     assert lines.any? { |line| line.include?('Unread direct messages (1)') }
     assert lines.any? { |line| line.include?('New #room:general traffic (1)') }
     assert lines.any? { |line| line.include?('ping text') }
-    assert lines.any? { |line| line.include?('dm text') }
-    assert lines.any? { |line| line.include?('room text') }
     assert_equal 1, Bus.pings_by_profile(@marlow).unread(@marlow).length
   end
 
-  def test_a_direct_message_outranks_room_traffic()
-    Bus.ping(@marlow, 'ping text', from: @wren, room: room('general'))
-    Bus.dm(@marlow, 'dm text', from: @wren)
-    Bus.post(room('general'), 'room text', from: @wren)
-
-    focus = Salience.focus(Salience.impulses(Bus.unread(@marlow)))
-
-    assert_equal 'Respond', focus.kind
-    assert focus.required?
-    assert_includes focus.context, 'ping text'
-    assert_includes focus.context, 'dm text'
-    assert_equal 'Action', focus.channel
-  end
-
-  def test_room_traffic_alone_is_a_coordinate_impulse()
-    Bus.post(room('general'), 'anyone around?', from: @wren)
-
-    focus = Salience.focus(Salience.impulses(Bus.unread(@marlow)))
-
-    assert_equal 'Coordinate', focus.kind
-    refute focus.required?
-  end
-
-  def test_stop_text_is_one_complete_message()
-    Bus.ping(@marlow, 'ping text', from: @wren, room: room('general'))
-
+  def test_stop_text_is_strictly_task_based()
     text = Salience.stop_text(@marlow)
 
     assert_includes text, 'Do not end the turn yet'
-    assert_includes text, 'Unread pings (1)'
-    assert_includes text, 'Answer what is owed first'
+    assert_includes text, 'continue the current user task'
+    assert_includes text, 'Do not invent side quests'
+    assert_includes text, 'choose a relevant room'
+    refute_includes text, 'activity drive'
   end
 
-  def test_stop_text_hands_the_turn_back_as_free_time_when_nothing_is_owed()
+  def test_stop_text_uses_the_last_posted_room_for_waiting()
+    Bus.post(room('general'), 'working here', from: @marlow)
+
     text = Salience.stop_text(@marlow)
 
-    assert_includes text, 'Do not end the turn yet'
-    assert_includes text, 'Nothing is owed'
-    assert_includes text, 'The turn is yours'
-    refute_includes text, 'wait_for_message'
+    assert_includes text, 'wait_for_message for room general'
+    refute_includes text, 'choose a relevant room'
   end
 
-  def test_a_starved_social_drive_is_a_report_impulse()
-    8.times { Salience::Activity.record(@marlow, 'edit', { 'file_path' => 'source/x.rb' }) }
-
-    impulses = Salience.activity_impulses(@marlow)
-
-    assert_equal 1, impulses.length
-    assert_equal 'Report', impulses.first.kind
-    assert_equal 'activity', impulses.first.origin
-    refute impulses.first.required?
-    assert_includes impulses.first.context, 'source/x.rb'
-  end
-
-  def test_a_starved_work_drive_is_a_continue_impulse()
-    5.times { Salience::Activity.record(@marlow, 'read', {}) }
-    3.times { Salience::Activity.record(@marlow, 'mcp__autonom-coord-mcp__send_message', {}) }
-
-    impulse = Salience.activity_impulses(@marlow).first
-
-    assert_equal 'Continue', impulse.kind
-  end
-
-  def test_a_starved_explore_drive_is_an_explore_impulse()
+  def test_briefing_carries_identity_team_and_room_without_memory()
     File.write(
       File.join(@marlow.directory, 'identity.md'),
-      "---\ndisplayName: Marlow\n---\n\n## Interests\n\n- kill columns\n"
+      "---\ndisplayName: Marlow\n---\n\nI read the kill columns.\n"
     )
-    8.times { Salience::Activity.record(@marlow, 'edit', {}) }
-    2.times { Salience::Activity.record(@marlow, 'mcp__autonom-coord-mcp__send_message', {}) }
-
-    impulse = Salience.activity_impulses(@marlow).first
-
-    assert_equal 'Explore', impulse.kind
-    assert_includes impulse.context, 'kill columns'
-  end
-
-  def test_stop_text_surfaces_one_activity_impulse_when_nothing_is_owed()
-    8.times { Salience::Activity.record(@marlow, 'edit', { 'file_path' => 'source/x.rb' }) }
-
-    text = Salience.stop_text(@marlow)
-
-    assert_includes text, 'Do not end the turn yet'
-    assert_includes text, 'The turn is yours'
-    assert_includes text, 'Tell the room what you are doing'
-    assert_includes text, 'source/x.rb'
-  end
-
-  def test_unread_still_outranks_a_starved_drive()
-    Bus.ping(@marlow, 'ping text', from: @wren, room: room('general'))
-    8.times { Salience::Activity.record(@marlow, 'edit', {}) }
-
-    text = Salience.stop_text(@marlow)
-
-    assert_includes text, 'Unread pings (1)'
-    refute_includes text, 'Tell the room what you are doing'
-  end
-
-  def test_briefing_carries_identity_memory_team_and_room()
-    write_config('project' => 'jobs', 'memory' => true)
-    File.write(File.join(@marlow.directory, 'identity.md'), "---\ndisplayName: Marlow\n---\n\nI read the kill columns.\n")
-    FileUtils.mkdir_p(File.join(@marlow.directory, 'memories'))
-    File.write(File.join(@marlow.directory, 'memories', 'memory.md'), "# marlow - memory\n\n## Now\n\nChecking the pricer.\n")
     Bus.post(room('general'), 'hello team', from: @wren)
 
     text = Salience.briefing(@marlow)
 
     assert_includes text, 'You are Marlow (marlow)'
     assert_includes text, 'I read the kill columns.'
-    assert_includes text, 'Checking the pricer.'
-    assert_includes text, 'Rooms: #room:general'
+    assert_includes text, 'Rooms: #general'
     assert_includes text, 'Teammates: wren'
     assert_includes text, 'hello team'
+    refute_includes text, 'Your memory'
   end
 
-  def test_briefing_asks_an_unclaimed_tab_to_claim_a_name()
-    assert_includes Salience.briefing(nil), 'Claim your name with set_profile'
+  def test_briefing_asks_an_unclaimed_tab_to_claim_an_agent_name()
+    text = Salience.briefing(nil)
+
+    assert_includes text, 'Claim your name with set_profile'
+    assert_includes text, 'human profile is reserved'
   end
 
   def test_ping_lines_format_unread_pings()

@@ -49,11 +49,9 @@ class BusTest < Minitest::Test
 
   def test_room_names_normalize_and_look_up_an_existing_room()
     write_room('market')
-    write_config('defaultRoom' => 'Market')
 
     assert_equal 'room:market', Bus.room_by_name('#Market').stream
     assert_nil Bus.room_by_name('')
-    assert_equal 'market', Bus.default_room
     assert_nil Bus.room_by_name('../secrets')
   end
 
@@ -103,5 +101,6 @@ class BusTest < Minitest::Test
     assert_equal ['hello'], unread['dms'].map { |entry| entry['text'] }
     assert_equal ['look'], unread['pings'].map { |entry| entry['text'] }
     assert_equal ['team line'], unread['rooms']['room:general'].map { |entry| entry['text'] }
+    assert_equal 'general', @marlow.last_room
   end
 end

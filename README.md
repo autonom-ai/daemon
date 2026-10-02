@@ -1,45 +1,72 @@
 # Autonom
 
-## MCP server
+Autonom is a Ruby coordination and policy core for multi-agent workspaces. It
+uses a small TypeScript bridge for AI SDK policy decisions; coordination,
+profiles, hooks, permissions, and policy composition remain Ruby.
 
-The server is `autonom-coord-mcp` and runs from `source/coord/server.rb`:
+There is no workspace config file. Paths are fixed relative to
+`DEVIN_PROJECT_DIR` (or the current directory), rooms are always explicit, and
+the one human profile is always named `human`.
+
+## Setup
+
+Requirements:
+
+- Ruby 3.2+
+- Node.js 22+
+
+Install and build the AI bridge:
+
+```sh
+npm ci
+npm run build
+```
+
+Merge `templates/mcp.json` into the workspace MCP configuration and replace
+`{{AUTONOM_ROOT}}`. The server names are part of the hook contract:
 
 ```json
 {
   "mcpServers": {
-    "autonom-coord-mcp": {
+    "autonom-coord": {
       "command": "ruby",
-      "args": ["<COORD_ROOT>/source/coord/server.rb"]
+      "args": ["<AUTONOM_ROOT>/source/coord/server.rb"]
+    },
+    "autonom-policy": {
+      "command": "ruby",
+      "args": ["<AUTONOM_ROOT>/source/policy/server.rb"]
     }
   }
 }
 ```
 
-## MCP tools
+Copy the appropriate hook template from `templates/devin/` or
+`templates/claude/` and replace `{{COORD_ROOT}}` with this clone's path.
+Copy `templates/policy.yml` to the workspace's `.devin/policy.yml`; the primary
+policy is required, and a missing file blocks tool use rather than loading a template.
 
-Tool calls are designed to be as lean as possible. Session ID maps a session to a profile/agent,
-and is used to identify the caller. After a session ID has been mapped, it cannot be changed and agents are disallowed from modifying the `sessions.json` map.
+## Coordination
+
+`autonom-coord` identifies each agent through the Devin session ID injected by
+the hook. A session claims one profile with `set_profile` and cannot change it.
+The `human` profile is created automatically and cannot be claimed by an agent
+session.
 
 | Tool | Behavior |
 | --- | --- |
-| `get_profiles` | Lists existing profile names and directories. |
-| `get_profile` | Returns the profile mapped to the current Devin session. |
-| `set_profile` | Registers the current session once; creates a profile if needed. |
-| `send_message` | Posts to a room (default: the team room) or DMs one profile, with optional `ping` targets. |
-| `read_messages` | Reads `room`, `dms`, or `pings`; reading a stream clears what it returns. |
-| `wait_for_message` | Blocks until something new lands on a stream (max 60s), then returns it. A ping interrupts any wait, a DM ends a dms wait. |
-| `list_rooms` | Lists the rooms this profile may use, with message and unread counts. Private rooms are hidden. |
-| `create_room` | Creates a room; the caller becomes its original owner. |
-| `delete_room` | Deletes a room and its messages. Owner or admin only. |
-| `set_room_involved` | Sets which profiles may use a room (`null` is everyone; two names is a DM). Owner or admin only. |
-| `add_room_admin` / `remove_room_admin` | Change a room's admins. Original owner only. |
-| `get_heartbeat` | Reports a profile's last tool call and whether that counts as online. |
+| `get_profiles` | Lists profile names and directories. |
+| `get_profile` | Returns the current session's profile. |
+| `set_profile` | Registers the current session once. |
+| `send_message` | Posts to an explicit room or DMs one profile, with optional pings. |
+| `read_messages` | Reads room, DM, or ping streams. Room reads require `room`. |
+| `wait_for_message` | Waits on an explicit room or on DMs for up to 60 seconds. |
+| `list_rooms` | Lists visible rooms and unread counts. |
+| `create_room` / `delete_room` | Creates or removes a room. |
+| `set_room_involved` | Sets room membership. |
+| `add_room_admin` / `remove_room_admin` | Changes room administrators. |
+| `get_heartbeat` | Reports profile presence from MCP activity. |
 
-## Chat
-
-Rooms are workspace-scoped and are folders under the project. A room carries its
-stream, the screening policy its owners add, and its membership - and
-`profiles.json` is private to the core, like `sessions.json`:
+Rooms live under the workspace:
 
 ```text
 <workspace>/.devin/autonom-coord/rooms/<room>/messages.jsonl
@@ -47,118 +74,90 @@ stream, the screening policy its owners add, and its membership - and
 <workspace>/.devin/autonom-coord/rooms/<room>/profiles.json
 ```
 
-A room's authority is a ladder: the original owner (the creator; every human
-seat is always an original owner) manages the admins, the original owner and
-admins administer the room, and `involved` profiles may read and write. An
-`involved` list that is `null` is everyone in the clone; a list makes the room
-private and hides it from non-members.
-
-DMs and pings are profile-scoped and live in the profile, so they follow a
-person across workspaces:
+DMs, pings, cursors, heartbeat, and last-room focus live directly in each
+profile:
 
 ```text
-agents/<name>/dms.jsonl      # DMs; the human's mirrors what they send
-agents/<name>/pings.jsonl    # pings aimed at this person
-agents/<name>/cursors.json   # how far this person has read each stream
-agents/<name>/heartbeat.json # when this person last called an MCP tool
+agents/<name>/identity.md
+agents/<name>/dms.jsonl
+agents/<name>/pings.jsonl
+agents/<name>/cursors.json
+agents/<name>/heartbeat.json
+agents/<name>/room.json
 ```
 
-Agents may fill out a `ping: [...]` field on `send_message`, and the human's `@name` mentions 
-in the extension fan out to the same pings. Pings will interrupt tool calls and wake agents. *DMs do NOT ping, unlike Discord or Slack*.
+Every room-scoped tool requires `room`; there is no default room. A successful
+room post records that room, keyed by workspace, in the posting profile's
+`room.json`. This selects the profile's active room policy until it posts in
+another room. This state is maintained by the core, not editable by agent tools.
 
-Each MCP call stamps the caller's `heartbeat.json`, which can be read by `get_heartbeat`. 
-A profile counts as online when its last call is within thirty minutes.
+## Policy
 
-The cursor in `cursors.json` (`dms:<name>`, `pings:<name>`, and `room:<name>`) records what has been read.
-First read starts with the newest `limit` entries instead of the whole backlog. A ping is an interrupt:
-while any are unread, `PreToolUse` blocks every tool call except the `read_messages` call that drains them,
-and `PostToolUse` resurfaces them as context after every tool call via peeks.
+`autonom-policy` is independent of the coordination MCP. It manages secondary
+`policy.yml` files by path, without a separate policy directory or registry:
 
-## Hooks
-
-`source/hooks.rb` runs on every lifecycle event. Salience is the only thing that
-gates a stop, and an agent stop is never allowed: every Stop hands the turn back
-something - what is owed, or the starved drive, or the floor, which hands the
-turn back as free time. The activity drives decide the nudge: every tool call
-refills one drive (social, work, explore) and drains the others, drives decay
-with time, and a starved drive surfaces one impulse - report to the room,
-continue the thread you left, pursue a lead. Only the user ends a turn;
-`salience: false` disables the gate.
-
-`workspace/.devin/autonom-config.json` is the workspace's configuration and the
-source of truth for its directories:
-
-```json
-{
-  "project": "my-project",
-  "human": "cet",
-  "defaultRoom": "general",
-  "policy": true,
-  "salience": true,
-  "memory": true
-}
-```
-
-`policy` screens tool calls and `salience` gates the stop gate and the activity impulses.
-Each is `true` (the default backend), a backend name (`"openjev"`, `"typesafe"`,
-`"decider"`), or `false`. `memory` gates the session-start notes read. `human` is
-one profile name or a list; every human seat is an original owner of every room.
-
-The screening itself is data, not code. `.devin/autonom-policy.yml` is the
-workspace's policy; a workspace without one runs on
-`templates/autonom-policy.yml`, the default template setup copies in. The
-`access` list names the guards the core enforces before any rule runs - env
-file privacy, profile and session-map isolation, the room file ladder, exec
-path and deletion checks, and the codebase edit ban - and `except` exempts
-profiles from a single guard or rule. Rules match on the tool name and input
-fields, then `deny`, `allow`, or `screen` (ask the backend a typed question).
-Content-bearing fields are scrubbed before a request reaches the backend - a
-screen rule's `expose` list names the input fields it is allowed to judge.
-A room's `policy.yml` adds rules on top and can only restrict: composition is
-a meet, so a room's `allow` never outranks a `deny` or `screen`.
-
-## Source layout
-
-| Path | Responsibility |
+| Tool | Behavior |
 | --- | --- |
-| `source/config.rb` | The workspace config and the directories derived from it. |
-| `source/profile_store.rb` | Gateway to profiles: listing, lookup, and session registration. |
-| `source/policy.rb` | The screening policy format: rules, matching, and the restrict-only composition. |
-| `source/coord/bus.rb` | The workspace's bus: stream mechanics, the wait registry, and the room, dms, and pings handles. |
-| `source/coord/room.rb` | A room folder: its stream, its policy, and its owner/admin/involved ladder. |
-| `source/coord/inbox.rb` | One named stream (a room, dms, or pings) with its own cursor and wait. |
-| `source/profile.rb` | A profile handle: identity, memory, presence, and its permissions. |
-| `source/permissions.rb` | Access control mixed into `Profile`, plus `Unclaimed` for sessions without one. |
-| `source/salience/salience.rb` | The arbiter: unread signals, activity impulses, and the stop text. |
-| `source/salience/activity.rb` | Tool-call telemetry: the drives each call refills and time decays. |
-| `source/salience/impulse.rb` | The impulse vocabulary: kinds, priorities, and which are obligations. |
-| `source/coord/server.rb` | The MCP server. |
-| `templates/autonom-policy.yml` | The default workspace policy. |
+| `check_policy` | Checks a request against primary policy and an optional secondary path injected by the hook. |
+| `set_secondary_policy` | Creates or replaces `policy.yml` at an existing directory path. |
+| `list_secondary_policies` | Lists accessible `policy.yml` files beneath the supplied `directory`. |
+| `remove_secondary_policy` | Removes the secondary `policy.yml` at the supplied `path`. |
 
-## Profile storage
+The primary policy is the required `.devin/policy.yml`; there is no template
+fallback. A room's `policy.yml` stays in its room directory. To set policy for
+room `general`, pass `.devin/autonom-coord/rooms/general/policy.yml` as `path`.
+Room members may read its policy, while only the owner or admins may change it.
+The hooks apply this room policy to every tool call after the profile last posts
+there, until it posts in another room. Secondary policies add restrictions but
+cannot grant past a primary denial or screen.
 
-Profiles live in the clone's ignored `agents/` directory:
+Policy files contain access guards and ordered rules. Rules match the tool name
+and input fields, then `deny`, `allow`, or `screen`. Screen rules have one plain
+language `question`; content-bearing fields are removed before the model call
+unless the rule explicitly names them in `expose`.
 
-```text
-agents/
-  sessions.json
-  marlow/
-    identity.md
-    heartbeat.json
-    memories/
-      memory.md
-      session-notes.md
-```
+The TypeScript bridge uses AI SDK structured output and an OpenAI-compatible
+provider. It reads these environment variables:
 
-`identity.md` stays at the profile root. Markdown notes live in `memories/`;
-scripts and logs remain at the profile root.
+| Variable | Meaning |
+| --- | --- |
+| `AUTONOM_AI_API_KEY` | Provider API key; falls back to `OPENROUTER_API_KEY`. |
+| `AUTONOM_AI_BASE_URL` | Provider base URL; defaults to OpenRouter. |
+| `AUTONOM_AI_MODEL` | Model ID; defaults to `openai/gpt-5-mini`. |
+
+The bridge also reads these values from this clone's `.env` when they are not
+already in the environment.
+
+## Hooks and salience
+
+`source/hooks.rb` injects identity, team, room, and unread-message context. It
+does not provide native memory storage or simulate activity drives. Stop
+handling is deliberately process-oriented: answer obligations first, continue
+the current user task, verify or coordinate concrete work, and wait only when
+the task is genuinely blocked.
+
+Unread pings interrupt tool use until the profile drains its ping stream. Every
+pre-tool call first enforces deterministic permissions, then primary policy,
+then the secondary policy selected by the profile's last posted room.
 
 ## Development
 
-Ruby 3.2+ is required. The core uses the standard library and has no gem
-dependencies.
-
 ```sh
-ruby -Itest -e 'Dir["tests/*.rb"].sort.each { |file| require_relative file }'
-ruby source/coord/server.rb
+npm run check
+npm run build
+ruby -Itests -e 'Dir["tests/**/*.rb"].sort.each { |file| require_relative file }'
 ```
+
+Source layout:
+
+| Path | Responsibility |
+| --- | --- |
+| `source/coord/` | Rooms, streams, waits, and the coordination MCP. |
+| `source/policy.rb` | Policy parsing, storage, matching, and composition. |
+| `source/policy/server.rb` | The policy MCP. |
+| `source/ai/decision.ts` | AI SDK structured decision bridge. |
+| `source/decision.rb` | Ruby bridge invocation and request scrubbing. |
+| `source/hooks.rb` | Lifecycle context, session injection, and enforcement. |
+| `source/profile_store.rb` | Profile discovery and session registration. |
+| `source/permissions.rb` | Deterministic file and command guards. |
+| `source/salience/salience.rb` | Strict task and coordination context. |

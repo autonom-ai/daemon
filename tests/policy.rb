@@ -6,7 +6,7 @@ require_relative '../source/policy'
 class PolicyTest < Minitest::Test
   include CoreTest
 
-  class FakeJev
+  class FakeDecision
     attr_reader :calls, :state
 
     def initialize(harmful: false)
@@ -14,16 +14,16 @@ class PolicyTest < Minitest::Test
       @calls = 0
     end
 
-    def decide(state, _questions)
+    def harmful?(state, _question)
       @calls += 1
       @state = state
-      { 'harmful' => { 'noul' => @harmful ? 1.0 : 0.0 } }
+      @harmful
     end
   end
 
   def setup()
     setup_core()
-    @jev = FakeJev.new
+    @decision = FakeDecision.new
   end
 
   def teardown()
@@ -40,11 +40,11 @@ class PolicyTest < Minitest::Test
           reason: blocked
     YAML
 
-    denied, reason = Policy.decide([rules], request('exec', 'command' => 'rm -rf /'), jev: @jev)
+    denied, reason = Policy.decide([rules], request('exec', 'command' => 'rm -rf /'), decision: @decision)
 
     assert denied
     assert_equal 'blocked', reason
-    assert_equal 0, @jev.calls
+    assert_equal 0, @decision.calls
   end
 
   def test_a_screen_rule_asks_the_backend()
@@ -60,10 +60,10 @@ class PolicyTest < Minitest::Test
               false: no
     YAML
 
-    denied, = Policy.decide([rules], request('exec'), jev: @jev)
+    denied, = Policy.decide([rules], request('exec'), decision: @decision)
 
     refute denied
-    assert_equal 1, @jev.calls
+    assert_equal 1, @decision.calls
   end
 
   def test_a_later_allow_cannot_outrank_an_earlier_deny()
@@ -79,7 +79,7 @@ class PolicyTest < Minitest::Test
           action: allow
     YAML
 
-    denied, reason = Policy.decide([workspace, room], request('exec'), jev: @jev)
+    denied, reason = Policy.decide([workspace, room], request('exec'), decision: @decision)
 
     assert denied
     assert_equal 'workspace', reason
@@ -93,26 +93,26 @@ class PolicyTest < Minitest::Test
           reason: no
     YAML
 
-    denied, = Policy.decide([rules], request('exec'), jev: @jev)
+    denied, = Policy.decide([rules], request('exec'), decision: @decision)
 
     refute denied
-    assert_equal 0, @jev.calls
+    assert_equal 0, @decision.calls
   end
 
-  def test_the_default_template_loads_and_screens()
+  def test_the_required_workspace_policy_loads_and_screens()
     assert Policy.workspace.rules.any?
     assert Policy.workspace.guard?('codebase', 'quill')
     refute Policy.workspace.guard?('codebase', 'sable')
 
-    denied, = Policy.decide([Policy.workspace], request('exec', 'command' => 'git status'), jev: @jev)
+    denied, = Policy.decide([Policy.workspace], request('exec', 'command' => 'git status'), decision: @decision)
 
     refute denied
-    assert_equal 1, @jev.calls
+    assert_equal 1, @decision.calls
   end
 
-  def test_the_workspace_file_wins_over_the_template()
-    File.write(Config.policy_path, "rules: []\n")
-    Policy.reset!
+  def test_the_workspace_file_controls_the_policy()
+    FileUtils.mkdir_p(File.dirname(Workspace.policy_path))
+    File.write(Workspace.policy_path, "rules: []\n")
 
     assert Policy.workspace.rules.empty?
     refute Policy.workspace.guard?('env', 'marlow')
@@ -127,11 +127,11 @@ class PolicyTest < Minitest::Test
           except: [marlow]
     YAML
 
-    denied, = Policy.decide([rules], request('exec'), jev: @jev)
+    denied, = Policy.decide([rules], request('exec'), decision: @decision)
 
     refute denied
 
-    denied, reason = Policy.decide([rules], request('exec', {}, 'wren'), jev: @jev)
+    denied, reason = Policy.decide([rules], request('exec', {}, 'wren'), decision: @decision)
 
     assert denied
     assert_equal 'blocked', reason
@@ -162,10 +162,10 @@ class PolicyTest < Minitest::Test
               false: no
     YAML
 
-    Policy.decide([policy], request('send_message', 'text' => 'sekrit', 'room' => 'general'), jev: @jev)
+    Policy.decide([policy], request('send_message', 'text' => 'sekrit', 'room' => 'general'), decision: @decision)
 
-    assert_equal 'sekrit', @jev.state.dig('tool_input', 'text')
-    assert_equal 'general', @jev.state.dig('tool_input', 'room')
+    assert_equal 'sekrit', @decision.state.dig('tool_input', 'text')
+    assert_equal 'general', @decision.state.dig('tool_input', 'room')
   end
 
   def test_a_screen_without_expose_never_sees_text()
@@ -180,10 +180,10 @@ class PolicyTest < Minitest::Test
               false: no
     YAML
 
-    Policy.decide([policy], request('send_message', 'text' => 'sekrit', 'room' => 'general'), jev: @jev)
+    Policy.decide([policy], request('send_message', 'text' => 'sekrit', 'room' => 'general'), decision: @decision)
 
-    refute @jev.state['tool_input'].key?('text')
-    assert_equal 'general', @jev.state.dig('tool_input', 'room')
+    refute @decision.state['tool_input'].key?('text')
+    assert_equal 'general', @decision.state.dig('tool_input', 'room')
   end
 
   def test_expose_must_be_a_list()
@@ -198,6 +198,37 @@ class PolicyTest < Minitest::Test
 
   def test_a_malformed_policy_raises()
     assert_raises(Policy::Error) { load('rules: {nope}') }
+  end
+
+  def test_secondary_policies_are_managed_at_their_existing_paths()
+    write_room('general')
+    path = room('general').policy_path
+    saved = Policy.set_secondary(path, 'rules' => [{ 'action' => 'deny', 'reason' => 'room' }])
+
+    assert_equal path, saved['path']
+    assert_equal [path], Policy.secondary_policies(Workspace.rooms_dir).map { |entry| entry['path'] }
+    assert_equal 1, Policy.secondary(path).rules.length
+    assert_equal({ 'path' => path, 'removed' => true }, Policy.remove_secondary(path))
+    assert_nil Policy.secondary(path)
+  end
+
+  def test_secondary_policy_paths_cannot_replace_primary_or_follow_symlinks()
+    write_room('general')
+    target = File.join(@project, 'target.yml')
+    File.write(target, "rules: []\n")
+    link = File.join(@project, 'policy.yml')
+    File.symlink(target, link)
+
+    assert_raises(Policy::Error) { Policy.set_secondary(Workspace.policy_path, 'rules' => []) }
+    assert_raises(Policy::Error) { Policy.set_secondary(link, 'rules' => []) }
+  end
+
+  def test_the_workspace_policy_is_required_without_template_fallback()
+    FileUtils.mkdir_p(File.join(@root, 'templates'))
+    FileUtils.cp(Workspace.policy_path, File.join(@root, 'templates', 'policy.yml'))
+    File.unlink(Workspace.policy_path)
+
+    assert_raises(Policy::Error) { Policy.workspace }
   end
 
   private

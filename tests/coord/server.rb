@@ -10,7 +10,6 @@ class ServerTest < Minitest::Test
 
   def setup()
     setup_core()
-    write_config('defaultRoom' => 'general')
     write_room('general')
     @server = Coord::Server.new
   end
@@ -42,12 +41,19 @@ class ServerTest < Minitest::Test
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
-      call(3, 'send_message', 'text' => 'hello team', 'room' => 'general', 'ping' => ['wren'], 'session_id' => 'session-1'),
+      call(
+        3,
+        'send_message',
+        'text' => 'hello team',
+        'room' => 'general',
+        'ping' => ['wren'],
+        'session_id' => 'session-1'
+      ),
       call(4, 'read_messages', 'source' => 'pings', 'session_id' => 'session-2'),
-      call(5, 'read_messages', 'source' => 'room', 'session_id' => 'session-2'),
+      call(5, 'read_messages', 'source' => 'room', 'room' => 'general', 'session_id' => 'session-2'),
       call(6, 'send_message', 'text' => 'psst', 'to' => 'marlow', 'session_id' => 'session-2'),
       call(7, 'read_messages', 'source' => 'dms', 'session_id' => 'session-1'),
-      call(8, 'send_message', 'text' => 'hi', 'ping' => ['nobody'], 'session_id' => 'session-1')
+      call(8, 'send_message', 'text' => 'hi', 'room' => 'general', 'ping' => ['nobody'], 'session_id' => 'session-1')
     )
 
     assert_equal 'Sent message to room:general with 1 pings', result(responses, 3)['result']
@@ -67,6 +73,19 @@ class ServerTest < Minitest::Test
     )
 
     assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')
+  end
+
+  def test_room_scoped_tools_require_a_room()
+    responses = exchange(
+      call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
+      call(2, 'send_message', 'text' => 'hello', 'session_id' => 'session-1'),
+      call(3, 'read_messages', 'source' => 'room', 'session_id' => 'session-1'),
+      call(4, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-1')
+    )
+
+    assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')
+    assert responses.find { |response| response['id'] == 3 }.dig('result', 'isError')
+    assert responses.find { |response| response['id'] == 4 }.dig('result', 'isError')
   end
 
   def test_rooms_can_be_created_and_deleted_through_tools()
@@ -93,9 +112,9 @@ class ServerTest < Minitest::Test
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
-      call(3, 'send_message', 'text' => 'first', 'session_id' => 'session-1'),
-      call(4, 'read_messages', 'source' => 'room', 'session_id' => 'session-2'),
-      call(5, 'send_message', 'text' => 'second', 'session_id' => 'session-1'),
+      call(3, 'send_message', 'text' => 'first', 'room' => 'general', 'session_id' => 'session-1'),
+      call(4, 'read_messages', 'source' => 'room', 'room' => 'general', 'session_id' => 'session-2'),
+      call(5, 'send_message', 'text' => 'second', 'room' => 'general', 'session_id' => 'session-1'),
       call(6, 'list_rooms', 'session_id' => 'session-2'),
       call(7, 'list_rooms', 'session_id' => 'session-1')
     )
@@ -115,13 +134,22 @@ class ServerTest < Minitest::Test
     exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
-      call(3, 'send_message', 'text' => 'first', 'session_id' => 'session-1'),
-      call(4, 'read_messages', 'source' => 'room', 'session_id' => 'session-2'),
-      call(5, 'send_message', 'text' => 'second', 'session_id' => 'session-1')
+      call(3, 'send_message', 'text' => 'first', 'room' => 'general', 'session_id' => 'session-1'),
+      call(4, 'read_messages', 'source' => 'room', 'room' => 'general', 'session_id' => 'session-2'),
+      call(5, 'send_message', 'text' => 'second', 'room' => 'general', 'session_id' => 'session-1')
     )
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    responses = exchange(call(6, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    responses = exchange(
+      call(
+        6,
+        'wait_for_message',
+        'source' => 'room',
+        'room' => 'general',
+        'timeout' => 5,
+        'session_id' => 'session-2'
+      )
+    )
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
     assert_operator elapsed, :<, 1.5
@@ -131,7 +159,16 @@ class ServerTest < Minitest::Test
   def test_wait_for_message_returns_empty_when_the_timeout_runs_out()
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
 
-    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-2'))
+    responses = exchange(
+      call(
+        2,
+        'wait_for_message',
+        'source' => 'room',
+        'room' => 'general',
+        'timeout' => 1,
+        'session_id' => 'session-2'
+      )
+    )
 
     assert_empty result(responses, 2)['messages']
   end
@@ -147,7 +184,16 @@ class ServerTest < Minitest::Test
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    responses = exchange(call(3, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    responses = exchange(
+      call(
+        3,
+        'wait_for_message',
+        'source' => 'room',
+        'room' => 'general',
+        'timeout' => 5,
+        'session_id' => 'session-2'
+      )
+    )
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     pinger.join
 
@@ -184,7 +230,16 @@ class ServerTest < Minitest::Test
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    responses = exchange(call(2, 'wait_for_message', 'source' => 'room', 'timeout' => 5, 'session_id' => 'session-2'))
+    responses = exchange(
+      call(
+        2,
+        'wait_for_message',
+        'source' => 'room',
+        'room' => 'general',
+        'timeout' => 5,
+        'session_id' => 'session-2'
+      )
+    )
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     writer.join
 
@@ -245,7 +300,10 @@ class ServerTest < Minitest::Test
     assert responses.find { |response| response['id'] == 5 }.dig('result', 'isError')
     assert responses.find { |response| response['id'] == 6 }.dig('result', 'isError')
 
-    sent = result(exchange(call(7, 'send_message', 'text' => 'hi', 'room' => 'general', 'session_id' => 'session-1')), 7)
+    sent = result(
+      exchange(call(7, 'send_message', 'text' => 'hi', 'room' => 'general', 'session_id' => 'session-1')),
+      7
+    )
 
     assert_includes sent['result'], 'room:general'
   end
@@ -260,14 +318,30 @@ class ServerTest < Minitest::Test
 
     # An admin may administer the room's membership...
     administered = result(
-      exchange(call(5, 'set_room_involved', 'name' => 'general', 'involved' => %w[marlow wren], 'session_id' => 'session-2')),
+      exchange(
+        call(
+          5,
+          'set_room_involved',
+          'name' => 'general',
+          'involved' => %w[marlow wren],
+          'session_id' => 'session-2'
+        )
+      ),
       5
     )
 
     assert_equal 'room:general', administered['name']
 
     # ...but only the original owner may change the admins.
-    refused = exchange(call(6, 'add_room_admin', 'name' => 'general', 'profile' => 'quill', 'session_id' => 'session-2'))
+    refused = exchange(
+      call(
+        6,
+        'add_room_admin',
+        'name' => 'general',
+        'profile' => 'quill',
+        'session_id' => 'session-2'
+      )
+    )
 
     assert refused.find { |response| response['id'] == 6 }.dig('result', 'isError')
   end
@@ -309,8 +383,7 @@ class ServerTest < Minitest::Test
     JSON.parse(text)
   end
 
-  # A line appended with no wake at all - what a different session's process,
-  # or the human's extension, does.
+  # A line appended with no wake at all - what a different session's process does.
   def append_line(path, entry)
     FileUtils.mkdir_p(File.dirname(path))
     line = { 'id' => SecureRandom.uuid, 'ts' => (Time.now.to_f * 1000).round, **entry }
