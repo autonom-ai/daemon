@@ -1,25 +1,32 @@
-require_relative 'config'
+require_relative 'decision'
 require_relative 'profile_store'
 require_relative 'permissions'
 require_relative 'policy'
 require_relative 'salience/salience'
-require_relative 'jev'
+require_relative 'workspace'
 require_relative 'coord/bus'
 
 require 'json'
 
 module Hooks
   SESSION_TOOLS = %w[
-    mcp__autonom-coord-mcp__get_profiles
-    mcp__autonom-coord-mcp__get_profile
-    mcp__autonom-coord-mcp__set_profile
-    mcp__autonom-coord-mcp__send_message
-    mcp__autonom-coord-mcp__read_messages
-    mcp__autonom-coord-mcp__wait_for_message
-    mcp__autonom-coord-mcp__list_rooms
-    mcp__autonom-coord-mcp__create_room
-    mcp__autonom-coord-mcp__delete_room
-    mcp__autonom-coord-mcp__get_heartbeat
+    mcp__autonom-coord__get_profiles
+    mcp__autonom-coord__get_profile
+    mcp__autonom-coord__set_profile
+    mcp__autonom-coord__send_message
+    mcp__autonom-coord__read_messages
+    mcp__autonom-coord__wait_for_message
+    mcp__autonom-coord__list_rooms
+    mcp__autonom-coord__create_room
+    mcp__autonom-coord__delete_room
+    mcp__autonom-coord__set_room_involved
+    mcp__autonom-coord__add_room_admin
+    mcp__autonom-coord__remove_room_admin
+    mcp__autonom-coord__get_heartbeat
+    mcp__autonom-policy__check_policy
+    mcp__autonom-policy__set_secondary_policy
+    mcp__autonom-policy__list_secondary_policies
+    mcp__autonom-policy__remove_secondary_policy
     mcp__circles__spawn
     mcp__circles__move
     mcp__circles__impulse
@@ -32,20 +39,20 @@ module Hooks
 
   extend self
 
-  def call(event, jev: JEV)
+  def call(event, decision: Decision)
     case event['hook_event_name']
     when 'SessionStart'
       session_start(event)
     when 'UserPromptSubmit'
       prompt_submit(event)
     when 'PreToolUse'
-      pre_tool_use(event, jev: jev)
+      pre_tool_use(event, decision: decision)
     when 'PostToolUse'
       post_tool_use(event)
     when 'Stop'
       stop(event)
     end
-  rescue JEV::Error, Policy::Error
+  rescue Decision::Error, Policy::Error
     block('The policy check is unavailable; request blocked')
   rescue ProfileStore::Error, Bus::Error
     case event['hook_event_name']
@@ -60,8 +67,8 @@ module Hooks
 
   private
 
-  # SessionStart - hand the tab its own context: who it is, what it
-  # remembers, who else is here, and what the room has been saying.
+  # SessionStart - hand the tab its own context: who it is, who else is here,
+  # and what the room has been saying.
   def session_start(event)
     profile = ProfileStore.profile_by_session(event['session_id'])
     context('SessionStart', Salience.briefing(profile))
@@ -78,7 +85,7 @@ module Hooks
     context('UserPromptSubmit', lines.join("\n"))
   end
 
-  def pre_tool_use(event, jev:)
+  def pre_tool_use(event, decision:)
     tool = event['tool_name'].to_s
     input = event['tool_input'].is_a?(Hash) ? event['tool_input'] : {}
     session = event['session_id']
@@ -88,28 +95,23 @@ module Hooks
 
     # An unread ping is an interrupt, not a note: while any are pending the
     # only tool call that runs is the read that drains them.
-    if profile && Config.salience.enabled? && pings_unread?(profile) && !reads_pings?(tool, input)
+    if profile && pings_unread?(profile) && !reads_pings?(tool, input)
       return block('You have unread pings - read them first: call read_messages with source "pings"')
     end
 
-    policy = Config.policy
-    if policy.enabled?
-      jev.backend = policy.backend if policy.backend.is_a?(String)
-      # TODO: a room's own policy.yml never reaches a plain tool call - it is
-      # enforced only on room-scoped MCP calls (see Server#deny_room_policy),
-      # because a call carries no room context. Enforcing it here needs a
-      # focus_room tool so a session can declare its active room and that
-      # room's policy can join this chain.
-      denied, reason = Policy.decide([Policy.workspace], policy_request(tool, input, profile), jev: jev)
-      return block(reason || 'The policy check denied this request') if denied
-    end
+    room = Bus.room_by_name(profile.last_room) if profile&.last_room
+    policies = [Policy.workspace, room&.policy]
+    denied, reason = Policy.decide(policies, policy_request(tool, input, profile), decision: decision)
+    return block(reason || 'The policy check denied this request') if denied
 
     return nil unless SESSION_TOOLS.include?(tool) && !session.to_s.empty?
 
+    updated = { 'session_id' => session.to_s }
+    updated['secondary'] = room&.policy_path if tool == 'mcp__autonom-policy__check_policy'
     {
       'hookSpecificOutput' => {
         'hookEventName' => 'PreToolUse',
-        'updatedInput' => { 'session_id' => session.to_s }
+        'updatedInput' => updated
       }
     }
   end
@@ -123,14 +125,12 @@ module Hooks
   end
 
   def reads_pings?(tool, input)
-    tool == 'mcp__autonom-coord-mcp__read_messages' && input['source'].to_s == 'pings'
+    tool == 'mcp__autonom-coord__read_messages' && input['source'].to_s == 'pings'
   end
 
   def post_tool_use(event)
     profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
-
-    Salience::Activity.record(profile, event['tool_name'], event['tool_input'])
 
     pings = Bus.pings_by_profile(profile).unread(profile)
     return nil if pings.empty?
@@ -142,8 +142,6 @@ module Hooks
     profile = ProfileStore.profile_by_session(event['session_id'])
     return nil unless profile
 
-    return nil unless Config.salience.enabled?
-
     reason = Salience.stop_text(profile)
     return nil unless reason
 
@@ -153,22 +151,23 @@ module Hooks
   def denial(tool, input, session, profile)
     actor = profile || Unclaimed.new()
     case tool
-    when 'mcp__autonom-coord-mcp__get_profile'
+    when 'mcp__autonom-coord__get_profile'
       'A Devin session ID is required' if session.to_s.empty?
-    when 'mcp__autonom-coord-mcp__set_profile'
+    when 'mcp__autonom-coord__set_profile'
       return 'A Devin session ID is required' if session.to_s.empty?
 
       name = input['name'].to_s
       return 'A valid profile name is required' unless ProfileStore.valid_name?(name)
+      return 'The human profile is reserved' if name.casecmp?(ProfileStore::HUMAN_NAME)
       return 'A session profile cannot be changed after registration' if profile && !profile.name.casecmp?(name)
     when 'read', 'notebook_read'
       paths(tool, input).each do |path|
         return DENIED unless actor.can_read?(path)
       end
     when 'grep'
-      return DENIED unless actor.can_search?(input['path'] || Config.project_dir)
+      return DENIED unless actor.can_search?(input['path'] || Workspace.project_dir)
     when 'glob'
-      return DENIED unless actor.can_glob?(input['pattern'], path: input['path'] || Config.project_dir)
+      return DENIED unless actor.can_glob?(input['pattern'], path: input['path'] || Workspace.project_dir)
     when 'write', 'edit', 'notebook_edit', 'apply_patch'
       paths(tool, input).each do |path|
         return DENIED unless actor.can_write?(path)

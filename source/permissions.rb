@@ -1,9 +1,9 @@
 require 'json'
 require 'shellwords'
 
-require_relative 'config'
 require_relative 'policy'
 require_relative 'profile_store'
+require_relative 'workspace'
 
 module Permissions
   def can_read?(path)
@@ -17,8 +17,8 @@ module Permissions
   def can_search?(path)
     return false unless can_read?(path)
 
-    path = resolve(path, Config.project_dir)
-    agents = resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
+    path = resolve(path, Workspace.project_dir)
+    agents = resolve(File.join(ProfileStore.root, 'agents'), Workspace.project_dir)
     prefix = path.end_with?(File::SEPARATOR) ? path : "#{path}#{File::SEPARATOR}"
     return false if guard?('profiles') && agents.start_with?(prefix)
 
@@ -33,11 +33,11 @@ module Permissions
     return false unless pattern.is_a?(String) && !pattern.empty?
     return false unless can_read?(path)
 
-    base = resolve(path, Config.project_dir)
+    base = resolve(path, Workspace.project_dir)
     glob = File.expand_path(pattern, base)
     restricted = []
     if guard?('profiles')
-      agents = resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
+      agents = resolve(File.join(ProfileStore.root, 'agents'), Workspace.project_dir)
       restricted.concat(
         [
           agents,
@@ -68,7 +68,7 @@ module Permissions
   end
 
   def can_exec?(cmd, dir: nil)
-    dir ||= Config.project_dir
+    dir ||= Workspace.project_dir
     return false unless cmd.is_a?(String)
     return false unless can_read?(dir)
     return true unless guard?('exec')
@@ -82,18 +82,20 @@ module Permissions
   def can_access?(path, write: false)
     return false unless path.is_a?(String) && !path.empty?
 
-    path = resolve(path, Config.project_dir)
+    path = resolve(path, Workspace.project_dir)
     name = File.basename(path)
     return false if guard?('env') && (name == '.env' || name.start_with?('.env.'))
+    return false if guard?('policy') && policy_path?(path)
 
     room = guard?('rooms') ? room_access(path, write: write) : nil
     return room unless room.nil?
 
-    root = resolve(ProfileStore.root, Config.project_dir)
-    agents = resolve(File.join(root, 'agents'), Config.project_dir)
+    root = resolve(ProfileStore.root, Workspace.project_dir)
+    agents = resolve(File.join(root, 'agents'), Workspace.project_dir)
     if guard?('profiles') && under?(path, agents)
       relative = path.delete_prefix("#{agents}#{File::SEPARATOR}")
       return false if relative.empty? || store_file?(relative)
+      return false if write && File.basename(path) == 'room.json'
 
       name = relative.split(File::SEPARATOR).first
       return @name && @name.casecmp?(name)
@@ -101,7 +103,7 @@ module Permissions
 
     name = profile_name(path)
     if guard?('profiles') && name
-      return false if store_file?(name)
+      return false if store_file?(name) || (write && File.basename(path) == 'room.json')
 
       return @name && @name.casecmp?(name)
     end
@@ -113,9 +115,13 @@ module Permissions
     true
   end
 
+  def policy_path?(path)
+    path == resolve(Workspace.policy_path, Workspace.project_dir)
+  end
+
   # A path inside a room folder, or nil when it is not one. `messages.jsonl`
-  # is visible to everyone in the room; `policy.yml` is visible but only an
-  # owner or admin may write it; `profiles.json` is never a tool's business.
+  # and `policy.yml` are visible to members; only owners/admins may change policy.
+  # `profiles.json` is never a tool's business.
   def room_access(path, write:)
     root = rooms_root
     prefix = "#{root}#{File::SEPARATOR}"
@@ -145,7 +151,7 @@ module Permissions
     return nil unless data.is_a?(Hash)
 
     owner = data['owner'].to_s
-    original = (!owner.empty? && owner.casecmp?(@name)) || Config.humans.any? { |human| human.casecmp?(@name) }
+    original = (!owner.empty? && owner.casecmp?(@name)) || ProfileStore::HUMAN_NAME.casecmp?(@name)
     admin = Array(data['admins']).any? { |name| name.to_s.casecmp?(@name) }
     involved = data['involved']
     member = involved.nil? || Array(involved).any? { |name| name.to_s.casecmp?(@name) }
@@ -168,7 +174,7 @@ module Permissions
   end
 
   def rooms_root
-    resolve(Config.rooms_dir, Config.project_dir)
+    resolve(Workspace.rooms_dir, Workspace.project_dir)
   end
 
   # A named guard from the workspace policy applies to this actor unless the

@@ -1,14 +1,11 @@
-require_relative '../config'
 require_relative '../profile_store'
-require_relative '../policy'
-require_relative '../jev'
 require_relative 'bus'
 
 require 'json'
 
 module Coord
   class Server
-    INFO = { 'name' => 'autonom-coord-mcp', 'version' => '0.1.0' }.freeze
+    INFO = { 'name' => 'autonom-coord', 'version' => '0.1.0' }.freeze
     PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
     SOURCES = %w[room dms pings].freeze
     WAIT_SOURCES = %w[room dms].freeze
@@ -118,8 +115,8 @@ module Coord
         {
           'name' => 'send_message',
           'description' => 'Send a chat message. Pass `to` to DM one profile (the DM sits in their ' \
-                           'dms and does not ping), or `room` for a room message (defaults to the ' \
-                           'team room). `ping` names profiles to notify - each gets an unread ping, ' \
+                           'dms and does not ping), or `room` for a room message. `room` is required ' \
+                           'for room messages. `ping` names profiles to notify - each gets an unread ping, ' \
                            'delivered on their next tool call.',
           'inputSchema' => {
             'type' => 'object',
@@ -139,31 +136,35 @@ module Coord
         },
         {
           'name' => 'read_messages',
-          'description' => 'Read chat messages. `source` picks the stream: `room` (a room, default the team ' \
-                           'room), `dms` (direct messages), or `pings` (unread pings; reading clears them). ' \
-                           'Reading a stream clears what it returns.',
+          'description' => 'Read chat messages. `source` picks `room`, `dms`, or `pings`; `room` is required ' \
+                           'for room reads. Reading a stream clears what it returns.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
               'source' => { 'type' => 'string', 'enum' => SOURCES, 'description' => 'Which stream to read.' },
               'room' => { 'type' => 'string', 'description' => 'Room to read when source is room.' },
-              'limit' => { 'type' => 'integer', 'description' => "Maximum entries to return (default #{DEFAULT_LIMIT})." },
+              'limit' => {
+                'type' => 'integer',
+                'description' => "Maximum entries to return (default #{DEFAULT_LIMIT})."
+              },
               'session_id' => session
             }
           }
         },
         {
           'name' => 'wait_for_message',
-          'description' => 'Block until something new arrives, then return it: `room` (a room, default the ' \
-                           'team room) or `dms` (direct messages). Returns as soon as there is anything ' \
-                           'unread, and empty when the timeout runs out. Reading clears what it returns. A ' \
-                           'ping interrupts any wait and a DM ends a dms wait; pings are not waitable.',
+          'description' => 'Block until something new arrives in `room` or `dms`; `room` is required for ' \
+                           'room waits. Reading clears what it returns. A ping interrupts any wait and a DM ' \
+                           'ends a dms wait; pings are not waitable.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
               'source' => { 'type' => 'string', 'enum' => WAIT_SOURCES, 'description' => 'Which stream to wait on.' },
               'room' => { 'type' => 'string', 'description' => 'Room to wait on when source is room.' },
-              'timeout' => { 'type' => 'integer', 'description' => "Seconds to wait (default #{DEFAULT_WAIT}, max #{MAX_WAIT})." },
+              'timeout' => {
+                'type' => 'integer',
+                'description' => "Seconds to wait (default #{DEFAULT_WAIT}, max #{MAX_WAIT})."
+              },
               'session_id' => session
             }
           }
@@ -231,7 +232,7 @@ module Coord
         },
         {
           'name' => 'remove_room_admin',
-          'description' => 'Remove a profile from a room\'s admins. Only the room\'s original owner may change its admins.',
+          'description' => 'Remove a room admin. Only the room\'s original owner may change admins.',
           'inputSchema' => {
             'type' => 'object',
             'properties' => {
@@ -315,7 +316,6 @@ module Coord
       targets = ping_targets(args['ping'], from)
       if args['to'].to_s.empty?
         room = room_named(args['room'], from)
-        deny_room_policy(room, from, 'send_message', args)
         Bus.post(room, text, from: from)
         targets.each { |target| Bus.ping(target, text, from: from, room: room) }
         { 'result' => "Sent message to #{room.stream} with #{targets.length} pings" }
@@ -332,7 +332,6 @@ module Coord
     def read_messages(args, session)
       profile = registered_profile(session)
       source, room = read_target(args, profile)
-      deny_room_policy(room, profile, 'read_messages', args) if room
       read_stream(profile, source, room, limit(args))
     end
 
@@ -342,7 +341,6 @@ module Coord
       source, room = read_target(args, profile)
       raise ProfileStore::Error, 'Pings interrupt; they cannot be waited on' if source == 'pings'
 
-      deny_room_policy(room, profile, 'wait_for_message', args) if room
       inbox = source == 'dms' ? Bus.dms_by_profile(profile) : room
       inbox.wait(profile, timeout: wait_timeout(args)) if inbox.unread(profile).empty?
       read_stream(profile, source, room, limit(args))
@@ -422,7 +420,6 @@ module Coord
     end
 
     def room_named(name, profile)
-      name = Bus.default_room if name.to_s.empty?
       raise ProfileStore::Error, 'A room is required' if name.to_s.empty?
 
       room = Bus.room_by_name(name)
@@ -460,17 +457,6 @@ module Coord
       raise ProfileStore::Error, 'Involved must be a list of profiles or null' unless value.is_a?(Array)
 
       value.map { |name| known_profile(name).name }
-    end
-
-    def deny_room_policy(room, profile, tool, args)
-      policy = room.policy
-      return if policy.rules.empty?
-
-      request = { 'tool_name' => tool, 'tool_input' => args, 'profile_name' => profile.name }
-      denied, reason = Policy.decide([policy], request, jev: JEV)
-      raise ProfileStore::Error, (reason || 'The room policy denied this request') if denied
-    rescue Policy::Error, JEV::Error => error
-      raise ProfileStore::Error, "The room policy could not be checked: #{error.class}"
     end
 
     def read_stream(profile, source, room, limit)

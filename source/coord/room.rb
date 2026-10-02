@@ -1,19 +1,17 @@
 require 'fileutils'
 require 'json'
 
-require_relative '../config'
-require_relative '../profile_store'
 require_relative '../policy'
+require_relative '../profile_store'
 require_relative 'inbox'
 
-# A room is a folder on the bus: its message stream, the profiles that may use
-# it, and the screening policy its owners add on top of the workspace policy.
+# A room is a folder on the bus: its message stream and the profiles that may use it.
 #
 #   rooms/<name>/messages.jsonl   the stream (same shape as any inbox)
-#   rooms/<name>/policy.yml       the room's own rules; restrict-only
+#   rooms/<name>/policy.yml       the room's restrict-only secondary policy
 #   rooms/<name>/profiles.json    owner, admins, involved - private to the core
 #
-# Authority is a ladder: the original owner (the creator, and every human seat)
+# Authority is a ladder: the original owner (the creator, and the human profile)
 # manages the admins; the original owner and admins administer the room
 # (policy, membership, deletion); involved profiles may read and write; nobody
 # else knows the room exists.
@@ -101,7 +99,7 @@ class Room
   end
 
   def original_owners
-    ([owner] + Config.humans).compact.map(&:to_s).reject(&:empty?).uniq
+    [owner, ProfileStore::HUMAN_NAME].compact.map(&:to_s).reject(&:empty?).uniq
   end
 
   def original_owner?(name)
@@ -117,7 +115,7 @@ class Room
   end
 
   # `involved` nil is everyone in the clone; a list is exactly those profiles.
-  # An unreadable membership file fails closed - nobody but a human owner.
+  # An unreadable membership file fails closed - nobody but the human owner.
   def involved?(name)
     return false unless profiles
     return true if involved.nil?

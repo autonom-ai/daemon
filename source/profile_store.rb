@@ -8,6 +8,7 @@ module ProfileStore
   ROOT = File.expand_path('..', __dir__)
   NAME_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\z/
   SESSIONS_FILE = 'sessions.json'
+  HUMAN_NAME = 'human'
 
   class Error < StandardError
   end
@@ -23,8 +24,8 @@ module ProfileStore
   end
 
   def profiles
+    ensure_human
     dir = agents_dir
-    return [] unless File.directory?(dir)
     raise Error, 'Agent profile directory must not be a symlink' if File.symlink?(dir)
 
     Dir.children(dir).filter_map do |name|
@@ -60,6 +61,7 @@ module ProfileStore
 
     name = name.to_s.strip
     raise Error, 'Invalid profile name' unless valid_name?(name)
+    raise Error, 'The human profile cannot be registered to an agent session' if name.casecmp?(HUMAN_NAME)
 
     with_lock(File::LOCK_EX) do
       sessions = read_sessions
@@ -88,6 +90,14 @@ module ProfileStore
     File.join(root, 'agents')
   end
 
+  def ensure_human
+    dir = agents_dir
+    directory = File.join(dir, HUMAN_NAME)
+    return if File.directory?(directory) && !File.symlink?(directory)
+
+    create(HUMAN_NAME)
+  end
+
   def create(name)
     dir = agents_dir
     FileUtils.mkdir_p(dir)
@@ -95,7 +105,6 @@ module ProfileStore
 
     directory = File.join(dir, name)
     FileUtils.mkdir(directory, mode: 0o700)
-    FileUtils.mkdir(File.join(directory, 'memories'), mode: 0o700)
     File.open(
       File.join(directory, 'identity.md'),
       File::WRONLY | File::CREAT | File::EXCL,
@@ -103,6 +112,11 @@ module ProfileStore
     ) do |file|
       file.write("---\nname: #{name}\ndisplayName: #{name}\n---\n\n# #{name}\n")
     end
+    Profile.new(name, File.realpath(directory))
+  rescue Errno::EEXIST
+    raise Error, 'Profile already exists' unless name == HUMAN_NAME && File.directory?(directory)
+    raise Error, 'Human profile must not be a symlink' if File.symlink?(directory)
+
     Profile.new(name, File.realpath(directory))
   rescue SystemCallError => error
     raise Error, "Could not create profile: #{error.class}"

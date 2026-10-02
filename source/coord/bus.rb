@@ -2,8 +2,8 @@ require 'fileutils'
 require 'json'
 require 'securerandom'
 
-require_relative '../config'
 require_relative '../profile_store'
+require_relative '../workspace'
 require_relative 'inbox'
 require_relative 'room'
 
@@ -102,7 +102,7 @@ module Bus
   extend self
 
   def rooms
-    dir = Config.rooms_dir
+    dir = Workspace.rooms_dir
     return [] unless File.directory?(dir)
 
     Dir.children(dir).filter_map do |entry|
@@ -173,11 +173,6 @@ module Bus
     pings_by_profile(profile)
   end
 
-  def default_room
-    name = Config.default_room.to_s.strip.sub(/\A#/, '').downcase
-    ProfileStore.valid_name?(name) ? name : nil
-  end
-
   def unread(profile)
     {
       'pings' => pings_by_profile(profile).unread(profile),
@@ -229,6 +224,7 @@ module Bus
   def post(room, text, from:)
     entry = entry(from: from, text: text)
     append(room.path, entry)
+    from.focus_room(room.name)
     wake_source(room.stream)
     entry
   end
@@ -320,7 +316,7 @@ module Bus
   end
 
   def room_directory(name)
-    dir = Config.rooms_dir
+    dir = Workspace.rooms_dir
     raise Error, 'Room directory must not be a symlink' if File.symlink?(dir)
 
     FileUtils.mkdir_p(dir, mode: 0o700)
