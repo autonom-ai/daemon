@@ -30,59 +30,26 @@ class PolicyServerTest < Minitest::Test
     responses = exchange(request(1, 'tools/list'))
     names = responses.first.dig('result', 'tools').map { |tool| tool['name'] }
 
-    assert_equal %w[check_policy set_secondary_policy list_secondary_policies remove_secondary_policy], names
+    assert_equal %w[check_policy], names
   end
 
-  def test_secondary_policy_tools_manage_existing_policy_paths()
-    path = room('general').policy_path
-    responses = exchange(
-      call(
-        1,
-        'set_secondary_policy',
-        'path' => path,
-        'policy' => { 'rules' => [] },
-        'session_id' => 'session-1'
-      ),
-      call(2, 'list_secondary_policies', 'directory' => Workspace.rooms_dir, 'session_id' => 'session-1'),
-      call(3, 'remove_secondary_policy', 'path' => path, 'session_id' => 'session-1'),
-      call(4, 'list_secondary_policies', 'directory' => Workspace.rooms_dir, 'session_id' => 'session-1')
-    )
-
-    assert_equal path, result(responses, 1)['path']
-    assert_equal [path], result(responses, 2).map { |entry| entry['path'] }
-    assert result(responses, 3)['removed']
-    assert_empty result(responses, 4)
-  end
-
-  def test_secondary_policy_tools_preserve_room_administration()
+  def test_secondary_policy_tools_are_gone()
     responses = exchange(
       call(
         1,
         'set_secondary_policy',
         'path' => room('general').policy_path,
         'policy' => { 'rules' => [] },
-        'session_id' => 'session-2'
-      ),
-      call(2, 'remove_secondary_policy', 'path' => room('general').policy_path, 'session_id' => 'session-2')
+        'session_id' => 'session-1'
+      )
     )
 
-    assert responses.all? { |response| response.dig('result', 'isError') }
+    assert responses.first.dig('result', 'isError')
   end
 
-  def test_listing_does_not_read_or_reveal_hidden_room_policies()
-    write_room('secret', involved: ['marlow'])
-    File.write(room('secret').policy_path, 'invalid: [')
-    listed = result(
-      exchange(call(1, 'list_secondary_policies', 'directory' => Workspace.rooms_dir, 'session_id' => 'session-2')),
-      1
-    )
-
-    assert_equal [room('general').policy_path], listed.map { |entry| entry['path'] }
-  end
-
-  def test_check_policy_uses_the_secondary_path_supplied_by_the_hook()
-    path = room('general').policy_path
-    Policy.set_secondary(path, 'rules' => [{ 'action' => 'deny', 'reason' => 'room' }])
+  def test_check_policy_applies_the_callers_profile_policy()
+    File.write(room('general').policy_path, "rules:\n  - action: deny\n    reason: room\n")
+    profile('marlow').policy = room('general').policy_path
     checked = result(
       exchange(
         call(
@@ -90,7 +57,6 @@ class PolicyServerTest < Minitest::Test
           'check_policy',
           'tool_name' => 'exec',
           'tool_input' => { 'command' => 'git status' },
-          'secondary' => path,
           'session_id' => 'session-1'
         )
       ),
@@ -99,7 +65,26 @@ class PolicyServerTest < Minitest::Test
 
     assert checked['denied']
     assert_equal 'room', checked['reason']
-    assert_equal path, checked['secondary']
+    assert_equal room('general').policy_path, checked['secondary']
+  end
+
+  def test_check_policy_ignores_a_supplied_secondary_path()
+    File.write(room('general').policy_path, "rules:\n  - action: deny\n    reason: room\n")
+    checked = result(
+      exchange(
+        call(
+          1,
+          'check_policy',
+          'tool_name' => 'exec',
+          'secondary' => room('general').policy_path,
+          'session_id' => 'session-1'
+        )
+      ),
+      1
+    )
+
+    refute checked['denied']
+    assert_nil checked['secondary']
   end
 
   private

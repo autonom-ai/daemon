@@ -202,29 +202,6 @@ class PolicyTest < Minitest::Test
     assert_raises(Policy::Error) { load('rules: {nope}') }
   end
 
-  def test_secondary_policies_are_managed_at_their_existing_paths()
-    write_room('general')
-    path = room('general').policy_path
-    saved = Policy.set_secondary(path, 'rules' => [{ 'action' => 'deny', 'reason' => 'room' }])
-
-    assert_equal path, saved['path']
-    assert_equal [path], Policy.secondary_policies(Workspace.rooms_dir).map { |entry| entry['path'] }
-    assert_equal 1, Policy.secondary(path).rules.length
-    assert_equal({ 'path' => path, 'removed' => true }, Policy.remove_secondary(path))
-    assert_nil Policy.secondary(path)
-  end
-
-  def test_secondary_policy_paths_cannot_replace_primary_or_follow_symlinks()
-    write_room('general')
-    target = File.join(@project, 'target.yml')
-    File.write(target, "rules: []\n")
-    link = File.join(@project, 'policy.yml')
-    File.symlink(target, link)
-
-    assert_raises(Policy::Error) { Policy.set_secondary(Workspace.policy_path, 'rules' => []) }
-    assert_raises(Policy::Error) { Policy.set_secondary(link, 'rules' => []) }
-  end
-
   def test_the_workspace_policy_is_required_without_template_fallback()
     FileUtils.mkdir_p(File.join(@root, 'templates'))
     FileUtils.cp(Workspace.policy_path, File.join(@root, 'templates', 'policy.yml'))

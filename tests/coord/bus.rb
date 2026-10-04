@@ -101,6 +101,6 @@ class BusTest < Minitest::Test
     assert_equal ['hello'], unread['dms'].map { |entry| entry['text'] }
     assert_equal ['look'], unread['pings'].map { |entry| entry['text'] }
     assert_equal ['team line'], unread['rooms']['room:general'].map { |entry| entry['text'] }
-    assert_equal 'general', @marlow.last_room
+    assert_equal room('general').policy_path, @marlow.policy
   end
 end

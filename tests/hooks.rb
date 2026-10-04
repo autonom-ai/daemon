@@ -83,8 +83,7 @@ class HooksTest < Minitest::Test
       mcp__autonom-coord__set_profile
       mcp__autonom-coord__send_message
       mcp__autonom-coord__set_room_involved
-      mcp__autonom-policy__set_secondary_policy
-      mcp__autonom-policy__remove_secondary_policy
+      mcp__autonom-policy__check_policy
     ]
     tools.each do |tool|
       updated = hook(event(tool, 'name' => 'marlow', 'session_id' => 'forged'))
@@ -176,16 +175,17 @@ class HooksTest < Minitest::Test
     refute_includes result['reason'], 'drive'
   end
 
-  def test_last_posted_room_selects_the_secondary_policy()
+  def test_posting_in_a_room_selects_its_policy()
     marlow = ProfileStore.register_profile('marlow', 'session-1')
-    Policy.set_secondary(
+    File.write(
       room('general').policy_path,
-      'rules' => [{ 'match' => { 'tool' => 'exec' }, 'action' => 'deny', 'reason' => 'room policy' }]
+      "rules:\n  - match: { tool: exec }\n    action: deny\n    reason: room policy\n"
     )
 
     assert_nil hook(event('exec', 'command' => 'git status'))
     Bus.post(room('general'), 'working here', from: marlow)
 
+    assert_equal room('general').policy_path, marlow.policy
     blocked = hook(event('exec', 'command' => 'git status'))
 
     assert_equal 'block', blocked['decision']
@@ -200,14 +200,13 @@ class HooksTest < Minitest::Test
     assert_equal 0, @decision.calls
   end
 
-  def test_the_policy_check_receives_the_last_rooms_policy_path()
+  def test_the_policy_check_injects_only_the_session()
     marlow = ProfileStore.register_profile('marlow', 'session-1')
     Bus.post(room('general'), 'working here', from: marlow)
     updated = hook(event('mcp__autonom-policy__check_policy', 'secondary' => '/forged/policy.yml'))
       .dig('hookSpecificOutput', 'updatedInput')
 
-    assert_equal room('general').policy_path, updated['secondary']
-    assert_equal 'session-1', updated['session_id']
+    assert_equal({ 'session_id' => 'session-1' }, updated)
   end
 
   private

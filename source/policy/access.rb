@@ -69,14 +69,14 @@ module Policy
       if under?(path, agents)
         relative = path.delete_prefix("#{agents}#{File::SEPARATOR}")
         return false if relative.empty? || store_file?(relative)
-        return false if write && File.basename(path) == 'room.json'
+        return false if write && File.basename(path) == 'policies.json'
 
         return profile_name.to_s.casecmp?(relative.split(File::SEPARATOR).first)
       end
 
       named = profile_from_path(path)
       if named
-        return false if store_file?(named) || (write && File.basename(path) == 'room.json')
+        return false if store_file?(named) || (write && File.basename(path) == 'policies.json')
 
         return profile_name.to_s.casecmp?(named)
       end

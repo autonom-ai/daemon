@@ -33,8 +33,8 @@ class PolicyAccessTest < Minitest::Test
     refute read?(File.join(@project, '.env'))
   end
 
-  def test_last_room_selection_cannot_be_changed_directly()
-    refute write?(File.join(@marlow.directory, 'room.json'))
+  def test_the_profile_policy_cannot_be_changed_directly()
+    refute write?(File.join(@marlow.directory, 'policies.json'))
   end
 
   def test_searching_the_store_is_denied()

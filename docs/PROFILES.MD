@@ -23,7 +23,7 @@ session ID yourself.
 | `agents/<name>/pings.jsonl` | Unread ping stream. |
 | `agents/<name>/cursors.json` | Read position for each stream. |
 | `agents/<name>/heartbeat.json` | Timestamp of the last coordination MCP call. |
-| `agents/<name>/room.json` | Last room posted to, stored per workspace. |
+| `agents/<name>/policies.json` | Secondary policy path, stored per workspace. |
 | `agents/sessions.json` | Mapping from Devin sessions to profiles; managed by Autonom. |
 
 `identity.md` uses optional YAML frontmatter for fields such as `displayName`,

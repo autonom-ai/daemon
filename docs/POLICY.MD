@@ -42,17 +42,14 @@ model.
 
 ## Secondary policies
 
-A room's `policy.yml` is a secondary policy. The hook applies it after the
-primary policy when the profile has posted in that room most recently. Secondary
-policies add rules; they do not change primary permissions.
+A room's `policy.yml` is a secondary policy. Posting in a room makes that
+room's policy the profile's secondary policy (`Profile.policy`), and the hook
+applies it after the primary policy. Secondary policies add rules; they do not
+change primary permissions.
 
-The policy MCP manages secondary `policy.yml` files:
+The policy MCP exposes `check_policy`, which checks a tool request against the
+primary policy and the caller's profile policy.
 
-- `check_policy` checks a tool request against the primary and an optional secondary policy.
-- `set_secondary_policy` creates or replaces a policy at an existing directory path.
-- `list_secondary_policies` lists policies the caller can read beneath a directory.
-- `remove_secondary_policy` removes a policy.
-
-Room members can read their room's policy. Only the owner or an admin can change
-it. The policy MCP is separate from coordination; both servers are in
-`templates/mcp.json`.
+Room policies are plain files: members can read them, and the owner or an admin
+can edit them with normal file tools. The policy MCP is separate from
+coordination; both servers are in `templates/mcp.json`.

@@ -24,21 +24,29 @@ class ProfileTest < Minitest::Test
     assert_includes @marlow.identity.get()['personality'], 'I read the kill columns.'
   end
 
-  def test_the_last_posted_room_is_persisted()
-    assert_nil @marlow.last_room
+  def test_the_posted_policy_is_persisted()
+    write_room('general')
+    assert_nil @marlow.policy
 
-    assert_equal 'general', @marlow.focus_room('general')
-    assert_equal 'general', @marlow.last_room
+    @marlow.policy = room('general').policy_path
+
+    assert_equal room('general').policy_path, @marlow.policy
   end
 
-  def test_last_room_focus_is_workspace_specific()
-    @marlow.focus_room('general')
+  def test_the_profile_policy_is_workspace_specific()
+    write_room('general')
+    @marlow.policy = room('general').policy_path
     ENV['DEVIN_PROJECT_DIR'] = File.join(@project, 'another-workspace')
 
-    assert_nil @marlow.last_room
-    @marlow.focus_room('other')
+    assert_nil @marlow.policy
+    @marlow.policy = File.join(@project, 'another-workspace', 'policy.yml')
     ENV['DEVIN_PROJECT_DIR'] = @project
-    assert_equal 'general', @marlow.last_room
+    assert_equal room('general').policy_path, @marlow.policy
+  end
+
+  def test_the_profile_policy_must_be_a_policy_file()
+    assert_raises(ProfileStore::Error) { @marlow.policy = 'notes.md' }
+    assert_raises(ProfileStore::Error) { @marlow.policy = nil }
   end
 
   def test_heartbeat_is_zero_until_stamped()

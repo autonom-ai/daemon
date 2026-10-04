@@ -24,9 +24,6 @@ module Hooks
     mcp__autonom-coord__remove_room_admin
     mcp__autonom-coord__get_heartbeat
     mcp__autonom-policy__check_policy
-    mcp__autonom-policy__set_secondary_policy
-    mcp__autonom-policy__list_secondary_policies
-    mcp__autonom-policy__remove_secondary_policy
   ].freeze
 
   DENIED = 'Access to this profile or protected file is blocked'
@@ -93,19 +90,16 @@ module Hooks
       return block('You have unread pings - read them first: call read_messages with source "pings"')
     end
 
-    room = Bus.room_by_name(profile.last_room) if profile&.last_room
-    policies = [Policy.workspace, room&.policy]
+    policies = [Policy.workspace, Policy.load(profile&.policy)]
     denied, reason = Policy.decide(policies, policy_request(tool, input, profile), decision: decision)
     return block(reason || 'The policy check denied this request') if denied
 
     return nil unless SESSION_TOOLS.include?(tool) && !session.to_s.empty?
 
-    updated = { 'session_id' => session.to_s }
-    updated['secondary'] = room&.policy_path if tool == 'mcp__autonom-policy__check_policy'
     {
       'hookSpecificOutput' => {
         'hookEventName' => 'PreToolUse',
-        'updatedInput' => updated
+        'updatedInput' => { 'session_id' => session.to_s }
       }
     }
   end

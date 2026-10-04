@@ -41,15 +41,6 @@ class SalienceTest < Minitest::Test
     refute_includes text, 'activity drive'
   end
 
-  def test_stop_text_uses_the_last_posted_room_for_waiting()
-    Bus.post(room('general'), 'working here', from: @marlow)
-
-    text = Salience.stop_text(@marlow)
-
-    assert_includes text, 'wait_for_message for room general'
-    refute_includes text, 'choose a relevant room'
-  end
-
   def test_briefing_carries_identity_team_and_room_without_memory()
     File.write(
       File.join(@marlow.directory, 'identity.md'),

@@ -1,4 +1,3 @@
-require 'securerandom'
 require 'yaml'
 
 require_relative '../decision'
@@ -19,57 +18,6 @@ module Policy
     raise Error, 'Workspace policy must not be a symlink' if File.symlink?(path)
 
     load(path)
-  end
-
-  def secondary(path)
-    path = secondary_path(path)
-    File.file?(path) ? load(path) : nil
-  end
-
-  def secondary_policies(directory)
-    raise Error, 'A policy search directory is required' unless directory.is_a?(String) && !directory.empty?
-
-    directory = File.expand_path(directory, Workspace.project_dir)
-    raise Error, 'A policy search directory is required' unless File.directory?(directory)
-    raise Error, 'Policy directory must not be a symlink' unless File.realpath(directory) == directory
-
-    Dir.glob(File.join(directory, '**', Workspace::POLICY_FILE)).sort.filter_map do |path|
-      next if path == Workspace.policy_path || File.symlink?(path)
-      next if block_given? && !yield(path)
-
-      { 'path' => secondary_path(path), 'policy' => raw(path) }
-    end
-  rescue Psych::Exception, SystemCallError => error
-    raise Error, "Could not list secondary policies: #{error.class}"
-  end
-
-  def set_secondary(path, value)
-    path = secondary_path(path)
-    parsed = parse_value(value, path)
-    document(parsed, path)
-    dir = File.dirname(path)
-    tmp = File.join(dir, ".policy-#{Process.pid}-#{SecureRandom.hex(8)}.tmp")
-    File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
-      file.write(YAML.dump(parsed))
-      file.flush
-      file.fsync
-    end
-    File.rename(tmp, path)
-    { 'path' => path, 'policy' => parsed }
-  rescue SystemCallError => error
-    raise Error, "Could not save secondary policy: #{error.class}"
-  ensure
-    File.unlink(tmp) if defined?(tmp) && tmp && File.exist?(tmp)
-  end
-
-  def remove_secondary(path)
-    path = secondary_path(path)
-    raise Error, "Unknown secondary policy: #{path}" unless File.file?(path)
-
-    File.unlink(path)
-    { 'path' => path, 'removed' => true }
-  rescue SystemCallError => error
-    raise Error, "Could not remove secondary policy: #{error.class}"
   end
 
   def load(path)
@@ -109,15 +57,6 @@ module Policy
     parsed
   end
 
-  def parse_value(value, source)
-    parsed = value.is_a?(String) ? YAML.safe_load(value) : value
-    raise Error, "Policy must be a map: #{source}" unless parsed.is_a?(Hash)
-
-    parsed
-  rescue Psych::Exception => error
-    raise Error, "Policy is not valid YAML: #{error.class}"
-  end
-
   def document(parsed, source)
     permissions = parsed['permissions']
     rules = parsed['rules']
@@ -128,20 +67,6 @@ module Policy
       Array(permissions).map { |entry| Grant.new(entry, source) },
       Array(rules).map { |rule| Rule.new(rule, source) }
     )
-  end
-
-  def secondary_path(path)
-    raise Error, 'A secondary policy path is required' unless path.is_a?(String) && !path.empty?
-
-    path = File.expand_path(path, Workspace.project_dir)
-    raise Error, 'Secondary policies must be named policy.yml' unless File.basename(path) == Workspace::POLICY_FILE
-    raise Error, 'The primary policy is not a secondary policy' if path == Workspace.policy_path
-    raise Error, 'Policy directory does not exist' unless File.directory?(File.dirname(path))
-    unless File.realpath(File.dirname(path)) == File.dirname(path) && !File.symlink?(path)
-      raise Error, 'Secondary policy must not use symlinks'
-    end
-
-    path
   end
 
   class Document

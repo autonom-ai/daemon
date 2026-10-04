@@ -5,9 +5,10 @@ require_relative 'identity'
 require_relative 'profile_store'
 require_relative 'workspace'
 
+# TODO: Profile activity log
 class Profile
   HEARTBEAT_FILE = 'heartbeat.json'
-  ROOM_FILE = 'room.json'
+  POLICIES_FILE = 'policies.json'
 
   def initialize(name, directory)
     @name = name
@@ -20,39 +21,42 @@ class Profile
     @identity ||= Identity.new(self)
   end
 
-  def last_room
-    path = room_path
+  # Secondary policy is dictated by the room the profile last posted in.
+  def policy
+    path = policies_path
     return nil unless File.file?(path)
 
     File.open(path, 'r') do |file|
       file.flock(File::LOCK_SH)
-      parse_rooms(file.read)[Workspace.project_dir]
+      parse_policies(file.read)[Workspace.project_dir]
     ensure
       file.flock(File::LOCK_UN)
     end
   rescue SystemCallError => error
-    raise ProfileStore::Error, "Could not read the last room: #{error.class}"
+    raise ProfileStore::Error, "Could not read the profile policy: #{error.class}"
   end
 
-  def focus_room(name)
-    raise ProfileStore::Error, 'Invalid room name' unless ProfileStore.valid_name?(name)
+  def policy=(path)
+    unless path.is_a?(String) && File.basename(path) == Workspace::POLICY_FILE
+      raise ProfileStore::Error, 'Invalid policy path'
+    end
 
-    path = room_path
-    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
-    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
+    state = policies_path
+    FileUtils.mkdir_p(File.dirname(state), mode: 0o700)
+    File.open(state, File::RDWR | File::CREAT, 0o600) do |file|
       file.flock(File::LOCK_EX)
-      rooms = parse_rooms(file.read)
-      rooms[Workspace.project_dir] = name
+      policies = parse_policies(file.read)
+      policies[Workspace.project_dir] = path
       file.truncate(0)
       file.rewind
-      file.write(JSON.generate(rooms))
+      file.write(JSON.generate(policies))
       file.flush
     ensure
       file.flock(File::LOCK_UN)
     end
-    name
+    path
   rescue SystemCallError => error
-    raise ProfileStore::Error, "Could not update the last room: #{error.class}"
+    raise ProfileStore::Error, "Could not update the profile policy: #{error.class}"
   end
 
   # Profile heartbeat is determined by last MCP call.
@@ -88,22 +92,22 @@ class Profile
     path
   end
 
-  def room_path
-    path = File.join(@directory, ROOM_FILE)
-    raise ProfileStore::Error, 'Last room must not be a symlink' if File.symlink?(path)
+  def policies_path
+    path = File.join(@directory, POLICIES_FILE)
+    raise ProfileStore::Error, 'Profile policy state must not be a symlink' if File.symlink?(path)
 
     path
   end
 
-  def parse_rooms(raw)
+  def parse_policies(raw)
     ret = raw.strip.empty? ? {} : JSON.parse(raw)
-    unless ret.is_a?(Hash) && ret.all? { |path, name| path.is_a?(String) && ProfileStore.valid_name?(name) }
-      raise ProfileStore::Error, 'Last room state has an invalid format'
+    unless ret.is_a?(Hash) && ret.all? { |dir, path| dir.is_a?(String) && path.is_a?(String) }
+      raise ProfileStore::Error, 'Profile policy state has an invalid format'
     end
 
     ret
   rescue JSON::ParserError
-    raise ProfileStore::Error, 'Last room state contains invalid JSON'
+    raise ProfileStore::Error, 'Profile policy state contains invalid JSON'
   end
 
   def parse_heartbeat(raw)

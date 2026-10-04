@@ -23,7 +23,7 @@ be registered before it can use messaging or room tools. See [Profiles](PROFILES
   profile is online for 30 minutes after its last call.
 
 Pass `room` to every room-scoped call. There is no default room. A successful
-room post sets that profile's active room for secondary policy checks.
+room post makes that room's policy the profile's secondary policy.
 
 The room owner and admins can change membership, delete the room, and manage its
 policy. Room members can read and post messages. The human profile is always an
