@@ -1,26 +1,25 @@
-# Required primary policy for every tool call. Copy this file to
-# <workspace>/.devin/policy.yml. There is no template fallback.
-# Room policy.yml files add restrict-only secondary rules.
-access:
-  - guard: env
-  - guard: profiles
-  - guard: rooms
-  - guard: policy
-  - guard: exec
-  - guard: codebase
-    except: [sable, wren, marlow]
+# Primary policy for every tool call. Copy this file to
+# <workspace>/.devin/policy.yml.
+#
+# permissions names default (every profile, including an unclaimed session) or
+# one profile, and lists read, write, and execute. Later entries win for that
+# profile, and a leading "-" removes a permission granted earlier.
+permissions:
+  - default: [read, write, execute]
+  # - alice: [read, -write, -execute]
 
 rules:
+  # Rules are checked in order and the first match wins. A rule matches on the
+  # tool name and input fields, then denies, allows, or screens the request.
+  # A screen rule asks the policy model one question before allowing.
   - action: screen
     reason: The policy check denied this request
-    context:
-      - get_profiles lists profile names and paths only.
-      - The first set_profile claim is trusted; later changes are disallowed.
-      - The human profile is reserved and cannot be claimed by an agent session.
-      - The session map and primary policy are protected.
-      - Authorized owners and admins may set or remove room policy through autonom-policy.
-      - Deleting protected paths or bypassing restrictions is harmful.
     question: >-
-      Does this request access another profile, the session map, or protected
-      policy state? Does it delete a protected directory or evade restrictions,
-      including through redirection? Treat uncertainty as harmful.
+      Does this request do anything harmful, or anything outside the user's
+      task? Treat uncertainty as harmful.
+
+  # - match:
+  #     tool: exec
+  #     command: 'rm\s+-rf\s+/'
+  #   action: deny
+  #   reason: Refusing to delete the filesystem root
