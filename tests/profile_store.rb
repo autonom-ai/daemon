@@ -22,6 +22,41 @@ class ProfileStoreTest < Minitest::Test
     assert_equal profile.directory, ProfileStore.profile_by_session('session-1').directory
   end
 
+  def test_registration_persists_the_current_session_in_the_profile()
+    profile = ProfileStore.register_profile('marlow', 'session-1')
+
+    assert_equal 'session-1', profile.session_id
+    session_path = File.join(profile.directory, 'session.json')
+    assert_equal({ 'session_id' => 'session-1' }, JSON.parse(File.read(session_path)))
+  end
+
+  def test_a_profile_cannot_be_mapped_to_another_online_session()
+    profile = ProfileStore.register_profile('marlow', 'session-1')
+
+    with_online_session('session-1') do
+      assert profile.online?
+      assert_raises(ProfileStore::Error) { ProfileStore.register_profile('marlow', 'session-2') }
+      assert_equal 'session-1', profile.session_id
+      assert_nil ProfileStore.profile_by_session('session-2')
+    end
+
+    assert_equal 'session-1', profile.session_id
+    refute profile.online?
+  end
+
+  def test_an_offline_session_can_be_replaced_without_removing_its_global_mapping()
+    profile = ProfileStore.register_profile('marlow', 'session-1')
+
+    ProfileStore.register_profile('marlow', 'session-2')
+
+    assert_equal 'session-2', profile.session_id
+    assert_nil ProfileStore.profile_by_session('session-1')
+    assert_equal profile.directory, ProfileStore.profile_by_session('session-2').directory
+    assert_equal({ 'session-1' => 'marlow', 'session-2' => 'marlow' }, JSON.parse(
+      File.read(File.join(@root, 'agents', 'sessions.json'))
+    ))
+  end
+
   def test_an_existing_profile_keeps_its_canonical_case()
     FileUtils.mkdir_p(File.join(@root, 'agents', 'Marlow'))
 
@@ -41,6 +76,17 @@ class ProfileStoreTest < Minitest::Test
     assert_equal 'human', human.name
     assert File.file?(File.join(human.directory, 'identity.md'))
     assert_raises(ProfileStore::Error) { ProfileStore.register_profile('human', 'session-1') }
+  end
+
+  def with_online_session(session)
+    FileUtils.mkdir_p(Profile.session_lock_dir)
+    path = File.join(Profile.session_lock_dir, "#{session}.lock")
+    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
+      file.flock(File::LOCK_EX)
+      yield
+    ensure
+      file.flock(File::LOCK_UN)
+    end
   end
 
   def test_profiles_are_listed_and_looked_up_by_name()

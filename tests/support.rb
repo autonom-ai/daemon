@@ -15,8 +15,10 @@ module CoreTest
     @project = Dir.mktmpdir('autonom-project')
     @previous_project = ENV['DEVIN_PROJECT_DIR']
     @previous_root = ProfileStore.root
+    @previous_session_lock_dir = Profile.session_lock_dir
     ENV['DEVIN_PROJECT_DIR'] = @project
     ProfileStore.root = @root
+    Profile.session_lock_dir = File.join(@root, 'session_locks')
     FileUtils.mkdir_p(File.dirname(Workspace.policy_path))
     FileUtils.cp(
       File.join(ProfileStore::ROOT, 'templates', 'policy.yml'),
@@ -27,6 +29,7 @@ module CoreTest
   def teardown_core()
     ENV['DEVIN_PROJECT_DIR'] = @previous_project
     ProfileStore.root = @previous_root
+    Profile.session_lock_dir = @previous_session_lock_dir
     FileUtils.remove_entry(@root) if @root && File.directory?(@root)
     FileUtils.remove_entry(@project) if @project && File.directory?(@project)
   end
