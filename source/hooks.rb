@@ -27,12 +27,6 @@ module Hooks
     mcp__autonom-policy__set_secondary_policy
     mcp__autonom-policy__list_secondary_policies
     mcp__autonom-policy__remove_secondary_policy
-    mcp__circles__spawn
-    mcp__circles__move
-    mcp__circles__impulse
-    mcp__circles__emote
-    mcp__circles__leave
-    mcp__circles__look
   ].freeze
 
   DENIED = 'Access to this profile or protected file is blocked'
