@@ -13,7 +13,6 @@ module Coord
     MAX_LIMIT = 500
     DEFAULT_WAIT = 30
     MAX_WAIT = 60
-    ONLINE_MS = 30 * 60_000
 
     def run(input: STDIN, output: STDOUT)
       output.sync = true
@@ -96,9 +95,16 @@ module Coord
           'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session } }
         },
         {
-          'name' => 'get_profile',
-          'description' => 'Get the profile registered to this Devin session.',
-          'inputSchema' => { 'type' => 'object', 'properties' => { 'session_id' => session } }
+          'name' => 'get_profile_status',
+          'description' => 'Get a profile\'s status: its registered session and whether that session ' \
+                           'is online. Omit `name` for the profile registered to this session.',
+          'inputSchema' => {
+            'type' => 'object',
+            'properties' => {
+              'name' => { 'type' => 'string', 'description' => 'Profile name to check.' },
+              'session_id' => session
+            }
+          }
         },
         {
           'name' => 'set_profile',
@@ -242,20 +248,6 @@ module Coord
             },
             'required' => ['name', 'profile']
           }
-        },
-        {
-          'name' => 'get_heartbeat',
-          'description' => 'Get a profile\'s heartbeat: when it last called a tool, and whether that is recent ' \
-                           'enough to count as online. Every MCP call stamps the caller, so presence is a fact ' \
-                           'about use.',
-          'inputSchema' => {
-            'type' => 'object',
-            'properties' => {
-              'name' => { 'type' => 'string', 'description' => 'Profile name to read the heartbeat for.' },
-              'session_id' => session
-            },
-            'required' => ['name']
-          }
         }
       ]
     end
@@ -268,8 +260,8 @@ module Coord
       ret = case tool
       when 'get_profiles'
         ProfileStore.profiles.map { |profile| profile_entry(profile) }
-      when 'get_profile'
-        profile_entry(ProfileStore.profile_by_session(session))
+      when 'get_profile_status'
+        get_profile_status(args, session)
       when 'set_profile'
         profile_entry(ProfileStore.register_profile(args['name'], session))
       when 'post_message'
@@ -290,15 +282,9 @@ module Coord
         add_room_admin(args, session)
       when 'remove_room_admin'
         remove_room_admin(args, session)
-      when 'get_heartbeat'
-        get_heartbeat(args)
       else
         return tool_error('Unknown profile tool')
       end
-
-      # Update heartbeat.
-      profile = ProfileStore.profile_by_session(session) rescue nil
-      profile&.touch_heartbeat()
 
       {
         'content' => [{ 'type' => 'text', 'text' => JSON.generate(ret) }],
@@ -394,16 +380,9 @@ module Coord
       }
     end
 
-    def get_heartbeat(args)
-      profile = ProfileStore.profile_by_name(args['name'])
-      raise ProfileStore::Error, "Unknown profile: #{args['name']}" unless profile
-
-      heartbeat = profile.heartbeat
-      {
-        'name' => profile.name,
-        'lastHeartbeat' => heartbeat,
-        'online' => heartbeat.positive? && (Time.now.to_f * 1000).round - heartbeat < ONLINE_MS
-      }
+    def get_profile_status(args, session)
+      profile = args['name'].to_s.empty? ? ProfileStore.profile_by_session(session) : known_profile(args['name'])
+      profile && { 'name' => profile.name, 'session' => profile.session_id, 'online' => profile.online? }
     end
 
     def profile_entry(profile)
