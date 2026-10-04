@@ -1,8 +1,9 @@
 require 'json'
 
 require_relative '../decision'
-require_relative '../policy'
 require_relative '../profile_store'
+require_relative 'access'
+require_relative 'format'
 
 module Policy
   class Server
@@ -130,8 +131,8 @@ module Policy
         authorize_write(args)
         Policy.set_secondary(args['path'], args['policy'])
       when 'list_secondary_policies'
-        actor = ProfileStore.profile_by_session(args['session_id']) || Unclaimed.new
-        Policy.secondary_policies(args['directory']) { |path| actor.can_read?(path) }
+        name = ProfileStore.profile_by_session(args['session_id'])&.name
+        Policy.secondary_policies(args['directory']) { |path| Policy::Access.permits?(name, 'read', path: path) }
       when 'remove_secondary_policy'
         authorize_write(args)
         Policy.remove_secondary(args['path'])
@@ -151,8 +152,9 @@ module Policy
       profile = ProfileStore.profile_by_session(args['session_id'])
       policies = [Policy.workspace]
       unless args['secondary'].to_s.empty?
-        actor = profile || Unclaimed.new
-        raise Policy::Error, 'Secondary policy access is denied' unless actor.can_read?(args['secondary'])
+        unless Policy::Access.permits?(profile&.name, 'read', path: args['secondary'])
+          raise Policy::Error, 'Secondary policy access is denied'
+        end
 
         policies << Policy.secondary(args['secondary'])
       end
@@ -169,8 +171,12 @@ module Policy
     end
 
     def authorize_write(args)
-      actor = ProfileStore.profile_by_session(args['session_id']) || Unclaimed.new
-      raise Policy::Error, 'Secondary policy changes are denied' unless actor.can_write?(args['path'])
+      name = ProfileStore.profile_by_session(args['session_id'])&.name
+      raise Policy::Error, 'Secondary policy changes are denied' unless Policy::Access.permits?(
+        name,
+        'write',
+        path: args['path']
+      )
     end
 
     def tool_error(message)
