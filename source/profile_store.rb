@@ -42,10 +42,14 @@ module ProfileStore
     key = session.to_s
     return nil if key.empty?
 
-    name = with_lock(File::LOCK_SH) { read_sessions[key] }
-    return nil unless name
+    with_lock(File::LOCK_SH) do
+      name = read_sessions[key]
+      next nil unless name
 
-    profile_by_name(name) || raise(Error, 'The registered profile no longer exists')
+      profile = profile_by_name(name) || raise(Error, 'The registered profile no longer exists')
+      current = profile.session_id
+      current.nil? || current == key ? profile : nil
+    end
   end
 
   def profile_by_name(name)
@@ -65,17 +69,22 @@ module ProfileStore
 
     with_lock(File::LOCK_EX) do
       sessions = read_sessions
-      if (current = sessions[key])
-        existing = profile_by_name(current)
-        raise Error, 'The registered profile no longer exists' unless existing
-        raise Error, 'A session profile cannot be changed after registration' unless existing.name.casecmp?(name)
-
-        next existing
+      current_name = sessions[key]
+      existing = current_name ? profile_by_name(current_name) : profile_by_name(name)
+      raise Error, 'The registered profile no longer exists' if current_name && !existing
+      if current_name && !existing.name.casecmp?(name)
+        raise Error, 'A session profile cannot be changed after registration'
       end
 
-      existing = profile_by_name(name) || create(name.downcase)
+      existing ||= create(name.downcase)
+      current_session = existing.session_id
+      if current_session && current_session != key && existing.online?
+        raise Error, 'The profile is already mapped to an online session'
+      end
+
+      existing.bind_session(key) unless current_session == key
       sessions[key] = existing.name
-      write_sessions(sessions)
+      write_sessions(sessions) unless current_name && current_session == key
       existing
     end
   end
