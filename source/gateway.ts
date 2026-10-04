@@ -30,7 +30,7 @@ const PROVIDERS: Record<string, ProviderSpec> = {
         options: { name: "zen", supportsStructuredOutputs: true },
     },
     anthropic: { npm: "@ai-sdk/anthropic", key: "ANTHROPIC_API_KEY" },
-    codex: { npm: "@ai-sdk/openai", key: "OPENAI_API_KEY" },
+    openai: { npm: "@ai-sdk/openai", key: "OPENAI_API_KEY" },
     local: {
         npm: "@ai-sdk/openai-compatible",
         baseURL: "http://localhost:11434/v1",
