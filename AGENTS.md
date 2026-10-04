@@ -9,5 +9,5 @@ npm run build
 ruby -Itests -e 'Dir["tests/**/*.rb"].sort.each { |file| require_relative file }'
 ```
 
-Build the bridge before running tests: the decision tests exercise Ruby-to-Node
+Build the gateway before running tests: the gateway tests exercise Ruby-to-Node
 requests against a local mock provider without remote credentials.

@@ -3,19 +3,46 @@ require 'minitest/autorun'
 require 'socket'
 
 require_relative '../source/decision'
+require_relative '../source/gateway'
 
-class DecisionTest < Minitest::Test
-  def test_the_ruby_bridge_uses_ai_sdk_structured_output()
+class GatewayTest < Minitest::Test
+  def test_the_gateway_returns_a_structured_decision()
     request = with_provider('{"harmful":false}') do
       refute Decision.harmful?({ 'tool_name' => 'read' }, 'Is it harmful?')
     end
 
-    assert_equal 'test-model', request['model']
+    assert_equal 'openai/gpt-5-mini', request['model']
     assert_equal 'json_schema', request.dig('response_format', 'type')
+  end
+
+  def test_the_gateway_returns_unstructured_text()
+    with_provider('plain answer') do
+      ret = Gateway.call({ 'model' => 'openrouter/test-model', 'prompt' => 'Say hi' })
+      assert_equal 'plain answer', ret['text']
+    end
+  end
+
+  def test_the_gateway_accepts_messages()
+    with_provider('plain answer') do
+      ret = Gateway.call({
+        'model' => 'openrouter/test-model',
+        'messages' => [{ 'role' => 'user', 'content' => 'hi' }]
+      })
+      assert_equal 'plain answer', ret['text']
+    end
   end
 
   def test_the_bridge_rejects_an_invalid_structured_decision()
     with_provider('{"harmful":"unknown"}') do
+      assert_raises(Decision::Error) { Decision.harmful?({}, 'Is it harmful?') }
+    end
+  end
+
+  def test_the_bridge_fails_when_the_provider_is_unreachable()
+    with_env(
+      'AUTONOM_OPENROUTER_BASE_URL' => 'http://127.0.0.1:1/v1',
+      'OPENROUTER_API_KEY' => 'test-key'
+    ) do
       assert_raises(Decision::Error) { Decision.harmful?({}, 'Is it harmful?') }
     end
   end
@@ -57,13 +84,16 @@ class DecisionTest < Minitest::Test
 
   private
 
+  def with_env(overrides)
+    previous = overrides.keys.to_h { |name| [name, ENV[name]] }
+    overrides.each { |name, value| ENV[name] = value }
+    yield
+  ensure
+    previous&.each { |name, value| ENV[name] = value }
+  end
+
   def with_provider(content)
     server = TCPServer.new('127.0.0.1', 0)
-    names = %w[AUTONOM_AI_BASE_URL AUTONOM_AI_API_KEY AUTONOM_AI_MODEL]
-    previous = names.to_h { |name| [name, ENV[name]] }
-    ENV['AUTONOM_AI_BASE_URL'] = "http://127.0.0.1:#{server.addr[1]}/v1"
-    ENV['AUTONOM_AI_API_KEY'] = 'test-key'
-    ENV['AUTONOM_AI_MODEL'] = 'test-model'
     worker = Thread.new do
       socket = server.accept
       headers = []
@@ -87,11 +117,15 @@ class DecisionTest < Minitest::Test
     ensure
       socket&.close
     end
-    yield
-    worker.value
+    with_env(
+      'AUTONOM_OPENROUTER_BASE_URL' => "http://127.0.0.1:#{server.addr[1]}/v1",
+      'OPENROUTER_API_KEY' => 'test-key'
+    ) do
+      yield
+      worker.value
+    end
   ensure
     server&.close
     worker&.kill if worker&.alive?
-    previous&.each { |name, value| ENV[name] = value }
   end
 end

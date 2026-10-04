@@ -1,8 +1,9 @@
 # Autonom
 
-Autonom is a Ruby coordination and policy core for multi-agent workspaces. It
-uses a small TypeScript bridge for AI SDK policy decisions; coordination,
-profiles, hooks, permissions, and policy composition remain Ruby.
+Autonom is a Ruby coordination and policy core for multi-agent workspaces. All
+model access goes through a small TypeScript AI gateway (policy decisions now,
+sidekicks later); coordination, profiles, hooks, permissions, and policy
+composition remain Ruby.
 
 There is no workspace config file. Paths are fixed relative to
 `DEVIN_PROJECT_DIR` (or the current directory), rooms are always explicit, and
@@ -15,7 +16,7 @@ Requirements:
 - Ruby 3.2+
 - Node.js 22+
 
-Install and build the AI bridge:
+Install and build the AI gateway:
 
 ```sh
 npm ci
@@ -116,17 +117,26 @@ and input fields, then `deny`, `allow`, or `screen`. Screen rules have one plain
 language `question`; content-bearing fields are removed before the model call
 unless the rule explicitly names them in `expose`.
 
-The TypeScript bridge uses AI SDK structured output and an OpenAI-compatible
-provider. It reads these environment variables:
+All model access goes through `source/gateway.ts`, an AI SDK bridge invoked
+as `node dist/gateway.js`. It reads a JSON request on stdin and writes the
+result on stdout:
 
-| Variable | Meaning |
+| Field | Meaning |
 | --- | --- |
-| `AUTONOM_AI_API_KEY` | Provider API key; falls back to `OPENROUTER_API_KEY`. |
-| `AUTONOM_AI_BASE_URL` | Provider base URL; defaults to OpenRouter. |
-| `AUTONOM_AI_MODEL` | Model ID; defaults to `openai/gpt-5-mini`. |
+| `model` | An alias (`policy`) or a `provider/model` spec; optional, defaults to the policy model. |
+| `prompt` / `messages` | A single prompt or a message list; exactly one is required. |
+| `system` | Optional system instructions. |
+| `schema` | Optional JSON schema; the reply is `{ "output": ... }` instead of `{ "text": ... }`. |
+| `timeout` | Milliseconds before the request aborts; defaults to 30000. |
+| `maxRetries` | Provider retry count; the policy decision disables retries. |
+| `maxOutputTokens`, `providerOptions` | Optional pass-through to the provider call. |
 
-The bridge also reads these values from this clone's `.env` when they are not
-already in the environment.
+The `PROVIDERS` hash in `source/gateway.ts` defines supported providers and
+their AI SDK packages: `openrouter`, `zen`, `anthropic`, `codex`, and `local`
+(Ollama). API keys are the only gateway configuration; they live in this
+clone's `.env` (`OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`). `AUTONOM_<PROVIDER>_BASE_URL` overrides a provider's base
+URL, e.g. `AUTONOM_OPENROUTER_BASE_URL`.
 
 ## Hooks and salience
 
@@ -155,8 +165,9 @@ Source layout:
 | `source/coord/` | Rooms, streams, waits, and the coordination MCP. |
 | `source/policy.rb` | Policy parsing, storage, matching, and composition. |
 | `source/policy/server.rb` | The policy MCP. |
-| `source/ai/decision.ts` | AI SDK structured decision bridge. |
-| `source/decision.rb` | Ruby bridge invocation and request scrubbing. |
+| `source/gateway.ts` | AI SDK gateway: providers, models, and generation. |
+| `source/gateway.rb` | Ruby gateway invocation. |
+| `source/decision.rb` | Policy decision requests and request scrubbing. |
 | `source/hooks.rb` | Lifecycle context, session injection, and enforcement. |
 | `source/profile_store.rb` | Profile discovery and session registration. |
 | `source/permissions.rb` | Deterministic file and command guards. |
