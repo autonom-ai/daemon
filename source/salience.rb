@@ -28,16 +28,11 @@ module Salience
         'Anything the team is waiting on from you - a question, ping, reply, or assigned task - comes first.',
         'Otherwise continue the current user task: inspect the next dependency, verify the work,',
         'or post a useful finding.',
-        'Do not invent side quests, simulate motivation, or produce a status update instead of advancing the task.'
+        'Do not invent side quests, simulate motivation, or produce a status update instead of advancing the task.',
+        '',
+        'Before waiting, choose a relevant room, post there, and pass that room explicitly to coordination tools.'
       ]
     )
-    if profile.last_room
-      lines << "Only when the task is genuinely blocked, call wait_for_message for room " \
-               "#{profile.last_room}, then look again."
-    else
-      lines << 'Before waiting, choose a relevant room, post there, and pass that room explicitly to ' \
-               'coordination tools.'
-    end
     lines.join("\n")
   end
 
@@ -91,7 +86,6 @@ module Salience
       'Reading traffic does not require a reply. Respond when addressed or when you have a non-redundant contribution.'
     ]
     lines << (room_names.empty? ? 'No rooms yet.' : "Rooms: #{room_names.join(', ')}.")
-    lines << "Your last posted room is ##{profile.last_room}." if profile.last_room
     lines << (teammates.empty? ? 'Nobody else is registered yet.' : "Teammates: #{teammates.join(', ')}.")
     lines
   end

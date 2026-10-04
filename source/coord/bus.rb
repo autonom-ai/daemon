@@ -224,7 +224,7 @@ module Bus
   def post(room, text, from:)
     entry = entry(from: from, text: text)
     append(room.path, entry)
-    from.focus_room(room.name)
+    from.policy = room.policy_path
     wake_source(room.stream)
     entry
   end
