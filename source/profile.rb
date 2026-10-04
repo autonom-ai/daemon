@@ -7,7 +7,6 @@ require_relative 'workspace'
 
 # TODO: Profile activity log
 class Profile
-  HEARTBEAT_FILE = 'heartbeat.json'
   POLICIES_FILE = 'policies.json'
   SESSION_FILE = 'session.json'
   SESSION_ID_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\z/
@@ -132,42 +131,11 @@ class Profile
     raise ProfileStore::Error, "Could not update the profile policy: #{error.class}"
   end
 
-  # Profile heartbeat is determined by last MCP call.
-  def heartbeat
-    path = heartbeat_path
-    File.exist?(path) ? parse_heartbeat(File.read(path)) : 0
-  rescue SystemCallError => error
-    raise ProfileStore::Error, "Could not read the heartbeat: #{error.class}"
-  end
-
-  def touch_heartbeat()
-    path = heartbeat_path
-    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
-    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
-      file.flock(File::LOCK_EX)
-      file.truncate(0)
-      file.rewind
-      file.write(JSON.generate('ts' => (Time.now.to_f * 1000).round))
-      file.flush
-    ensure
-      file.flock(File::LOCK_UN)
-    end
-  rescue SystemCallError => error
-    raise ProfileStore::Error, "Could not update the heartbeat: #{error.class}"
-  end
-
   private
 
   def session_path
     path = File.join(@directory, SESSION_FILE)
     raise ProfileStore::Error, 'Profile session state must not be a symlink' if File.symlink?(path)
-
-    path
-  end
-
-  def heartbeat_path
-    path = File.join(@directory, HEARTBEAT_FILE)
-    raise ProfileStore::Error, 'Heartbeat must not be a symlink' if File.symlink?(path)
 
     path
   end
@@ -200,12 +168,5 @@ class Profile
     ret
   rescue JSON::ParserError
     raise ProfileStore::Error, 'Profile policy state contains invalid JSON'
-  end
-
-  def parse_heartbeat(raw)
-    parsed = raw.strip.empty? ? {} : JSON.parse(raw)
-    parsed.is_a?(Hash) ? parsed['ts'].to_i : 0
-  rescue JSON::ParserError
-    0
   end
 end

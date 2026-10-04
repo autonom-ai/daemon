@@ -11,7 +11,7 @@ require 'json'
 module Hooks
   SESSION_TOOLS = %w[
     mcp__autonom-coord__get_profiles
-    mcp__autonom-coord__get_profile
+    mcp__autonom-coord__get_profile_status
     mcp__autonom-coord__set_profile
     mcp__autonom-coord__post_message
     mcp__autonom-coord__read_messages
@@ -22,7 +22,6 @@ module Hooks
     mcp__autonom-coord__set_room_involved
     mcp__autonom-coord__add_room_admin
     mcp__autonom-coord__remove_room_admin
-    mcp__autonom-coord__get_heartbeat
     mcp__autonom-policy__check_policy
   ].freeze
 
@@ -139,7 +138,7 @@ module Hooks
   def denial(tool, input, session, profile)
     name = profile && profile.name
     case tool
-    when 'mcp__autonom-coord__get_profile'
+    when 'mcp__autonom-coord__get_profile_status'
       'A Devin session ID is required' if session.to_s.empty?
     when 'mcp__autonom-coord__set_profile'
       return 'A Devin session ID is required' if session.to_s.empty?

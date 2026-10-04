@@ -78,17 +78,6 @@ class ProfileStoreTest < Minitest::Test
     assert_raises(ProfileStore::Error) { ProfileStore.register_profile('human', 'session-1') }
   end
 
-  def with_online_session(session)
-    FileUtils.mkdir_p(Profile.session_lock_dir)
-    path = File.join(Profile.session_lock_dir, "#{session}.lock")
-    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
-      file.flock(File::LOCK_EX)
-      yield
-    ensure
-      file.flock(File::LOCK_UN)
-    end
-  end
-
   def test_profiles_are_listed_and_looked_up_by_name()
     FileUtils.mkdir_p(File.join(@root, 'agents', 'Marlow'))
     FileUtils.mkdir_p(File.join(@root, 'agents', 'wren'))

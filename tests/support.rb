@@ -53,6 +53,17 @@ module CoreTest
   def profile(name)
     ProfileStore.profile_by_name(name)
   end
+
+  def with_online_session(session)
+    FileUtils.mkdir_p(Profile.session_lock_dir)
+    path = File.join(Profile.session_lock_dir, "#{session}.lock")
+    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
+      file.flock(File::LOCK_EX)
+      yield
+    ensure
+      file.flock(File::LOCK_UN)
+    end
+  end
 end
 
 # A mock provider for the gateway bridge: it answers one request and hands the

@@ -24,17 +24,20 @@ class ServerTest < Minitest::Test
       { 'jsonrpc' => '2.0', 'method' => 'notifications/initialized' },
       request(2, 'tools/list'),
       call(3, 'set_profile', 'name' => 'Marlow', 'session_id' => 'session-1'),
-      call(4, 'get_profile', 'session_id' => 'session-1')
+      call(4, 'get_profile_status', 'session_id' => 'session-1')
     )
 
     listed_tools = responses.find { |response| response['id'] == 2 }.dig('result', 'tools')
     set_result = result(responses, 3)
 
-    assert_equal %w[get_profiles get_profile set_profile post_message read_messages wait_for_message list_rooms
-                    create_room delete_room set_room_involved add_room_admin remove_room_admin get_heartbeat],
+    assert_equal %w[get_profiles get_profile_status set_profile post_message read_messages wait_for_message
+                    list_rooms create_room delete_room set_room_involved add_room_admin remove_room_admin],
                  listed_tools.map { |tool| tool['name'] }
     assert_equal 'marlow', set_result['name']
-    assert_equal set_result, result(responses, 4)
+    assert_equal(
+      { 'name' => 'marlow', 'session' => 'session-1', 'online' => false },
+      result(responses, 4)
+    )
   end
 
   def test_chat_tools_route_rooms_dms_and_pings()
@@ -247,35 +250,33 @@ class ServerTest < Minitest::Test
     assert_equal ['late line'], result(responses, 2)['messages'].map { |entry| entry['text'] }
   end
 
-  def test_heartbeats_report_presence_and_are_stamped_by_calls()
+  def test_profile_status_reports_the_mapped_session_and_presence()
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
-      call(3, 'get_heartbeat', 'name' => 'wren', 'session_id' => 'session-1')
+      call(3, 'get_profile_status', 'name' => 'wren', 'session_id' => 'session-1')
     )
-    beat = result(responses, 3)
+    status = result(responses, 3)
 
-    assert_equal 'wren', beat['name']
-    assert beat['lastHeartbeat'].positive?
-    assert beat['online']
+    assert_equal 'wren', status['name']
+    assert_equal 'session-2', status['session']
+    refute status['online']
 
-    file = File.join(@root, 'agents', 'marlow', 'heartbeat.json')
-    File.write(file, '{"ts":0}')
-    exchange(call(4, 'get_profiles', 'session_id' => 'session-1'))
+    with_online_session('session-2') do
+      responses = exchange(call(4, 'get_profile_status', 'name' => 'wren', 'session_id' => 'session-1'))
 
-    assert JSON.parse(File.read(file))['ts'].positive?
+      assert result(responses, 4)['online']
+    end
   end
 
-  def test_an_unregistered_session_stamps_nobody()
-    exchange(call(1, 'get_profiles'))
-
-    assert_empty Dir.glob(File.join(@root, 'agents', '*', 'heartbeat.json'))
+  def test_an_unregistered_session_has_no_status()
+    assert_nil result(exchange(call(1, 'get_profile_status')), 1)
   end
 
-  def test_get_heartbeat_requires_a_known_profile()
+  def test_get_profile_status_requires_a_known_profile()
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
-      call(2, 'get_heartbeat', 'name' => 'nobody', 'session_id' => 'session-1')
+      call(2, 'get_profile_status', 'name' => 'nobody', 'session_id' => 'session-1')
     )
 
     assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')

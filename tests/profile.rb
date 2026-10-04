@@ -49,11 +49,9 @@ class ProfileTest < Minitest::Test
     assert_raises(ProfileStore::Error) { @marlow.policy = nil }
   end
 
-  def test_heartbeat_is_zero_until_stamped()
-    assert_equal 0, @marlow.heartbeat
+  def test_online_reports_the_mapped_sessions_lock()
+    refute @marlow.online?
 
-    @marlow.touch_heartbeat()
-
-    assert @marlow.heartbeat.positive?
+    with_online_session('session-1') { assert @marlow.online? }
   end
 end
