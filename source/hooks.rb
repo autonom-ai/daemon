@@ -2,7 +2,7 @@ require_relative 'decision'
 require_relative 'profile_store'
 require_relative 'permissions'
 require_relative 'policy'
-require_relative 'salience/salience'
+require_relative 'salience'
 require_relative 'workspace'
 require_relative 'coord/bus'
 

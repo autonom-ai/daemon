@@ -171,4 +171,4 @@ Source layout:
 | `source/hooks.rb` | Lifecycle context, session injection, and enforcement. |
 | `source/profile_store.rb` | Profile discovery and session registration. |
 | `source/permissions.rb` | Deterministic file and command guards. |
-| `source/salience/salience.rb` | Strict task and coordination context. |
+| `source/salience.rb` | Strict task and coordination context. |

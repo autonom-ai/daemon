@@ -1,7 +1,7 @@
 require 'minitest/autorun'
 
-require_relative '../support'
-require_relative '../../source/salience/salience'
+require_relative 'support'
+require_relative '../source/salience'
 
 class SalienceTest < Minitest::Test
   include CoreTest

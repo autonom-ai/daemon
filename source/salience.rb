@@ -1,6 +1,6 @@
-require_relative '../identity'
-require_relative '../profile_store'
-require_relative '../coord/bus'
+require_relative 'identity'
+require_relative 'profile_store'
+require_relative 'coord/bus'
 
 module Salience
   RECENT_ROOM = 6
