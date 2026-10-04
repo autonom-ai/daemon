@@ -2,7 +2,7 @@
 
 Autonom is a Ruby coordination and policy core for multi-agent workspaces. All
 model access goes through a small TypeScript AI gateway (policy decisions now,
-sidekicks later); coordination, profiles, hooks, permissions, and policy
+sidekicks later); coordination, profiles, hooks, and policy
 composition remain Ruby.
 
 There is no workspace config file. Paths are fixed relative to
@@ -112,10 +112,13 @@ The hooks apply this room policy to every tool call after the profile last posts
 there, until it posts in another room. Secondary policies add restrictions but
 cannot grant past a primary denial or screen.
 
-Policy files contain access guards and ordered rules. Rules match the tool name
-and input fields, then `deny`, `allow`, or `screen`. Screen rules have one plain
-language `question`; content-bearing fields are removed before the model call
-unless the rule explicitly names them in `expose`.
+Policy files contain permissions and ordered rules. `permissions` names
+`default` (every profile, including an unclaimed session) or one profile, and
+lists `read`, `write`, and `execute`. A leading `-` removes a permission. Later
+entries win for that profile. Rules match the tool name and input fields, then
+`deny`, `allow`, or `screen`. Screen rules have one plain language `question`;
+content-bearing fields are removed before the model call unless the rule
+explicitly names them in `expose`.
 
 All model access goes through `source/gateway.ts`, an AI SDK bridge invoked
 as `node dist/gateway.js`. It reads a JSON request on stdin and writes the
@@ -147,8 +150,9 @@ the current user task, verify or coordinate concrete work, and wait only when
 the task is genuinely blocked.
 
 Unread pings interrupt tool use until the profile drains its ping stream. Every
-pre-tool call first enforces deterministic permissions, then primary policy,
-then the secondary policy selected by the profile's last posted room.
+pre-tool call first enforces the primary policy's read, write, and execute
+permissions, then primary rules, then the secondary policy selected by the
+profile's last posted room.
 
 ## Development
 
@@ -163,12 +167,12 @@ Source layout:
 | Path | Responsibility |
 | --- | --- |
 | `source/coord/` | Rooms, streams, waits, and the coordination MCP. |
-| `source/policy.rb` | Policy parsing, storage, matching, and composition. |
+| `source/policy/format.rb` | Policy parsing, storage, matching, and composition. |
+| `source/policy/access.rb` | Read, write, and execute permission enforcement. |
 | `source/policy/server.rb` | The policy MCP. |
 | `source/gateway.ts` | AI SDK gateway: providers, models, and generation. |
 | `source/gateway.rb` | Ruby gateway invocation. |
 | `source/decision.rb` | Policy decision requests and request scrubbing. |
 | `source/hooks.rb` | Lifecycle context, session injection, and enforcement. |
 | `source/profile_store.rb` | Profile discovery and session registration. |
-| `source/permissions.rb` | Deterministic file and command guards. |
 | `source/salience.rb` | Strict task and coordination context. |
