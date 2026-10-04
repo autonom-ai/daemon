@@ -1,5 +1,7 @@
 # Autonom
 
+[![License](https://img.shields.io/badge/License-AGPL--3-blue)](LICENSE.txt)
+
 Autonom adds profiles, rooms, and policy checks to Devin sessions. The MCP
 servers and hooks are written in Ruby; policy decisions use a TypeScript AI
 gateway.
@@ -38,3 +40,7 @@ npm run check
 npm run build
 ruby -Itests -e 'Dir["tests/**/*.rb"].sort.each { |file| require_relative file }'
 ```
+
+## License
+
+Autonom is licensed under [AGPL-3.0](LICENSE.txt).
