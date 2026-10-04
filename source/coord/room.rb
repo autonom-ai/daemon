@@ -1,7 +1,7 @@
 require 'fileutils'
 require 'json'
 
-require_relative '../policy'
+require_relative '../policy/format'
 require_relative '../profile_store'
 require_relative 'inbox'
 

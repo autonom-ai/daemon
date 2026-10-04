@@ -2,13 +2,10 @@ require 'fileutils'
 require 'json'
 
 require_relative 'identity'
-require_relative 'permissions'
 require_relative 'profile_store'
 require_relative 'workspace'
 
 class Profile
-  include Permissions
-
   HEARTBEAT_FILE = 'heartbeat.json'
   ROOM_FILE = 'room.json'
 
