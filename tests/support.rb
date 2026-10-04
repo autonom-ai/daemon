@@ -1,9 +1,11 @@
 require 'fileutils'
 require 'json'
+require 'socket'
 require 'tmpdir'
 
 require_relative '../source/profile_store'
-require_relative '../source/policy'
+require_relative '../source/policy/access'
+require_relative '../source/policy/format'
 require_relative '../source/workspace'
 require_relative '../source/coord/bus'
 
@@ -47,5 +49,54 @@ module CoreTest
 
   def profile(name)
     ProfileStore.profile_by_name(name)
+  end
+end
+
+# A mock provider for the gateway bridge: it answers one request and hands the
+# parsed request body back so a test can assert what the bridge sent.
+module MockProvider
+  def with_env(overrides)
+    previous = overrides.keys.to_h { |name| [name, ENV[name]] }
+    overrides.each { |name, value| ENV[name] = value }
+    yield
+  ensure
+    previous&.each { |name, value| ENV[name] = value }
+  end
+
+  def with_provider(content)
+    server = TCPServer.new('127.0.0.1', 0)
+    worker = Thread.new do
+      socket = server.accept
+      headers = []
+      while (line = socket.gets) && line != "\r\n"
+        headers << line
+      end
+      length = headers.find { |line| line.downcase.start_with?('content-length:') }.split(':', 2).last.to_i
+      ret = JSON.parse(socket.read(length))
+      body = JSON.generate(
+        'id' => 'test-response',
+        'object' => 'chat.completion',
+        'created' => 0,
+        'model' => 'test-model',
+        'choices' => [{ 'index' => 0, 'message' => { 'role' => 'assistant', 'content' => content },
+                        'finish_reason' => 'stop' }],
+        'usage' => { 'prompt_tokens' => 1, 'completion_tokens' => 1, 'total_tokens' => 2 }
+      )
+      socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
+                   "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")
+      ret
+    ensure
+      socket&.close
+    end
+    with_env(
+      'AUTONOM_OPENROUTER_BASE_URL' => "http://127.0.0.1:#{server.addr[1]}/v1",
+      'OPENROUTER_API_KEY' => 'test-key'
+    ) do
+      yield
+      worker.value
+    end
+  ensure
+    server&.close
+    worker&.kill if worker&.alive?
   end
 end

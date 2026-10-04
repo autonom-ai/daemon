@@ -1,7 +1,7 @@
 require 'minitest/autorun'
 
-require_relative 'support'
-require_relative '../source/policy'
+require_relative '../support'
+require_relative '../../source/policy/format'
 
 class PolicyTest < Minitest::Test
   include CoreTest
@@ -101,8 +101,9 @@ class PolicyTest < Minitest::Test
 
   def test_the_required_workspace_policy_loads_and_screens()
     assert Policy.workspace.rules.any?
-    assert Policy.workspace.guard?('codebase', 'quill')
-    refute Policy.workspace.guard?('codebase', 'sable')
+    assert Policy.workspace.permits?('read', 'quill')
+    assert Policy.workspace.permits?('write', 'quill')
+    assert Policy.workspace.permits?('execute', nil)
 
     denied, = Policy.decide([Policy.workspace], request('exec', 'command' => 'git status'), decision: @decision)
 
@@ -115,7 +116,7 @@ class PolicyTest < Minitest::Test
     File.write(Workspace.policy_path, "rules: []\n")
 
     assert Policy.workspace.rules.empty?
-    refute Policy.workspace.guard?('env', 'marlow')
+    refute Policy.workspace.permits?('read', 'marlow')
   end
 
   def test_an_except_rule_does_not_apply_to_the_profile()
@@ -137,16 +138,17 @@ class PolicyTest < Minitest::Test
     assert_equal 'blocked', reason
   end
 
-  def test_an_except_guard_does_not_apply_to_the_profile()
+  def test_a_profile_grant_overrides_default_and_case()
     policy = load(<<~'YAML')
-      access:
-        - guard: codebase
-          except: [sable]
+      permissions:
+        - default: [read, -write, -execute]
+        - sable: [write, execute]
     YAML
 
-    assert policy.guard?('codebase', 'quill')
-    refute policy.guard?('codebase', 'Sable')
-    refute policy.guard?('env', 'quill')
+    refute policy.permits?('write', 'quill')
+    assert policy.permits?('write', 'Sable')
+    assert policy.permits?('read', 'quill')
+    refute policy.permits?('execute', nil)
   end
 
   def test_a_screen_judges_only_the_fields_a_rule_exposes()
@@ -192,8 +194,8 @@ class PolicyTest < Minitest::Test
     end
   end
 
-  def test_an_unknown_guard_raises()
-    assert_raises(Policy::Error) { load("access:\n  - guard: nope\n") }
+  def test_an_unknown_permission_raises()
+    assert_raises(Policy::Error) { load("permissions:\n  - default: [nope]\n") }
   end
 
   def test_a_malformed_policy_raises()

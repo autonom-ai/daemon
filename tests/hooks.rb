@@ -39,6 +39,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_direct_profile_access_is_denied_before_the_model()
+    ProfileStore.register_profile('marlow', 'session-1')
     path = File.join(@root, 'agents', 'wren', 'notes.md')
     patch = ['*** Begin Patch', "*** Update File: #{path}", '+note', '*** End Patch'].join("\n")
 
@@ -53,11 +54,14 @@ class HooksTest < Minitest::Test
   end
 
   def test_an_allowed_request_reaches_the_model()
+    ProfileStore.register_profile('marlow', 'session-1')
+
     assert_nil hook(event('exec', 'command' => 'git status'))
     assert_equal 1, @decision.calls
   end
 
   def test_a_model_denial_blocks_the_request()
+    ProfileStore.register_profile('marlow', 'session-1')
     @decision = FakeDecision.new(harmful: true)
 
     assert_equal 'block', hook(event('exec', 'command' => 'git status'))['decision']
@@ -65,6 +69,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_the_screen_sends_a_scrubbed_state()
+    ProfileStore.register_profile('marlow', 'session-1')
     input = { 'file_path' => File.join(@project, 'notes.md'), 'content' => 'private content' }
 
     assert_nil hook(event('write', input))
@@ -73,6 +78,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_session_ids_are_injected_into_both_mcp_servers()
+    ProfileStore.register_profile('marlow', 'session-1')
     tools = %w[
       mcp__autonom-coord__set_profile
       mcp__autonom-coord__send_message
@@ -187,6 +193,7 @@ class HooksTest < Minitest::Test
   end
 
   def test_a_missing_primary_policy_blocks_tool_use()
+    ProfileStore.register_profile('marlow', 'session-1')
     File.unlink(Workspace.policy_path)
 
     assert_equal 'block', hook(event('exec', 'command' => 'git status'))['decision']
