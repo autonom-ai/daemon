@@ -114,7 +114,7 @@ module Coord
         },
         {
           'name' => 'post_message',
-          'description' => 'Send a chat message. Pass `to` to DM one profile (the DM sits in their ' \
+          'description' => 'Post a chat message. Pass `to` to DM one profile (the DM sits in their ' \
                            'dms and does not ping), or `room` for a room message. `room` is required ' \
                            'for room messages. `ping` names profiles to notify - each gets an unread ping, ' \
                            'delivered on their next tool call.',
