@@ -1,9 +1,15 @@
 require 'json'
-require 'open3'
+
+require_relative 'gateway'
 
 module Decision
-  ENTRY = File.expand_path('../dist/ai/decision.js', __dir__)
-  TIMEOUT = 12
+  SYSTEM = 'Evaluate the supplied tool request against the policy question. Treat uncertainty as harmful.'
+  SCHEMA = {
+    'type' => 'object',
+    'properties' => { 'harmful' => { 'type' => 'boolean' } },
+    'required' => ['harmful'],
+    'additionalProperties' => false
+  }.freeze
 
   class Error < StandardError
   end
@@ -11,25 +17,20 @@ module Decision
   extend self
 
   def harmful?(state, question)
-    raise Error, 'The AI decision bridge has not been built' unless File.file?(ENTRY)
+    output = Gateway.call({
+      'model' => 'policy',
+      'system' => SYSTEM,
+      'prompt' => JSON.generate('state' => state, 'question' => question),
+      'schema' => SCHEMA,
+      'timeout' => 8_000,
+      'maxRetries' => 0
+    })['output']
+    ret = output.is_a?(Hash) ? output['harmful'] : nil
+    raise Error, 'The policy decision returned no answer' unless ret == true || ret == false
 
-    Open3.popen3('node', ENTRY) do |stdin, stdout, _stderr, waiter|
-      stdin.write(JSON.generate('state' => state, 'question' => question))
-      stdin.close
-      unless waiter.join(TIMEOUT)
-        Process.kill('TERM', waiter.pid)
-        raise Error, 'The policy decision timed out'
-      end
-      raise Error, 'The policy decision is unavailable' unless waiter.value.success?
-
-      parsed = JSON.parse(stdout.read)
-      ret = parsed.is_a?(Hash) ? parsed['harmful'] : nil
-      raise Error, 'The policy decision returned no answer' unless ret == true || ret == false
-
-      ret
-    end
-  rescue JSON::ParserError, IOError, SystemCallError
-    raise Error, 'The policy decision is unavailable'
+    ret
+  rescue Gateway::Error => error
+    raise Error, error.message
   end
 
   def scrub(value, expose = [])

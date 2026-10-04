@@ -23,7 +23,7 @@ module Permissions
     return false if guard?('profiles') && agents.start_with?(prefix)
 
     # A search rooted at or above a hidden room would read its messages, and a
-    # search cannot filter its own results - so it fails closed.
+    # search cannot filter its own results. Fails closed.
     return false if guard?('rooms') && hidden_room_dirs.any? { |dir| dir == path || dir.start_with?(prefix) }
 
     true
