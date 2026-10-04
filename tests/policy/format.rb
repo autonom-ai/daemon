@@ -164,7 +164,7 @@ class PolicyTest < Minitest::Test
               false: no
     YAML
 
-    Policy.decide([policy], request('send_message', 'text' => 'sekrit', 'room' => 'general'), decision: @decision)
+    Policy.decide([policy], request('post_message', 'text' => 'sekrit', 'room' => 'general'), decision: @decision)
 
     assert_equal 'sekrit', @decision.state.dig('tool_input', 'text')
     assert_equal 'general', @decision.state.dig('tool_input', 'room')
@@ -182,7 +182,7 @@ class PolicyTest < Minitest::Test
               false: no
     YAML
 
-    Policy.decide([policy], request('send_message', 'text' => 'sekrit', 'room' => 'general'), decision: @decision)
+    Policy.decide([policy], request('post_message', 'text' => 'sekrit', 'room' => 'general'), decision: @decision)
 
     refute @decision.state['tool_input'].key?('text')
     assert_equal 'general', @decision.state.dig('tool_input', 'room')

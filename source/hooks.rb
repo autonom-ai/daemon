@@ -13,7 +13,7 @@ module Hooks
     mcp__autonom-coord__get_profiles
     mcp__autonom-coord__get_profile
     mcp__autonom-coord__set_profile
-    mcp__autonom-coord__send_message
+    mcp__autonom-coord__post_message
     mcp__autonom-coord__read_messages
     mcp__autonom-coord__wait_for_message
     mcp__autonom-coord__list_rooms

@@ -23,7 +23,7 @@ module Coord
         req = parse(line)
         # A blocking wait must not stall the requests behind it, so it runs on
         # its own thread. Everything else is answered in arrival order - a
-        # client that sends set_profile then send_message must not see the two
+        # client that sends set_profile then post_message must not see the two
         # race - and no worker outlives the process with its response unwritten.
         if waiting?(req)
           blocking << Thread.new { respond(req, output, write_lock) }
@@ -113,7 +113,7 @@ module Coord
           }
         },
         {
-          'name' => 'send_message',
+          'name' => 'post_message',
           'description' => 'Send a chat message. Pass `to` to DM one profile (the DM sits in their ' \
                            'dms and does not ping), or `room` for a room message. `room` is required ' \
                            'for room messages. `ping` names profiles to notify - each gets an unread ping, ' \
@@ -272,8 +272,8 @@ module Coord
         profile_entry(ProfileStore.profile_by_session(session))
       when 'set_profile'
         profile_entry(ProfileStore.register_profile(args['name'], session))
-      when 'send_message'
-        send_message(args, session)
+      when 'post_message'
+        post_message(args, session)
       when 'read_messages'
         read_messages(args, session)
       when 'wait_for_message'
@@ -308,7 +308,7 @@ module Coord
       tool_error(error.message)
     end
 
-    def send_message(args, session)
+    def post_message(args, session)
       from = registered_profile(session)
       text = args['text'].to_s
       raise ProfileStore::Error, 'A message needs text' if text.strip.empty?

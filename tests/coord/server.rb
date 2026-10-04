@@ -30,7 +30,7 @@ class ServerTest < Minitest::Test
     listed_tools = responses.find { |response| response['id'] == 2 }.dig('result', 'tools')
     set_result = result(responses, 3)
 
-    assert_equal %w[get_profiles get_profile set_profile send_message read_messages wait_for_message list_rooms
+    assert_equal %w[get_profiles get_profile set_profile post_message read_messages wait_for_message list_rooms
                     create_room delete_room set_room_involved add_room_admin remove_room_admin get_heartbeat],
                  listed_tools.map { |tool| tool['name'] }
     assert_equal 'marlow', set_result['name']
@@ -43,7 +43,7 @@ class ServerTest < Minitest::Test
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
       call(
         3,
-        'send_message',
+        'post_message',
         'text' => 'hello team',
         'room' => 'general',
         'ping' => ['wren'],
@@ -51,9 +51,9 @@ class ServerTest < Minitest::Test
       ),
       call(4, 'read_messages', 'source' => 'pings', 'session_id' => 'session-2'),
       call(5, 'read_messages', 'source' => 'room', 'room' => 'general', 'session_id' => 'session-2'),
-      call(6, 'send_message', 'text' => 'psst', 'to' => 'marlow', 'session_id' => 'session-2'),
+      call(6, 'post_message', 'text' => 'psst', 'to' => 'marlow', 'session_id' => 'session-2'),
       call(7, 'read_messages', 'source' => 'dms', 'session_id' => 'session-1'),
-      call(8, 'send_message', 'text' => 'hi', 'room' => 'general', 'ping' => ['nobody'], 'session_id' => 'session-1')
+      call(8, 'post_message', 'text' => 'hi', 'room' => 'general', 'ping' => ['nobody'], 'session_id' => 'session-1')
     )
 
     assert_equal 'Sent message to room:general with 1 pings', result(responses, 3)['result']
@@ -69,7 +69,7 @@ class ServerTest < Minitest::Test
   def test_an_unknown_room_is_refused()
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
-      call(2, 'send_message', 'text' => 'hello', 'room' => 'nowhere', 'session_id' => 'session-1')
+      call(2, 'post_message', 'text' => 'hello', 'room' => 'nowhere', 'session_id' => 'session-1')
     )
 
     assert responses.find { |response| response['id'] == 2 }.dig('result', 'isError')
@@ -78,7 +78,7 @@ class ServerTest < Minitest::Test
   def test_room_scoped_tools_require_a_room()
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
-      call(2, 'send_message', 'text' => 'hello', 'session_id' => 'session-1'),
+      call(2, 'post_message', 'text' => 'hello', 'session_id' => 'session-1'),
       call(3, 'read_messages', 'source' => 'room', 'session_id' => 'session-1'),
       call(4, 'wait_for_message', 'source' => 'room', 'timeout' => 1, 'session_id' => 'session-1')
     )
@@ -112,9 +112,9 @@ class ServerTest < Minitest::Test
     responses = exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
-      call(3, 'send_message', 'text' => 'first', 'room' => 'general', 'session_id' => 'session-1'),
+      call(3, 'post_message', 'text' => 'first', 'room' => 'general', 'session_id' => 'session-1'),
       call(4, 'read_messages', 'source' => 'room', 'room' => 'general', 'session_id' => 'session-2'),
-      call(5, 'send_message', 'text' => 'second', 'room' => 'general', 'session_id' => 'session-1'),
+      call(5, 'post_message', 'text' => 'second', 'room' => 'general', 'session_id' => 'session-1'),
       call(6, 'list_rooms', 'session_id' => 'session-2'),
       call(7, 'list_rooms', 'session_id' => 'session-1')
     )
@@ -134,9 +134,9 @@ class ServerTest < Minitest::Test
     exchange(
       call(1, 'set_profile', 'name' => 'marlow', 'session_id' => 'session-1'),
       call(2, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'),
-      call(3, 'send_message', 'text' => 'first', 'room' => 'general', 'session_id' => 'session-1'),
+      call(3, 'post_message', 'text' => 'first', 'room' => 'general', 'session_id' => 'session-1'),
       call(4, 'read_messages', 'source' => 'room', 'room' => 'general', 'session_id' => 'session-2'),
-      call(5, 'send_message', 'text' => 'second', 'room' => 'general', 'session_id' => 'session-1')
+      call(5, 'post_message', 'text' => 'second', 'room' => 'general', 'session_id' => 'session-1')
     )
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -293,7 +293,7 @@ class ServerTest < Minitest::Test
     refute_includes listed.map { |room| room['name'] }, 'room:general'
 
     responses = exchange(
-      call(5, 'send_message', 'text' => 'hi', 'room' => 'general', 'session_id' => 'session-2'),
+      call(5, 'post_message', 'text' => 'hi', 'room' => 'general', 'session_id' => 'session-2'),
       call(6, 'read_messages', 'source' => 'room', 'room' => 'general', 'session_id' => 'session-2')
     )
 
@@ -301,7 +301,7 @@ class ServerTest < Minitest::Test
     assert responses.find { |response| response['id'] == 6 }.dig('result', 'isError')
 
     sent = result(
-      exchange(call(7, 'send_message', 'text' => 'hi', 'room' => 'general', 'session_id' => 'session-1')),
+      exchange(call(7, 'post_message', 'text' => 'hi', 'room' => 'general', 'session_id' => 'session-1')),
       7
     )
 

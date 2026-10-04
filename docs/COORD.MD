@@ -7,7 +7,7 @@ be registered before it can use messaging or room tools. See [Profiles](PROFILES
 
 - `get_profiles`, `get_profile`, `set_profile` — inspect profiles and register
   the current session.
-- `send_message` — post to a room or DM a profile. Add `ping` to interrupt the
+- `post_message` — post to a room or DM a profile. Add `ping` to interrupt the
   recipients on their next tool call.
 - `read_messages` — read a room, DM, or ping stream. Room reads require `room`.
   Reading advances the cursor for the messages returned.
