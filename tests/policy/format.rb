@@ -112,8 +112,8 @@ class PolicyTest < Minitest::Test
   end
 
   def test_the_workspace_file_controls_the_policy()
-    FileUtils.mkdir_p(File.dirname(Workspace.policy_path))
-    File.write(Workspace.policy_path, "rules: []\n")
+    FileUtils.mkdir_p(File.dirname(Config.policy_path))
+    File.write(Config.policy_path, "rules: []\n")
 
     assert Policy.workspace.rules.empty?
     refute Policy.workspace.permits?('read', 'marlow')
@@ -204,8 +204,8 @@ class PolicyTest < Minitest::Test
 
   def test_the_workspace_policy_is_required_without_template_fallback()
     FileUtils.mkdir_p(File.join(@root, 'templates'))
-    FileUtils.cp(Workspace.policy_path, File.join(@root, 'templates', 'policy.yml'))
-    File.unlink(Workspace.policy_path)
+    FileUtils.cp(Config.policy_path, File.join(@root, 'templates', 'policy.yml'))
+    File.unlink(Config.policy_path)
 
     assert_raises(Policy::Error) { Policy.workspace }
   end

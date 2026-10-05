@@ -2,6 +2,8 @@
 
 `autonom-coord` stores room messages, direct messages, and pings. A profile must
 be registered before it can use messaging or room tools. See [Profiles](PROFILES.MD).
+The coordination MCP requires `.devin/hooks.v1.json` and refuses to connect
+without it.
 
 ## Tools
 

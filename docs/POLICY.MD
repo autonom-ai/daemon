@@ -48,7 +48,8 @@ applies it after the primary policy. Secondary policies add rules; they do not
 change primary permissions.
 
 The policy MCP exposes `check_policy`, which checks a tool request against the
-primary policy and the caller's profile policy.
+primary policy and the caller's profile policy. The policy MCP requires
+`.devin/policy.yml` and refuses to connect without it.
 
 Room policies are plain files: members can read them, and the owner or an admin
 can edit them with normal file tools. The policy MCP is separate from

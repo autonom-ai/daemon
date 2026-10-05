@@ -194,7 +194,7 @@ class HooksTest < Minitest::Test
 
   def test_a_missing_primary_policy_blocks_tool_use()
     ProfileStore.register_profile('marlow', 'session-1')
-    File.unlink(Workspace.policy_path)
+    File.unlink(Config.policy_path)
 
     assert_equal 'block', hook(event('exec', 'command' => 'git status'))['decision']
     assert_equal 0, @decision.calls

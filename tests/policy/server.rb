@@ -1,5 +1,6 @@
 require 'json'
 require 'minitest/autorun'
+require 'open3'
 require 'stringio'
 
 require_relative '../support'
@@ -7,6 +8,8 @@ require_relative '../../source/policy/server'
 
 class PolicyServerTest < Minitest::Test
   include CoreTest
+
+  POLICY_SERVER = File.expand_path('../../source/policy/server.rb', __dir__)
 
   class FakeDecision
     def harmful?(_state, _question)
@@ -102,6 +105,34 @@ class PolicyServerTest < Minitest::Test
 
     refute checked['denied']
     assert_nil checked['secondary']
+  end
+
+  def test_the_entrypoint_refuses_to_start_without_hooks()
+    _stdout, stderr, status = Open3.capture3('ruby', POLICY_SERVER, stdin_data: '')
+
+    refute status.success?
+    assert_includes stderr, Config.hooks_path
+  end
+
+  def test_the_entrypoint_refuses_to_start_without_policy()
+    File.write(Config.hooks_path, "{}\n")
+    File.unlink(Config.policy_path)
+    _stdout, stderr, status = Open3.capture3('ruby', POLICY_SERVER, stdin_data: '')
+
+    refute status.success?
+    assert_includes stderr, Config.policy_path
+  end
+
+  def test_the_entrypoint_starts_when_the_hooks_and_policy_are_present()
+    File.write(Config.hooks_path, "{}\n")
+    stdout, _stderr, status = Open3.capture3(
+      'ruby',
+      POLICY_SERVER,
+      stdin_data: "#{JSON.generate(request(1, 'initialize', 'protocolVersion' => '2025-03-26'))}\n"
+    )
+
+    assert status.success?
+    assert_equal 'autonom-policy', JSON.parse(stdout).dig('result', 'serverInfo', 'name')
   end
 
   private

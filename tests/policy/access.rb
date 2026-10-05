@@ -59,7 +59,7 @@ class PolicyAccessTest < Minitest::Test
     source_file = File.join(@root, 'source', 'hooks.rb')
     project_file = File.join(@project, 'notes.md')
     File.write(
-      Workspace.policy_path,
+      Config.policy_path,
       <<~YAML
         permissions:
           - default: [read, -write, -execute]
@@ -86,9 +86,9 @@ class PolicyAccessTest < Minitest::Test
   end
 
   def test_a_later_profile_entry_overrides_default()
-    FileUtils.mkdir_p(File.dirname(Workspace.policy_path))
+    FileUtils.mkdir_p(File.dirname(Config.policy_path))
     File.write(
-      Workspace.policy_path,
+      Config.policy_path,
       "permissions:\n  - default: [read, -write]\n  - marlow: [write]\nrules: []\n"
     )
 
@@ -98,8 +98,8 @@ class PolicyAccessTest < Minitest::Test
   end
 
   def test_a_workspace_file_without_permissions_denies_every_kind()
-    FileUtils.mkdir_p(File.dirname(Workspace.policy_path))
-    File.write(Workspace.policy_path, "permissions: []\nrules: []\n")
+    FileUtils.mkdir_p(File.dirname(Config.policy_path))
+    File.write(Config.policy_path, "permissions: []\nrules: []\n")
 
     refute write?(File.join(@project, 'notes.md'))
     refute read?(File.join(@project, '.env'))

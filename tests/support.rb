@@ -6,7 +6,7 @@ require 'tmpdir'
 require_relative '../source/profile_store'
 require_relative '../source/policy/access'
 require_relative '../source/policy/format'
-require_relative '../source/workspace'
+require_relative '../source/config'
 require_relative '../source/coord/bus'
 
 module CoreTest
@@ -19,10 +19,10 @@ module CoreTest
     ENV['DEVIN_PROJECT_DIR'] = @project
     ProfileStore.root = @root
     Profile.session_lock_dir = File.join(@root, 'session_locks')
-    FileUtils.mkdir_p(File.dirname(Workspace.policy_path))
+    FileUtils.mkdir_p(File.dirname(Config.policy_path))
     FileUtils.cp(
       File.join(ProfileStore::ROOT, 'templates', 'policy.yml'),
-      Workspace.policy_path
+      Config.policy_path
     )
   end
 

@@ -1,5 +1,6 @@
 require 'json'
 require 'minitest/autorun'
+require 'open3'
 require 'stringio'
 
 require_relative '../support'
@@ -7,6 +8,8 @@ require_relative '../../source/coord/server'
 
 class ServerTest < Minitest::Test
   include CoreTest
+
+  COORD_SERVER = File.expand_path('../../source/coord/server.rb', __dir__)
 
   def setup()
     setup_core()
@@ -390,6 +393,25 @@ class ServerTest < Minitest::Test
     deleted = result(exchange(call(4, 'delete_room', 'name' => 'general', 'session_id' => 'session-1')), 4)
 
     assert_equal 'Deleted room room:general', deleted['result']
+  end
+
+  def test_the_entrypoint_refuses_to_start_without_hooks()
+    _stdout, stderr, status = Open3.capture3('ruby', COORD_SERVER, stdin_data: '')
+
+    refute status.success?
+    assert_includes stderr, Config.hooks_path
+  end
+
+  def test_the_entrypoint_starts_when_the_hooks_are_present()
+    File.write(Config.hooks_path, "{}\n")
+    stdout, _stderr, status = Open3.capture3(
+      'ruby',
+      COORD_SERVER,
+      stdin_data: "#{JSON.generate(request(1, 'initialize', 'protocolVersion' => '2025-03-26'))}\n"
+    )
+
+    assert status.success?
+    assert_equal 'autonom-coord', JSON.parse(stdout).dig('result', 'serverInfo', 'name')
   end
 
   private

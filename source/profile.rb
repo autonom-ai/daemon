@@ -3,7 +3,7 @@ require 'json'
 
 require_relative 'identity'
 require_relative 'profile_store'
-require_relative 'workspace'
+require_relative 'config'
 
 class Profile
   POLICIES_FILE = 'policies.json'
@@ -95,7 +95,7 @@ class Profile
 
     File.open(policies_path, 'r') do |file|
       file.flock(File::LOCK_SH)
-      parse_policies(file.read)[Workspace.project_dir]
+      parse_policies(file.read)[Config.project_dir]
     ensure
       file.flock(File::LOCK_UN)
     end
@@ -104,7 +104,7 @@ class Profile
   end
 
   def policy=(policy_path)
-    unless policy_path.is_a?(String) && File.basename(policy_path) == Workspace::POLICY_FILE
+    unless policy_path.is_a?(String) && File.basename(policy_path) == Config::POLICY_FILE
       raise ProfileStore::Error, 'Invalid policy path'
     end
 
@@ -112,7 +112,7 @@ class Profile
     File.open(policies_path, File::RDWR | File::CREAT, 0o600) do |file|
       file.flock(File::LOCK_EX)
       policies = parse_policies(file.read)
-      policies[Workspace.project_dir] = policy_path
+      policies[Config.project_dir] = policy_path
       file.truncate(0)
       file.rewind
       file.write(JSON.generate(policies))

@@ -1,3 +1,4 @@
+require_relative '../config'
 require_relative '../mcp/protocol'
 require_relative 'operations'
 
@@ -36,4 +37,8 @@ module Coord
   end
 end
 
-Coord::Server.new.run if $PROGRAM_NAME == __FILE__
+if $PROGRAM_NAME == __FILE__
+  abort "The Autonom hooks are not installed: #{Config.hooks_path}" unless Config.has_hooks?
+
+  Coord::Server.new.run
+end

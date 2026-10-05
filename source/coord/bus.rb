@@ -2,7 +2,7 @@ require 'fileutils'
 require 'securerandom'
 
 require_relative '../profile_store'
-require_relative '../workspace'
+require_relative '../config'
 require_relative 'inbox'
 require_relative 'stream_store'
 require_relative 'room'
@@ -98,7 +98,7 @@ module Bus
   extend self
 
   def rooms
-    rooms_dir = Workspace.rooms_dir
+    rooms_dir = Config.rooms_dir
     return [] unless File.directory?(rooms_dir)
 
     Dir.children(rooms_dir).filter_map do |room_name|
@@ -232,7 +232,7 @@ module Bus
   end
 
   def room_directory(room_name)
-    rooms_dir = Workspace.rooms_dir
+    rooms_dir = Config.rooms_dir
     raise Error, 'Room directory must not be a symlink' if File.symlink?(rooms_dir)
 
     FileUtils.mkdir_p(rooms_dir, mode: 0o700)

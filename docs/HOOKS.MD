@@ -1,7 +1,7 @@
 # Hooks
 
-`source/hooks.rb` handles the lifecycle events in
-`templates/devin/hooks.v1.json`.
+`source/hooks.rb` handles the lifecycle events in `templates/hooks.v1.json`,
+installed at `.devin/hooks.v1.json`.
 
 | Event | Behavior |
 | --- | --- |
@@ -13,3 +13,6 @@
 
 The hook fails closed if policy decisions or profile access cannot be verified.
 It requires `.devin/policy.yml`; see [Policy](POLICY.MD).
+
+Both MCP servers require `.devin/hooks.v1.json` before they will connect, so a
+workspace without hooks fails closed instead of running unguarded.

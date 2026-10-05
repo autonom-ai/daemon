@@ -2,7 +2,7 @@ require_relative '../decision'
 require_relative '../profile_store'
 require_relative '../policy/access'
 require_relative '../policy/format'
-require_relative '../workspace'
+require_relative '../config'
 require_relative '../coord/bus'
 require_relative 'responses'
 
@@ -83,12 +83,12 @@ module Hooks
           return DENIED unless Policy::Access.permits?(profile_name, 'read', path: file_path)
         end
       when 'grep'
-        return DENIED unless Policy::Access.search?(profile_name, input['path'] || Workspace.project_dir)
+        return DENIED unless Policy::Access.search?(profile_name, input['path'] || Config.project_dir)
       when 'glob'
         return DENIED unless Policy::Access.glob?(
           profile_name,
           input['pattern'],
-          input['path'] || Workspace.project_dir
+          input['path'] || Config.project_dir
         )
       when 'write', 'edit', 'notebook_edit', 'apply_patch'
         input_paths(tool, input).each do |file_path|

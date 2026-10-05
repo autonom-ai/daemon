@@ -21,13 +21,17 @@ For a workspace:
 
 - Merge `templates/mcp.json` into its MCP configuration. Replace
   `{{AUTONOM_ROOT}}` with this repository's path.
-- Merge `templates/devin/hooks.v1.json` into its hook configuration. Replace
-  `{{COORD_ROOT}}` with this repository's path.
+- Merge `templates/hooks.v1.json` into its hook configuration at
+  `.devin/hooks.v1.json`. Replace `{{COORD_ROOT}}` with this repository's path.
 - Copy `templates/policy.yml` to `.devin/policy.yml`.
 
 Set `DEVIN_PROJECT_DIR` when the workspace is not the process's current
-directory. The primary policy file is required; tool use is blocked if it is
-missing.
+directory.
+
+The MCP servers fail closed: both require `.devin/hooks.v1.json`, and the policy
+server also requires `.devin/policy.yml`. A session whose hooks did not load
+would run without the policy gate, so the servers refuse to connect instead of
+serving unguarded. Devin reports the failure as a connection error.
 
 ## Documentation
 

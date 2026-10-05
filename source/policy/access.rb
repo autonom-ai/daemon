@@ -2,7 +2,7 @@ require 'shellwords'
 
 require_relative '../coord/membership'
 require_relative '../profile_store'
-require_relative '../workspace'
+require_relative '../config'
 require_relative 'format'
 
 module Policy
@@ -19,7 +19,7 @@ module Policy
     def search?(profile_name, file_path)
       return false unless path_ok?(profile_name, file_path, write: false)
 
-      file_path = resolve(file_path, Workspace.project_dir)
+      file_path = resolve(file_path, Config.project_dir)
       prefix = file_path.end_with?(File::SEPARATOR) ? file_path : "#{file_path}#{File::SEPARATOR}"
       return false if agents_dir.start_with?(prefix)
       hidden = hidden_rooms(profile_name).any? do |room_dir|
@@ -34,7 +34,7 @@ module Policy
       return false unless pattern.is_a?(String) && !pattern.empty?
       return false unless path_ok?(profile_name, file_path, write: false)
 
-      base_dir = resolve(file_path, Workspace.project_dir)
+      base_dir = resolve(file_path, Config.project_dir)
       glob = File.expand_path(pattern, base_dir)
       flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
       return false if restricted(profile_name).any? { |entry| File.fnmatch?(glob, entry, flags) }
@@ -47,7 +47,7 @@ module Policy
     private
 
     def command_ok?(profile_name, command, base_dir)
-      base_dir ||= Workspace.project_dir
+      base_dir ||= Config.project_dir
       return false unless command.is_a?(String)
       return false unless path_ok?(profile_name, base_dir, write: false)
       return false if deletes_protected?(command, base_dir)
@@ -60,10 +60,10 @@ module Policy
     def path_ok?(profile_name, file_path, write:)
       return false unless file_path.is_a?(String) && !file_path.empty?
 
-      file_path = resolve(file_path, Workspace.project_dir)
+      file_path = resolve(file_path, Config.project_dir)
       file_name = File.basename(file_path)
       return false if file_name == '.env' || file_name.start_with?('.env.')
-      return false if file_path == resolve(Workspace.policy_path, Workspace.project_dir)
+      return false if file_path == resolve(Config.policy_path, Config.project_dir)
 
       room = room_access(profile_name, file_path, write: write)
       return room unless room.nil?
@@ -139,11 +139,11 @@ module Policy
     end
 
     def agents_dir
-      resolve(File.join(ProfileStore.root, 'agents'), Workspace.project_dir)
+      resolve(File.join(ProfileStore.root, 'agents'), Config.project_dir)
     end
 
     def rooms_root
-      resolve(Workspace.rooms_dir, Workspace.project_dir)
+      resolve(Config.rooms_dir, Config.project_dir)
     end
 
     def under?(file_path, dir_path)
