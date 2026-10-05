@@ -1,7 +1,7 @@
 require 'yaml'
 
 require_relative '../decision'
-require_relative '../workspace'
+require_relative '../config'
 
 module Policy
   class Error < StandardError
@@ -13,11 +13,9 @@ module Policy
   extend self
 
   def workspace
-    policy_path = Workspace.policy_path
-    raise Error, 'The workspace requires .devin/policy.yml' unless File.file?(policy_path)
-    raise Error, 'Workspace policy must not be a symlink' if File.symlink?(policy_path)
+    raise Error, 'The workspace requires .devin/policy.yml' unless Config.has_policy?
 
-    load(policy_path)
+    load(Config.policy_path)
   end
 
   def load(policy_path)

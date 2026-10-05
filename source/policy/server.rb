@@ -1,3 +1,4 @@
+require_relative '../config'
 require_relative '../decision'
 require_relative '../mcp/protocol'
 require_relative '../profile_store'
@@ -79,4 +80,9 @@ module Policy
   end
 end
 
-Policy::Server.new.run if $PROGRAM_NAME == __FILE__
+if $PROGRAM_NAME == __FILE__
+  abort "The Autonom hooks are not installed: #{Config.hooks_path}" unless Config.has_hooks?
+  abort "The workspace policy is not installed: #{Config.policy_path}" unless Config.has_policy?
+
+  Policy::Server.new.run
+end
