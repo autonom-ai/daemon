@@ -37,10 +37,10 @@ module Decision
     case value
     when Hash
       value.each_with_object({}) do |(field, item), ret|
-        name = field.to_s
-        next if private_field?(name) && expose.none? { |exposed| exposed.to_s.casecmp?(name) }
+        field_name = field.to_s
+        next if private_field?(field_name) && expose.none? { |exposed| exposed.to_s.casecmp?(field_name) }
 
-        ret[name] = name == 'command' && item.is_a?(String) ? redact(item) : scrub(item, expose)
+        ret[field_name] = field_name == 'command' && item.is_a?(String) ? redact(item) : scrub(item, expose)
       end
     when Array
       value.map { |item| scrub(item, expose) }

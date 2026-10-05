@@ -1,10 +1,10 @@
 require 'fileutils'
-require 'json'
 require 'securerandom'
 
 require_relative '../profile_store'
 require_relative '../workspace'
 require_relative 'inbox'
+require_relative 'stream_store'
 require_relative 'room'
 
 module Bus
@@ -12,11 +12,7 @@ module Bus
   PINGS_PREFIX = 'pings'
   DMS_FILE = 'dms.jsonl'
   PINGS_FILE = 'pings.jsonl'
-  CURSORS_FILE = 'cursors.json'
   MAX_ENTRY = 400
-
-  class Error < StandardError
-  end
 
   class WaitRegistry
     FIRST_SLICE = 0.05
@@ -30,33 +26,33 @@ module Bus
       @entries = {}
     end
 
-    def wait(agent, source, timeout:, watch: [])
+    def wait(profile_name, stream_name, timeout:, watch_paths: [])
       # The files are read before the waiter is registered: a line that lands
       # in the gap is a change the waiter can still see on its next slice, and
       # one that lands after registration is a change too.
-      baseline = fingerprint(watch)
+      baseline = fingerprint(watch_paths)
       ticket = Ticket.new(false)
-      @lock.synchronize { ((@entries[source] ||= {})[agent] ||= []) << ticket }
-      park(ticket, timeout, watch, baseline)
+      @lock.synchronize { ((@entries[stream_name] ||= {})[profile_name] ||= []) << ticket }
+      park(ticket, timeout, watch_paths, baseline)
     ensure
       @lock.synchronize do
-        parked = @entries.dig(source, agent)
+        parked = @entries.dig(stream_name, profile_name)
         parked&.delete(ticket)
-        @entries[source]&.delete(agent) if parked&.empty?
-        @entries.delete(source) if @entries[source]&.empty?
+        @entries[stream_name]&.delete(profile_name) if parked&.empty?
+        @entries.delete(stream_name) if @entries[stream_name]&.empty?
       end
     end
 
-    def wake(agent, source)
-      signal() { Array(@entries.dig(source, agent)) }
+    def wake(profile_name, stream_name)
+      signal() { Array(@entries.dig(stream_name, profile_name)) }
     end
 
-    def wake_agent(agent)
-      signal() { @entries.values.flat_map { |agents| Array(agents[agent]) } }
+    def wake_agent(profile_name)
+      signal() { @entries.values.flat_map { |streams| Array(streams[profile_name]) } }
     end
 
-    def wake_source(source)
-      signal() { Array(@entries[source]&.values&.flatten) }
+    def wake_source(stream_name)
+      signal() { Array(@entries[stream_name]&.values&.flatten) }
     end
 
     private
@@ -69,7 +65,7 @@ module Bus
     end
 
     # Sleeps until slice change.
-    def park(ticket, timeout, watch, baseline)
+    def park(ticket, timeout, watch_paths, baseline)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
       slice = FIRST_SLICE
       loop do
@@ -77,19 +73,19 @@ module Bus
         return if remaining <= 0
 
         @lock.synchronize do
-          @condition.wait(@lock, watch.empty? ? remaining : [slice, remaining].min) unless ticket.woken
+          @condition.wait(@lock, watch_paths.empty? ? remaining : [slice, remaining].min) unless ticket.woken
           return if ticket.woken
         end
-        return if fingerprint(watch) != baseline
+        return if fingerprint(watch_paths) != baseline
 
         slice = [slice * 2, MAX_SLICE].min
       end
     end
 
     # Detects when a file has been replaced, added, or modified.
-    def fingerprint(paths)
-      paths.map do |path|
-        stat = File.stat(path)
+    def fingerprint(watch_paths)
+      watch_paths.map do |file_path|
+        stat = File.stat(file_path)
         [stat.size, stat.mtime.to_f, stat.ino]
       rescue SystemCallError
         nil
@@ -102,43 +98,43 @@ module Bus
   extend self
 
   def rooms
-    dir = Workspace.rooms_dir
-    return [] unless File.directory?(dir)
+    rooms_dir = Workspace.rooms_dir
+    return [] unless File.directory?(rooms_dir)
 
-    Dir.children(dir).filter_map do |entry|
-      next unless ProfileStore.valid_name?(entry)
+    Dir.children(rooms_dir).filter_map do |room_name|
+      next unless ProfileStore.valid_name?(room_name)
 
-      path = File.join(dir, entry)
-      next unless File.directory?(path) && !File.symlink?(path)
+      room_dir = File.join(rooms_dir, room_name)
+      next unless File.directory?(room_dir) && !File.symlink?(room_dir)
 
-      Room.new(entry, path)
+      Room.new(room_name, room_dir)
     end.sort_by(&:name)
   end
 
-  def room_by_name(name)
-    name = room_name(name)
-    return nil unless name
+  def room_by_name(room_name)
+    room_name = normalize_room_name(room_name)
+    return nil unless room_name
 
-    rooms.find { |room| room.name == name }
+    rooms.find { |room| room.name == room_name }
   end
 
   def visible_rooms(profile)
     rooms.select { |room| room.visible?(profile && profile.name) }
   end
 
-  def create_room(name, owner:)
-    name = room_name(name)
-    raise Error, 'Invalid room name' unless name
-    raise Error, "Room already exists: #{name}" if room_by_name(name)
+  def create_room(room_name, owner_profile_name:)
+    room_name = normalize_room_name(room_name)
+    raise Error, 'Invalid room name' unless room_name
+    raise Error, "Room already exists: #{room_name}" if room_by_name(room_name)
 
-    Room.create(name, room_directory(name), owner: owner)
+    Room.create(room_name, room_directory(room_name), owner_profile_name: owner_profile_name)
   rescue SystemCallError => error
     raise Error, "Could not create room: #{error.class}"
   end
 
-  def delete_room(name)
-    room = room_by_name(name)
-    raise Error, "Unknown room: #{name}" unless room
+  def delete_room(room_name)
+    room = room_by_name(room_name)
+    raise Error, "Unknown room: #{room_name}" unless room
 
     FileUtils.remove_entry(room.directory)
     wake_source(room.stream)
@@ -150,56 +146,21 @@ module Bus
   def dms_by_profile(profile)
     Inbox.new(
       "#{DMS_PREFIX}:#{profile.name}",
-      stream_path(profile.directory, DMS_FILE),
-      watch: [pings_path(profile)]
+      StreamStore.path(profile.directory, DMS_FILE),
+      watch_paths: [pings_path(profile)]
     )
-  end
-
-  def dms_by_name(name)
-    profile = ProfileStore.profile_by_name(name)
-    raise Error, "Unknown profile: #{name}" unless profile
-
-    dms_by_profile(profile)
   end
 
   def pings_by_profile(profile)
     Inbox.new("#{PINGS_PREFIX}:#{profile.name}", pings_path(profile))
   end
 
-  def pings_by_name(name)
-    profile = ProfileStore.profile_by_name(name)
-    raise Error, "Unknown profile: #{name}" unless profile
-
-    pings_by_profile(profile)
-  end
-
   def unread(profile)
     {
       'pings' => pings_by_profile(profile).unread(profile),
       'dms' => dms_by_profile(profile).unread(profile),
-      'rooms' => visible_rooms(profile).to_h { |room| [room.stream, room.unread(profile)] }
+      'rooms' => visible_rooms(profile).to_h { |room| [room.stream, room.inbox.unread(profile)] }
     }
-  end
-
-  def read(path)
-    return [] unless File.exist?(path)
-
-    File.read(path).lines.filter_map do |line|
-      JSON.parse(line)
-    rescue JSON::ParserError
-      nil
-    end
-  rescue SystemCallError => error
-    raise Error, "Could not read chat stream: #{error.class}"
-  end
-
-  def append(path, entry)
-    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
-    File.open(path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
-      file.write("#{JSON.generate(entry)}\n")
-    end
-  rescue SystemCallError => error
-    raise Error, "Could not append to chat stream: #{error.class}"
   end
 
   def entry(from:, text:, to: nil, room: nil)
@@ -216,14 +177,14 @@ module Bus
 
   def format_entries(entries)
     entries.map do |entry|
-      room = entry['room'] ? " in ##{entry['room']}" : ''
-      "[#{clock(entry['ts'])}] #{entry['from']}#{room}: #{clip(entry['text'], MAX_ENTRY)}"
+      room_suffix = entry['room'] ? " in ##{entry['room']}" : ''
+      "[#{clock(entry['ts'])}] #{entry['from']}#{room_suffix}: #{clip(entry['text'], MAX_ENTRY)}"
     end
   end
 
   def post(room, text, from:)
     entry = entry(from: from, text: text)
-    append(room.path, entry)
+    StreamStore.append(room.messages_path, entry)
     from.policy = room.policy_path
     wake_source(room.stream)
     entry
@@ -232,128 +193,65 @@ module Bus
   def dm(to, text, from:)
     inbox = dms_by_profile(to)
     entry = entry(from: from, text: text, to: to)
-    append(inbox.path, entry)
-    wake(to, inbox.name)
+    StreamStore.append(inbox.file_path, entry)
+    wake(to, inbox.stream_name)
     entry
   end
 
   def ping(profile, text, from:, room: nil)
     inbox = pings_by_profile(profile)
     entry = entry(from: from, text: text, room: room)
-    append(inbox.path, entry)
+    StreamStore.append(inbox.file_path, entry)
     # A ping interrupts anything: it ends an inbox wait and any room wait
     # this person is parked in.
     wake_agent(profile)
     entry
   end
 
-  # A stream file must not be a symlink, or an append would land wherever the
-  # link points.
-  def stream_path(dir, file)
-    raise Error, 'Stream directory must not be a symlink' if File.symlink?(dir)
-
-    path = File.join(dir, file)
-    raise Error, 'Stream file must not be a symlink' if File.symlink?(path)
-
-    path
+  def wait(profile, stream_name, timeout:, watch_paths: [])
+    WAITERS.wait(profile.name, stream_name, timeout: timeout, watch_paths: watch_paths)
   end
 
-  def cursor(profile, key)
-    cursors(profile)[key.to_s].to_i
-  end
-
-  def advance_cursor(profile, key, count)
-    path = cursors_path(profile)
-    FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
-    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
-      file.flock(File::LOCK_EX)
-      current = parse_cursors(file.read)
-      next if current[key.to_s].to_i >= count
-
-      current[key.to_s] = count
-      file.rewind
-      file.truncate(0)
-      file.write(JSON.generate(current))
-      file.flush
-    ensure
-      file.flock(File::LOCK_UN)
-    end
-  rescue SystemCallError => error
-    raise Error, "Could not update the read cursor: #{error.class}"
-  end
-
-  # Unread entries, and reading advances the cursor: a stream is delivered
-  # once. A first read starts with the newest `limit` entries instead of the
-  # whole backlog.
-  def read_stream(profile, key, entries, limit: nil)
-    seen = cursor(profile, key)
-    unread = seen.zero? && limit ? entries.last(limit) : entries.drop(seen)
-    advance_cursor(profile, key, entries.length)
-    unread
-  end
-
-  def wait(profile, source, timeout:, watch: [])
-    WAITERS.wait(profile.name, source, timeout: timeout, watch: watch)
-  end
-
-  def wake(profile, source)
-    WAITERS.wake(profile.name, source)
+  def wake(profile, stream_name)
+    WAITERS.wake(profile.name, stream_name)
   end
 
   def wake_agent(profile)
     WAITERS.wake_agent(profile.name)
   end
 
-  def wake_source(source)
-    WAITERS.wake_source(source)
+  def wake_source(stream_name)
+    WAITERS.wake_source(stream_name)
   end
 
   private
 
-  def room_name(name)
-    name = name.to_s.strip.sub(/\A#/, '').downcase
-    ProfileStore.valid_name?(name) ? name : nil
+  def normalize_room_name(room_name)
+    room_name = room_name.to_s.strip.sub(/\A#/, '').downcase
+    ProfileStore.valid_name?(room_name) ? room_name : nil
   end
 
-  def room_directory(name)
-    dir = Workspace.rooms_dir
-    raise Error, 'Room directory must not be a symlink' if File.symlink?(dir)
+  def room_directory(room_name)
+    rooms_dir = Workspace.rooms_dir
+    raise Error, 'Room directory must not be a symlink' if File.symlink?(rooms_dir)
 
-    FileUtils.mkdir_p(dir, mode: 0o700)
-    path = File.join(dir, name)
-    raise Error, 'Room directory must not be a symlink' if File.symlink?(path)
+    FileUtils.mkdir_p(rooms_dir, mode: 0o700)
+    room_dir = File.join(rooms_dir, room_name)
+    raise Error, 'Room directory must not be a symlink' if File.symlink?(room_dir)
 
-    path
+    room_dir
   end
 
   def pings_path(profile)
-    stream_path(profile.directory, PINGS_FILE)
-  end
-
-  def cursors(profile)
-    path = cursors_path(profile)
-    File.exist?(path) ? parse_cursors(File.read(path)) : {}
-  rescue SystemCallError => error
-    raise Error, "Could not read the read cursor: #{error.class}"
-  end
-
-  def cursors_path(profile)
-    stream_path(profile.directory, CURSORS_FILE)
-  end
-
-  def parse_cursors(raw)
-    parsed = raw.strip.empty? ? {} : JSON.parse(raw)
-    parsed.is_a?(Hash) ? parsed : {}
-  rescue JSON::ParserError
-    {}
+    StreamStore.path(profile.directory, PINGS_FILE)
   end
 
   def clock(ts)
     Time.at(ts.to_i / 1000.0).strftime('%H:%M:%S')
   end
 
-  def clip(text, max)
-    text = text.to_s
+  def clip(value, max)
+    text = value.to_s
     text.length <= max ? text : "#{text[0, max - 1]}…"
   end
 end

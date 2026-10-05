@@ -92,7 +92,7 @@ module Salience
 
   def room_lines(rooms)
     entries = rooms.flat_map do |room|
-      room.messages.map { |entry| entry.merge('room' => room.stream) }
+      room.inbox.messages.map { |entry| entry.merge('room' => room.stream) }
     end.sort_by { |entry| entry['ts'].to_i }.last(RECENT_ROOM)
     return ['', 'No room has traffic yet - introducing yourself with your task is a fine first move.'] if entries.empty?
 
@@ -100,7 +100,7 @@ module Salience
   end
 
   def prior_lines(profile, profiles)
-    priors = Identity.priors(profiles, skip: profile.name)
+    priors = Identity.priors(profiles, skip_profile_name: profile.name)
     priors.empty? ? [] : ['', "Your teammates' stated leanings:", priors.join("\n\n")]
   end
 
