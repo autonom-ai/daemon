@@ -1,12 +1,9 @@
-# Who a person is when they wake up: the identity file's frontmatter and
-# body, and the leanings their teammates have stated. Identity files are
-# clone content, so they follow the person across workspaces.
+# TODO: Identity and salience have a lot of cruft.
 class Identity
   FILE = 'identity.md'
   MAX_PRIOR = 800
 
-  # Teammate priors: what the others reach for and avoid, from the sections
-  # the identity scaffold writes.
+  # What the others reach for and avoid via scaffolds.
   def self.priors(profiles, skip_profile_name: nil)
     profiles.filter_map do |profile|
       next if skip_profile_name && profile.name.casecmp?(skip_profile_name.to_s)

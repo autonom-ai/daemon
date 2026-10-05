@@ -2,6 +2,7 @@ require_relative 'identity'
 require_relative 'profile_store'
 require_relative 'coord/bus'
 
+# TODO: Identity and salience have a lot of cruft.
 module Salience
   RECENT_ROOM = 6
 
