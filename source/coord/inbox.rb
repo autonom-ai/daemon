@@ -1,7 +1,7 @@
-# One stream on the bus: a named jsonl file with its own read cursor and wait.
-# Rooms, dms, and pings are all inboxes; only the name and path differ.
 require_relative 'stream_store'
 
+# One stream on the bus: a named jsonl file with its own read cursor and wait.
+# Rooms, dms, and pings are all inboxes; only the name and path differ.
 class Inbox
   def initialize(stream_name, file_path, watch_paths: [])
     @stream_name = stream_name
