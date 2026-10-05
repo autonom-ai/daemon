@@ -57,6 +57,17 @@ class ProfileStoreTest < Minitest::Test
     ))
   end
 
+  def test_the_global_session_map_must_not_be_a_symlink()
+    ProfileStore.register_profile('marlow', 'session-1')
+    target = File.join(@root, 'sessions-copy.json')
+    path = File.join(@root, 'agents', 'sessions.json')
+    File.write(target, JSON.generate('session-1' => 'marlow'))
+    File.unlink(path)
+    File.symlink(target, path)
+
+    assert_raises(ProfileStore::Error) { ProfileStore.profile_by_session('session-1') }
+  end
+
   def test_an_existing_profile_keeps_its_canonical_case()
     FileUtils.mkdir_p(File.join(@root, 'agents', 'Marlow'))
 

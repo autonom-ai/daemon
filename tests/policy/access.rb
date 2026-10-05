@@ -49,7 +49,7 @@ class PolicyAccessTest < Minitest::Test
     refute execute?("rm -rf #{Dir.home}")
     refute execute?("rm -rf #{File.join(@root, 'source')}")
     refute execute?('rm -rf /')
-    refute execute?('pwd', dir: @wren.directory)
+    refute execute?('pwd', base_dir: @wren.directory)
     assert execute?('git status')
   end
 
@@ -120,6 +120,46 @@ class PolicyAccessTest < Minitest::Test
     refute read?(File.join(dir, 'profiles.json'))
   end
 
+  def test_room_membership_rules_match_path_access()
+    write_room('shared', owner: 'marlow', admins: ['wren'], involved: ['quill'])
+    messages = File.join(@project, '.devin', 'autonom-coord', 'rooms', 'shared', 'messages.jsonl')
+    policy = File.join(@project, '.devin', 'autonom-coord', 'rooms', 'shared', 'policy.yml')
+    membership = {
+      'marlow' => [true, true],
+      'wren' => [true, true],
+      'quill' => [true, false],
+      'human' => [true, true],
+      'sable' => [false, false]
+    }
+
+    membership.each do |name, (visible, administrator)|
+      assert_equal visible, room('shared').visible?(name)
+      assert_equal visible, Policy::Access.permits?(name, 'read', path: messages)
+      assert_equal visible, Policy::Access.permits?(name, 'write', path: messages)
+      assert_equal administrator, Policy::Access.permits?(name, 'write', path: policy)
+    end
+  end
+
+  def test_the_human_profile_remains_room_admin_when_membership_is_unreadable()
+    dir = write_room('broken', owner: 'marlow', involved: ['marlow'])
+    profiles = File.join(dir, 'profiles.json')
+    messages = File.join(dir, 'messages.jsonl')
+    policy = File.join(dir, 'policy.yml')
+    File.write(profiles, 'not json')
+
+    assert room('broken').visible?('human')
+    assert Policy::Access.permits?('human', 'read', path: messages)
+    assert Policy::Access.permits?('human', 'write', path: policy)
+    refute room('broken').visible?('marlow')
+    refute Policy::Access.permits?('marlow', 'read', path: messages)
+
+    File.unlink(profiles)
+
+    assert room('broken').visible?('human')
+    assert Policy::Access.permits?('human', 'read', path: messages)
+    refute Policy::Access.permits?('marlow', 'read', path: messages)
+  end
+
   def test_a_hidden_room_is_excluded_from_search()
     write_room('secret', owner: 'marlow', involved: ['marlow'])
 
@@ -141,11 +181,11 @@ class PolicyAccessTest < Minitest::Test
     Policy::Access.search?(@marlow.name, path)
   end
 
-  def execute?(command, dir: nil)
-    permits?(@marlow.name, 'execute', command: command, dir: dir)
+  def execute?(command, base_dir: nil)
+    permits?(@marlow.name, 'execute', command: command, base_dir: base_dir)
   end
 
-  def permits?(name, kind, path: nil, command: nil, dir: nil)
-    Policy::Access.permits?(name, kind, path: path, command: command, dir: dir)
+  def permits?(name, kind, path: nil, command: nil, base_dir: nil)
+    Policy::Access.permits?(name, kind, path: path, command: command, base_dir: base_dir)
   end
 end

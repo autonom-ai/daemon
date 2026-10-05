@@ -46,7 +46,7 @@ class IdentityTest < Minitest::Test
     )
     write_identity(@marlow, "---\ndisplayName: Marlow\n---\n\n## Voice\n\nblunt\n")
 
-    priors = Identity.priors(ProfileStore.profiles, skip: 'marlow')
+    priors = Identity.priors(ProfileStore.profiles, skip_profile_name: 'marlow')
 
     assert_equal 1, priors.length
     assert_includes priors.first, 'Wren:'

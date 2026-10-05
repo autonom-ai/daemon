@@ -25,31 +25,31 @@ class InboxTest < Minitest::Test
 
   def test_a_room_inbox_owns_its_name_and_path()
     assert_equal 'room:general', @room.stream
-    assert File.file?(@room.path)
+    assert File.file?(@room.messages_path)
     assert_nil room('nobody')
   end
 
   def test_messages_are_read_from_the_room_file()
     Bus.post(@room, 'hello', from: @marlow)
 
-    assert_equal ['hello'], @room.messages.map { |entry| entry['text'] }
-    assert_equal 'marlow', @room.messages.first['from']
+    assert_equal ['hello'], @room.inbox.messages.map { |entry| entry['text'] }
+    assert_equal 'marlow', @room.inbox.messages.first['from']
   end
 
   def test_reads_are_cursored_per_profile_and_own_posts_are_not_unread()
     Bus.post(@room, 'first', from: @wren)
     Bus.post(@room, 'second', from: @wren)
 
-    assert_equal 2, @room.unread(@marlow).length
-    assert_equal ['first', 'second'], @room.read(@marlow).map { |entry| entry['text'] }
-    assert_empty @room.unread(@marlow)
+    assert_equal 2, @room.inbox.unread(@marlow).length
+    assert_equal ['first', 'second'], @room.inbox.read(@marlow).map { |entry| entry['text'] }
+    assert_empty @room.inbox.unread(@marlow)
 
     # A profile's own posts are never its unread.
-    assert_empty @room.unread(@wren)
+    assert_empty @room.inbox.unread(@wren)
 
     Bus.post(@room, 'third', from: @marlow)
 
-    assert_equal ['third'], @room.unread(@wren).map { |entry| entry['text'] }
+    assert_equal ['third'], @room.inbox.unread(@wren).map { |entry| entry['text'] }
 
     Bus.dm(@wren, 'psst', from: @marlow)
     dms = Bus.dms_by_profile(@wren)
@@ -64,7 +64,7 @@ class InboxTest < Minitest::Test
     woken = Queue.new
     waiters = [@marlow, @wren].map do |profile|
       Thread.new do
-        @room.wait(profile, timeout: 5)
+        @room.inbox.wait(profile, timeout: 5)
         woken << profile.name
       end
     end
@@ -79,11 +79,11 @@ class InboxTest < Minitest::Test
   def test_a_ping_wakes_only_the_pinged_waiter()
     woken = Queue.new
     Thread.new do
-      @room.wait(@wren, timeout: 5)
+      @room.inbox.wait(@wren, timeout: 5)
       woken << 'wren'
     end
     other = Thread.new do
-      @room.wait(@marlow, timeout: 1)
+      @room.inbox.wait(@marlow, timeout: 1)
       woken << 'marlow'
     end
     sleep 0.2
@@ -104,7 +104,7 @@ class InboxTest < Minitest::Test
     child = fork do
       reader.close
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      @room.wait(@wren, timeout: 5)
+      @room.inbox.wait(@wren, timeout: 5)
       writer.puts(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started)
       writer.close
       exit!(0)
@@ -132,10 +132,10 @@ class InboxTest < Minitest::Test
     dms = Bus.dms_by_profile(@wren)
     pings = Bus.pings_by_profile(@wren)
 
-    assert_equal 'dms:wren', dms.name
+    assert_equal 'dms:wren', dms.stream_name
     assert_equal ['first'], dms.messages.map { |entry| entry['text'] }
     assert_equal 'wren', dms.messages.first['to']
-    assert_equal 'pings:wren', pings.name
+    assert_equal 'pings:wren', pings.stream_name
     assert_equal ['look here'], pings.messages.map { |entry| entry['text'] }
     assert_equal 'room:general', pings.messages.first['room']
     assert_empty Bus.dms_by_profile(@marlow).messages

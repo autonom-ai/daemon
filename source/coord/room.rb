@@ -4,6 +4,7 @@ require 'json'
 require_relative '../policy/format'
 require_relative '../profile_store'
 require_relative 'inbox'
+require_relative 'membership'
 
 # A room is a folder on the bus: its message stream and the profiles that may use it.
 #
@@ -20,23 +21,26 @@ class Room
   POLICY_FILE = 'policy.yml'
   PROFILES_FILE = 'profiles.json'
 
-  def self.create(name, directory, owner:)
-    FileUtils.mkdir_p(directory, mode: 0o700)
-    raise ProfileStore::Error, 'Room directory must not be a symlink' if File.symlink?(directory)
+  def self.create(room_name, room_dir, owner_profile_name:)
+    FileUtils.mkdir_p(room_dir, mode: 0o700)
+    raise ProfileStore::Error, 'Room directory must not be a symlink' if File.symlink?(room_dir)
 
-    write_new(File.join(directory, MESSAGES_FILE), '')
-    write_new(File.join(directory, POLICY_FILE), "rules: []\n")
-    write_new(File.join(directory, PROFILES_FILE), JSON.generate('owner' => owner, 'admins' => [], 'involved' => nil))
-    new(name, directory)
+    write_new(File.join(room_dir, MESSAGES_FILE), '')
+    write_new(File.join(room_dir, POLICY_FILE), "rules: []\n")
+    write_new(
+      File.join(room_dir, PROFILES_FILE),
+      JSON.generate('owner' => owner_profile_name, 'admins' => [], 'involved' => nil)
+    )
+    new(room_name, room_dir)
   end
 
-  def self.write_new(path, contents)
-    File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |file| file.write(contents) }
+  def self.write_new(file_path, contents)
+    File.open(file_path, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |file| file.write(contents) }
   end
 
-  def initialize(name, directory)
-    @name = name
-    @directory = directory
+  def initialize(room_name, room_dir)
+    @name = room_name
+    @directory = room_dir
   end
 
   attr_reader :name, :directory
@@ -62,126 +66,80 @@ class Room
     File.join(@directory, PROFILES_FILE)
   end
 
-  def path
-    messages_path
-  end
-
-  def messages
-    inbox.messages
-  end
-
-  def unread(profile)
-    inbox.unread(profile)
-  end
-
-  def read(profile, limit: nil)
-    inbox.read(profile, limit: limit)
-  end
-
-  def wait(profile, timeout:)
-    inbox.wait(profile, timeout: timeout)
-  end
-
   def policy
     Policy.load(policy_path)
   end
 
   def owner
-    profiles && profiles['owner']
+    membership.owner
   end
 
-  def admins
-    (profiles && profiles['admins']) || []
+  def original_owner?(profile_name)
+    membership.original_owner?(profile_name)
   end
 
-  def involved
-    profiles && profiles['involved']
+  def admin?(profile_name)
+    membership.admin?(profile_name)
   end
 
-  def original_owners
-    [owner, ProfileStore::HUMAN_NAME].compact.map(&:to_s).reject(&:empty?).uniq
-  end
-
-  def original_owner?(name)
-    named?(original_owners, name)
-  end
-
-  def admin?(name)
-    named?(admins, name)
-  end
-
-  def administrator?(name)
-    original_owner?(name) || admin?(name)
+  def administrator?(profile_name)
+    membership.administrator?(profile_name)
   end
 
   # `involved` nil is everyone in the clone; a list is exactly those profiles.
   # An unreadable membership file fails closed - nobody but the human owner.
-  def involved?(name)
-    return false unless profiles
-    return true if involved.nil?
-
-    named?(involved, name)
+  def involved?(profile_name)
+    membership.involved?(profile_name)
   end
 
-  def visible?(name)
-    administrator?(name) || involved?(name)
+  def visible?(profile_name)
+    membership.visible?(profile_name)
   end
 
-  def add_admin(name)
-    name = name.to_s
-    update_profiles do |data|
-      data['admins'] = (Array(data['admins']) + [name]).uniq { |admin| admin.downcase }
+  def add_admin(profile_name)
+    update_profiles do |membership_data|
+      membership_data['admins'] =
+        (Array(membership_data['admins']) + [profile_name.to_s]).uniq { |admin| admin.downcase }
     end
   end
 
-  def remove_admin(name)
-    update_profiles do |data|
-      data['admins'] = Array(data['admins']).reject { |admin| admin.casecmp?(name.to_s) }
+  def remove_admin(profile_name)
+    update_profiles do |membership_data|
+      membership_data['admins'] =
+        Array(membership_data['admins']).reject { |admin| admin.casecmp?(profile_name.to_s) }
     end
   end
 
-  def set_involved(names)
-    update_profiles do |data|
-      data['involved'] = names.nil? ? nil : Array(names).map(&:to_s).reject(&:empty?).uniq
+  def set_involved(profile_names)
+    update_profiles do |membership_data|
+      membership_data['involved'] = profile_names.nil? ? nil : Array(profile_names).map(&:to_s).reject(&:empty?).uniq
     end
   end
 
   private
 
-  def profiles
-    @profiles ||= read_profiles
-  end
-
-  def read_profiles
-    parsed = JSON.parse(File.read(profiles_path))
-    parsed.is_a?(Hash) ? parsed : nil
-  rescue SystemCallError, JSON::ParserError
-    nil
-  end
-
-  def named?(list, name)
-    name = name.to_s
-    return false if name.empty?
-
-    list.any? { |entry| entry.casecmp?(name) }
+  def membership
+    @membership ||= Coord::Membership.read(profiles_path)
   end
 
   def update_profiles
-    path = profiles_path
-    raise ProfileStore::Error, 'Room membership must not be a symlink' if File.symlink?(path)
+    membership_path = profiles_path
+    raise ProfileStore::Error, 'Room membership must not be a symlink' if File.symlink?(membership_path)
 
-    File.open(path, File::RDWR | File::CREAT, 0o600) do |file|
+    File.open(membership_path, File::RDWR | File::CREAT, 0o600) do |file|
       file.flock(File::LOCK_EX)
-      raw = file.read
-      data = raw.strip.empty? ? {} : JSON.parse(raw)
-      raise ProfileStore::Error, 'Room membership has an invalid format' unless data.is_a?(Hash)
+      membership_json = file.read
+      membership_data = membership_json.strip.empty? ? {} : JSON.parse(membership_json)
+      unless membership_data.is_a?(Hash)
+        raise ProfileStore::Error, 'Room membership has an invalid format'
+      end
 
-      yield data
+      yield membership_data
       file.rewind
       file.truncate(0)
-      file.write(JSON.generate(data))
+      file.write(JSON.generate(membership_data))
       file.flush
-      @profiles = data
+      @membership = Coord::Membership.new(membership_data)
     ensure
       file.flock(File::LOCK_UN)
     end

@@ -49,6 +49,28 @@ class ProfileTest < Minitest::Test
     assert_raises(ProfileStore::Error) { @marlow.policy = nil }
   end
 
+  def test_profile_session_state_must_not_be_a_symlink()
+    target = File.join(@root, 'session.json')
+    path = File.join(@marlow.directory, 'session.json')
+    File.write(target, JSON.generate('session_id' => 'session-1'))
+    File.unlink(path)
+    File.symlink(target, path)
+
+    assert_raises(ProfileStore::Error) { @marlow.session_id }
+    assert_raises(ProfileStore::Error) { @marlow.bind_session('session-1') }
+  end
+
+  def test_profile_policy_state_must_not_be_a_symlink()
+    write_room('general')
+    target = File.join(@root, 'policies.json')
+    path = File.join(@marlow.directory, 'policies.json')
+    File.write(target, JSON.generate(@project => room('general').policy_path))
+    File.symlink(target, path)
+
+    assert_raises(ProfileStore::Error) { @marlow.policy }
+    assert_raises(ProfileStore::Error) { @marlow.policy = room('general').policy_path }
+  end
+
   def test_online_reports_the_mapped_sessions_lock()
     refute @marlow.online?
 

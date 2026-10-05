@@ -1,13 +1,15 @@
-require 'json'
-
 require_relative '../decision'
+require_relative '../mcp/protocol'
 require_relative '../profile_store'
 require_relative 'format'
+
+require 'json'
 
 module Policy
   class Server
     INFO = { 'name' => 'autonom-policy', 'version' => '0.1.0' }.freeze
-    PROTOCOLS = %w[2025-11-25 2025-06-18 2025-03-26 2024-11-05].freeze
+
+    include MCP::Protocol
 
     def initialize(decision: Decision)
       @decision = decision
@@ -16,55 +18,14 @@ module Policy
     def run(input: STDIN, output: STDOUT)
       output.sync = true
       input.each_line do |line|
-        request = parse(line)
-        response = request ? handle(request) : error(nil, -32700, 'Parse error')
-        output.puts(JSON.generate(response)) if response
-      rescue StandardError
-        id = request.is_a?(Hash) ? request['id'] : nil
-        output.puts(JSON.generate(error(id, -32603, 'Internal error')))
+        respond(parse(line), output)
       end
     end
 
     private
 
-    def parse(raw)
-      JSON.parse(raw)
-    rescue JSON::ParserError
-      nil
-    end
-
-    def handle(request)
-      return error(nil, -32600, 'Invalid request') unless request.is_a?(Hash)
-
-      id = request['id']
-      method = request['method']
-      params = request['params'].is_a?(Hash) ? request['params'] : {}
-      return nil if method == 'notifications/initialized' || method == 'notifications/cancelled'
-      return error(id, -32600, 'Invalid request') unless method.is_a?(String)
-
-      case method
-      when 'initialize'
-        protocol = params['protocolVersion']
-        protocol = '2025-03-26' unless PROTOCOLS.include?(protocol)
-        success(
-          id,
-          'protocolVersion' => protocol,
-          'capabilities' => { 'tools' => { 'listChanged' => false } },
-          'serverInfo' => INFO
-        )
-      when 'ping'
-        success(id, {})
-      when 'tools/list'
-        success(id, 'tools' => tools)
-      when 'tools/call'
-        success(id, call_tool(params))
-      else
-        error(id, -32601, 'Method not found')
-      end
-    end
-
     def tools
-      session = { 'type' => 'string', 'description' => 'Injected by the Devin session hook.' }
+      session_schema = { 'type' => 'string', 'description' => 'Injected by the Devin session hook.' }
       [
         {
           'name' => 'check_policy',
@@ -74,7 +35,7 @@ module Policy
             'properties' => {
               'tool_name' => { 'type' => 'string' },
               'tool_input' => { 'type' => 'object' },
-              'session_id' => session
+              'session_id' => session_schema
             },
             'required' => ['tool_name']
           }
@@ -114,18 +75,6 @@ module Policy
         decision: @decision
       )
       { 'denied' => denied, 'reason' => reason, 'secondary' => profile&.policy }
-    end
-
-    def tool_error(message)
-      { 'content' => [{ 'type' => 'text', 'text' => message }], 'isError' => true }
-    end
-
-    def success(id, ret)
-      { 'jsonrpc' => '2.0', 'id' => id, 'result' => ret }
-    end
-
-    def error(id, code, message)
-      { 'jsonrpc' => '2.0', 'id' => id, 'error' => { 'code' => code, 'message' => message } }
     end
   end
 end

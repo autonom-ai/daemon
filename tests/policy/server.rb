@@ -33,6 +33,23 @@ class PolicyServerTest < Minitest::Test
     assert_equal %w[check_policy], names
   end
 
+  def test_protocol_handles_parse_errors_notifications_and_version_fallback()
+    raw = [
+      '{invalid}',
+      JSON.generate('jsonrpc' => '2.0', 'method' => 'notifications/initialized'),
+      JSON.generate(request(1, 'initialize', 'protocolVersion' => 'unsupported'))
+    ].join("\n")
+    input = StringIO.new(raw)
+    output = StringIO.new
+
+    @server.run(input: input, output: output)
+    responses = output.string.lines.map { |line| JSON.parse(line) }
+
+    assert_equal 2, responses.length
+    assert_equal(-32700, responses.first.dig('error', 'code'))
+    assert_equal '2025-03-26', responses.last.dig('result', 'protocolVersion')
+  end
+
   def test_secondary_policy_tools_are_gone()
     responses = exchange(
       call(

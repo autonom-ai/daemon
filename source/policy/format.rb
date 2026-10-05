@@ -13,17 +13,17 @@ module Policy
   extend self
 
   def workspace
-    path = Workspace.policy_path
-    raise Error, 'The workspace requires .devin/policy.yml' unless File.file?(path)
-    raise Error, 'Workspace policy must not be a symlink' if File.symlink?(path)
+    policy_path = Workspace.policy_path
+    raise Error, 'The workspace requires .devin/policy.yml' unless File.file?(policy_path)
+    raise Error, 'Workspace policy must not be a symlink' if File.symlink?(policy_path)
 
-    load(path)
+    load(policy_path)
   end
 
-  def load(path)
-    return Document.new([], []) unless path && File.file?(path)
+  def load(policy_path)
+    return Document.new([], []) unless policy_path && File.file?(policy_path)
 
-    document(raw(path), path)
+    document(raw(policy_path), policy_path)
   rescue Psych::Exception => error
     raise Error, "Policy is not valid YAML: #{error.class}"
   rescue SystemCallError => error
@@ -41,31 +41,33 @@ module Policy
     [false, nil]
   end
 
-  def exempt_list(value, source)
+  def exempt_list(value, policy_path)
     return [] if value.nil?
-    raise Error, "Policy except must be a list of profile names: #{source}" unless value.is_a?(Array)
+    raise Error, "Policy except must be a list of profile names: #{policy_path}" unless value.is_a?(Array)
 
     value.map(&:to_s).reject(&:empty?)
   end
 
   private
 
-  def raw(path)
-    parsed = YAML.safe_load(File.read(path)) || {}
-    raise Error, "Policy must be a map: #{path}" unless parsed.is_a?(Hash)
+  def raw(policy_path)
+    parsed = YAML.safe_load(File.read(policy_path)) || {}
+    raise Error, "Policy must be a map: #{policy_path}" unless parsed.is_a?(Hash)
 
     parsed
   end
 
-  def document(parsed, source)
+  def document(parsed, policy_path)
     permissions = parsed['permissions']
     rules = parsed['rules']
-    raise Error, "Policy permissions must be a list: #{source}" unless permissions.nil? || permissions.is_a?(Array)
-    raise Error, "Policy rules must be a list: #{source}" unless rules.nil? || rules.is_a?(Array)
+    unless permissions.nil? || permissions.is_a?(Array)
+      raise Error, "Policy permissions must be a list: #{policy_path}"
+    end
+    raise Error, "Policy rules must be a list: #{policy_path}" unless rules.nil? || rules.is_a?(Array)
 
     Document.new(
-      Array(permissions).map { |entry| Grant.new(entry, source) },
-      Array(rules).map { |rule| Rule.new(rule, source) }
+      Array(permissions).map { |entry| Grant.new(entry, policy_path) },
+      Array(rules).map { |rule| Rule.new(rule, policy_path) }
     )
   end
 
@@ -78,10 +80,9 @@ module Policy
     attr_reader :permissions, :rules
 
     def permits?(kind, profile_name)
-      name = profile_name.to_s
       granted = false
       @permissions.each do |grant|
-        next unless grant.default? || (!name.empty? && grant.named?(name))
+        next unless grant.default? || (!profile_name.to_s.empty? && grant.named?(profile_name))
 
         granted = true if grant.grants?(kind)
         granted = false if grant.revokes?(kind)
@@ -91,25 +92,31 @@ module Policy
   end
 
   class Grant
-    def initialize(value, source)
-      raise Error, "A policy permission must be a map: #{source}" unless value.is_a?(Hash)
-      raise Error, "A policy permission names default or one profile: #{source}" unless value.keys.length == 1
+    def initialize(value, policy_path)
+      raise Error, "A policy permission must be a map: #{policy_path}" unless value.is_a?(Hash)
+      unless value.keys.length == 1
+        raise Error, "A policy permission names default or one profile: #{policy_path}"
+      end
 
       @profile = value.key?('default') ? nil : value.keys.first.to_s
-      raise Error, "A policy permission needs a profile name: #{source}" if !value.key?('default') && @profile.empty?
+      if !value.key?('default') && @profile.empty?
+        raise Error, "A policy permission needs a profile name: #{policy_path}"
+      end
 
       @grants = []
       @revokes = []
       list = value.values.first
-      raise Error, "Policy permissions must be a list: #{source}" unless list.is_a?(Array)
+      raise Error, "Policy permissions must be a list: #{policy_path}" unless list.is_a?(Array)
 
       list.each do |entry|
-        name = entry.to_s
-        revoke = name.start_with?('-')
-        name = name.delete_prefix('-')
-        raise Error, "Unknown policy permission: #{entry.inspect}" unless PERMISSIONS.include?(name)
+        permission_name = entry.to_s
+        revoke = permission_name.start_with?('-')
+        permission_name = permission_name.delete_prefix('-')
+        unless PERMISSIONS.include?(permission_name)
+          raise Error, "Unknown policy permission: #{entry.inspect}"
+        end
 
-        (revoke ? @revokes : @grants) << name
+        (revoke ? @revokes : @grants) << permission_name
       end
     end
 
@@ -131,19 +138,21 @@ module Policy
   end
 
   class Rule
-    def initialize(value, source)
-      raise Error, "A policy rule must be a map: #{source}" unless value.is_a?(Hash)
+    def initialize(value, policy_path)
+      raise Error, "A policy rule must be a map: #{policy_path}" unless value.is_a?(Hash)
 
       @action = value['action'].to_s
       raise Error, "Unknown policy action: #{@action.inspect}" unless ACTIONS.include?(@action)
 
       @question = question(value['question'])
-      raise Error, "A screen rule needs a question: #{source}" if screen? && @question.empty?
+      raise Error, "A screen rule needs a question: #{policy_path}" if screen? && @question.empty?
 
       @match = value['match'].is_a?(Hash) ? value['match'] : {}
-      @except = Policy.exempt_list(value['except'], source)
+      @except = Policy.exempt_list(value['except'], policy_path)
       @expose = value['expose']
-      raise Error, "Policy expose must be a list of input fields: #{source}" unless @expose.nil? || @expose.is_a?(Array)
+      unless @expose.nil? || @expose.is_a?(Array)
+        raise Error, "Policy expose must be a list of input fields: #{policy_path}"
+      end
 
       @expose = Array(@expose).map(&:to_s)
       @reason = value['reason']
@@ -165,8 +174,7 @@ module Policy
     end
 
     def exempt?(profile_name)
-      name = profile_name.to_s
-      !name.empty? && @except.any? { |entry| entry.casecmp?(name) }
+      !profile_name.to_s.empty? && @except.any? { |entry| entry.casecmp?(profile_name.to_s) }
     end
 
     def match?(request)

@@ -18,6 +18,23 @@ class ServerTest < Minitest::Test
     teardown_core()
   end
 
+  def test_protocol_handles_parse_errors_notifications_and_version_fallback()
+    raw = [
+      '{invalid}',
+      JSON.generate('jsonrpc' => '2.0', 'method' => 'notifications/initialized'),
+      JSON.generate(request(1, 'initialize', 'protocolVersion' => 'unsupported'))
+    ].join("\n")
+    input = StringIO.new(raw)
+    output = StringIO.new
+
+    @server.run(input: input, output: output)
+    responses = output.string.lines.map { |line| JSON.parse(line) }
+
+    assert_equal 2, responses.length
+    assert_equal(-32700, responses.first.dig('error', 'code'))
+    assert_equal '2025-03-26', responses.last.dig('result', 'protocolVersion')
+  end
+
   def test_profile_tools_share_session_mapping()
     responses = exchange(
       request(1, 'initialize', 'protocolVersion' => '2025-03-26'),
@@ -229,7 +246,7 @@ class ServerTest < Minitest::Test
     exchange(call(1, 'set_profile', 'name' => 'wren', 'session_id' => 'session-2'))
     writer = Thread.new do
       sleep 0.3
-      append_line(room('general').path, 'from' => 'marlow', 'text' => 'late line')
+      append_line(room('general').messages_path, 'from' => 'marlow', 'text' => 'late line')
     end
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -271,6 +288,19 @@ class ServerTest < Minitest::Test
 
   def test_an_unregistered_session_has_no_status()
     assert_nil result(exchange(call(1, 'get_profile_status')), 1)
+  end
+
+  def test_profile_status_by_name_does_not_depend_on_the_session_map()
+    profile = ProfileStore.register_profile('marlow', 'session-1')
+    File.write(File.join(ProfileStore.root, 'agents', 'sessions.json'), 'not json')
+
+    status = result(
+      exchange(call(1, 'get_profile_status', 'name' => profile.name, 'session_id' => 'unregistered')),
+      1
+    )
+
+    assert_equal 'marlow', status['name']
+    assert_equal 'session-1', status['session']
   end
 
   def test_get_profile_status_requires_a_known_profile()
