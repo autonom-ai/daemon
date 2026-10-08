@@ -10,6 +10,18 @@
 		},
 		{
 			"excludedSourceFiles": [
+				"source/tests/**",
+				"source/evals/**"
+			],
+			"name": "daemon",
+			"targetName": "autonom-daemon",
+			"targetType": "executable",
+			"versions": [
+				"AutonomDaemon"
+			]
+		},
+		{
+			"excludedSourceFiles": [
 				"source/evals/**"
 			],
 			"dependencies": {"unit-threaded": "2.2.6"},

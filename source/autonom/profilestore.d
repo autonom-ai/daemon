@@ -1,14 +1,16 @@
 module autonom.profilestore;
 
 import autonom.config : Config;
+import autonom.daemon.server : profileStore, readField, respond;
 import autonom.profile : Profile;
 import autonom.session.bridge : Bridge;
 import autonom.session.session : Session;
 import autonom.storage : atomicWrite, openFile;
+import serverino : Output, Request, endpoint, route;
 
 import core.sys.posix.fcntl : O_CREAT, O_RDONLY, O_RDWR;
 import core.sys.linux.sys.file : flock, LOCK_EX;
-import std.algorithm : sort;
+import std.algorithm : sort, startsWith;
 import std.array : join;
 import std.ascii : isAlphaNum;
 import std.exception : enforce, errnoEnforce;
@@ -16,9 +18,72 @@ import std.file : exists, isSymlink, mkdirRecurse, FileException;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.path : buildPath;
 import std.stdio : File;
-import std.string : toLower;
+import std.string : split, toLower;
+
+private:
+
+bool profileRoute(bool SESSION)(const Request request)
+{
+    enum PREFIX = "/api/profiles/";
+    if (!request.path.startsWith(PREFIX))
+        return false;
+
+    string[] segments = request.path[PREFIX.length..$].split('/');
+    static if (SESSION)
+        return segments.length == 2 && segments[1] == "session";
+    else
+        return segments.length == 1;
+}
+
+string profileName(Request request)
+    => request.path["/api/profiles/".length..$].split('/')[0];
 
 public:
+
+@endpoint @route!"/api/profiles"
+void profiles(Request request, Output output)
+{
+    if (request.method == Request.Method.Get)
+    {
+        JSONValue[] ret;
+        foreach (profile; profileStore.list())
+            ret ~= profile.toJSON();
+
+        respond(output, JSONValue(ret));
+    }
+    else if (request.method == Request.Method.Post)
+        respond(output, profileStore.create(readField!"name"(request)).toJSON(), 201);
+    else
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+}
+
+@endpoint @route!(profileRoute!false)
+void getProfile(Request request, Output output)
+{
+    Profile profile = profileStore.get(request.profileName);
+    if (profile is null)
+        respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
+    else if (request.method == Request.Method.Get)
+        respond(output, profile.toJSON());
+    else
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+}
+
+@endpoint @route!(profileRoute!true)
+void profileSession(Request request, Output output)
+{
+    Profile profile = profileStore.get(request.profileName);
+    if (profile is null)
+        respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
+    else if (request.method == Request.Method.Post)
+        respond(output, profileStore.register(profile.name, readField!"id"(request)).toJSON());
+    else if (request.method != Request.Method.Get)
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    else if (profile.session !is null)
+        respond(output, profile.session.toJSON());
+    else
+        respond(output, JSONValue(["error": JSONValue("Profile has no session")]), 404);
+}
 
 class ProfileConflict : Exception
 {

@@ -1,7 +1,9 @@
 module autonom.config;
 
+import autonom.daemon.server : configuration, respond;
 import autonom.storage : openFile;
 import dyaml : Loader, Node, NodeType;
+import serverino : Output, Request, endpoint, route;
 
 import core.sys.posix.fcntl : O_RDONLY;
 import std.algorithm : canFind;
@@ -11,6 +13,17 @@ import std.json : JSONValue;
 import std.path : absolutePath, buildNormalizedPath, buildPath, dirName, expandTilde;
 import std.process : environment;
 import std.stdio : File;
+
+public:
+
+@endpoint @route!"/api/config"
+void getConfig(Request request, Output output)
+{
+    if (request.method == Request.Method.Get)
+        respond(output, configuration.toJSON());
+    else
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+}
 
 class Config
 {

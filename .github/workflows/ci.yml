@@ -19,5 +19,7 @@ jobs:
         run: dub run --compiler=ldc2 --config=unit --build=unittest
       - name: Build eval runner
         run: dub build --compiler=ldc2 --config=eval
+      - name: Build daemon
+        run: dub build --compiler=ldc2 --config=daemon
       - name: Build Serverino test host
         run: dub build --compiler=ldc2 --config=http-test
