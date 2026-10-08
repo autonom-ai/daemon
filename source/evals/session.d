@@ -1,66 +1,83 @@
 module evals.session;
 
-import autonom.profilestore : ProfileConflict, ProfileStore;
-import autonom.session : Devin, Session, SessionStatus;
-import evals : Eval, waitFor;
+import evals : Eval, request, waitFor;
 
 import core.time : seconds;
 import std.algorithm : canFind;
 import std.conv : to;
-import std.file : exists, readText;
-import std.path : buildPath;
+import std.json : JSONType, JSONValue;
+import std.net.curl : HTTP;
 import std.string : strip;
+import std.uri : encodeComponent;
 
 public:
 
-void sessionLifecycle(Eval eval, Devin devin, ProfileStore store, string workspace, string model)
+void sessionLifecycle(Eval eval, string workspace, string model)
 {
+    string listing = "/api/sessions?directory="~workspace.encodeComponent;
     bool[string] previous;
-    foreach (id; devin.list(workspace))
-        previous[id] = true;
+    foreach (entry; request(listing).array)
+        previous[entry.str] = true;
 
-    string reply = devin.print("Reply only AUTONOM_READY. Do not use tools or modify files.", workspace, model);
+    JSONValue launch = JSONValue([
+        "prompt": JSONValue("Reply only AUTONOM_READY. Do not use tools or modify files."),
+        "directory": JSONValue(workspace),
+        "model": JSONValue(model)
+    ]);
+    string reply = request("/api/print", launch.toString())["reply"].str;
     eval.check("print follows the reply instruction", reply.canFind("AUTONOM_READY"), reply.strip);
     string[] created;
-    foreach (id; devin.list(workspace))
+    foreach (entry; request(listing).array)
     {
-        if (id !in previous)
-            created ~= id;
+        if (entry.str !in previous)
+            created ~= entry.str;
     }
 
     if (!eval.check("print creates exactly one CLI session", created.length == 1, created.length.to!string~" new"))
         return;
 
-    Session session = store.register("eval", created[0]).session;
+    string session = "/api/sessions/"~created[0];
     scope(failure)
-        session.remove();
+        request(
+            session,
+            null,
+            200,
+            HTTP.Method.del
+        );
 
-    session.start("Reply only AUTONOM_RESUMED. Do not use tools or modify files.", workspace, model);
+    request("/api/profiles", `{"name":"eval"}`, 201);
+    request("/api/profiles/eval/session", JSONValue(["id": JSONValue(created[0])]).toString());
+    launch["prompt"] = JSONValue("Reply only AUTONOM_RESUMED. Do not use tools or modify files.");
+    request(session~"/start", launch.toString());
     eval.check("resumed session comes online", waitFor(delegate bool()
     {
-        return session.isOnline();
-    }, 30.seconds), session.inspect().to!string);
-    bool rejected;
-    try
-        store.register("eval", "replacement-session");
-    catch (ProfileConflict)
-        rejected = true;
-
-    eval.check("active session rejects profile replacement", rejected);
-    session.stop();
-    eval.check("stop releases the process and lock", !session.isRunning() && !session.isOnline());
-    session.start("Reply only AUTONOM_DONE. Do not use tools or modify files.", workspace, model);
+        return request(session)["status"].str == "online";
+    }, 30.seconds), request(session)["status"].str);
+    request("/api/profiles/eval/session", `{"id":"replacement-session"}`, 409);
+    eval.check("active session rejects profile replacement", true);
+    request(session~"/stop", "{}");
+    eval.check("stop releases the process and lock", request(session)["status"].str == "offline");
+    launch["prompt"] = JSONValue("Reply only AUTONOM_DONE. Do not use tools or modify files.");
+    request(session~"/start", launch.toString());
     bool finished = waitFor(delegate bool()
     {
-        return !session.isRunning();
+        return request(session)["exitStatus"].type != JSONType.null_;
     }, 120.seconds);
-    eval.check("resumed session exits cleanly", finished && session.exitStatus.get == 0,
-        session.exitStatus.isNull ? "running" : "exit "~session.exitStatus.get.to!string);
-    string log = buildPath(devin.logDir, session.id~".log");
-    eval.check("resumed reply is logged", exists(log) && readText(log).canFind("AUTONOM_DONE"));
-    eval.check("final status is offline", session.inspect() == SessionStatus.Offline,
-        session.inspect().to!string);
-    session.remove();
-    eval.check("removed session leaves the CLI and its log",
-        !devin.list(workspace).canFind(session.id) && !exists(log));
+    JSONValue status = request(session);
+    eval.check("resumed session exits cleanly", finished && status["exitStatus"] == JSONValue(0),
+        status["exitStatus"].toString());
+    eval.check("resumed reply is logged", request(session~"/log")["log"].str.canFind("AUTONOM_DONE"));
+    eval.check("final status is offline", status["status"].str == "offline", status["status"].str);
+    request(
+        session,
+        null,
+        200,
+        HTTP.Method.del
+    );
+    bool removed = true;
+    foreach (entry; request(listing).array)
+        removed = removed && entry.str != created[0];
+
+    request(session~"/log", null, 404);
+    eval.check("removed session leaves the CLI and its log", removed);
 }

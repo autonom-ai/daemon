@@ -1,7 +1,7 @@
 module autonom.profilestore;
 
 import autonom.config : Config;
-import autonom.daemon.server : profileStore, readField, respond;
+import autonom.server : profileStore, readField, respond;
 import autonom.profile : Profile;
 import autonom.session.bridge : Bridge;
 import autonom.session.session : Session;
@@ -143,14 +143,6 @@ private:
             throw new FileException(path, error.msg);
     }
 
-    Session sessionFor(string id)
-    {
-        if (id !in sessions)
-            sessions[id] = bridge.session(id);
-
-        return sessions[id];
-    }
-
     Profile profile(string name, JSONValue value)
     {
         return new Profile(name, value.type == JSONType.null_ ? null : sessionFor(value.str));
@@ -163,6 +155,42 @@ private:
             enforce(isAlphaNum(character) || character == '-' || character == '_', "Invalid profile name");
 
         return name.toLower;
+    }
+
+package(autonom):
+    Session sessionFor(string id)
+    {
+        if (id !in sessions)
+            sessions[id] = bridge.session(id);
+
+        return sessions[id];
+    }
+
+    void stopSessions()
+    {
+        foreach (session; sessions)
+        {
+            if (session.isRunning())
+                session.stop();
+        }
+    }
+
+    void removeSession(string id)
+    {
+        File guard = lock();
+        scope(exit)
+            guard.close();
+
+        JSONValue registry = read();
+        sessionFor(id).remove();
+        foreach (name, ref value; registry.object)
+        {
+            if (value.type == JSONType.string && value.str == id)
+                value = JSONValue(null);
+        }
+
+        atomicWrite(buildPath(directory, "profiles.json"), registry.toString());
+        sessions.remove(id);
     }
 
 public:
@@ -239,6 +267,7 @@ public:
                 "Profile already has an active session");
         }
 
+        sessionFor(id);
         registry[name] = JSONValue(id);
         atomicWrite(buildPath(directory, "profiles.json"), registry.toString());
         if (previous !is null)

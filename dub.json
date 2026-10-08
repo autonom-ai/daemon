@@ -5,68 +5,46 @@
 				"source/tests/**",
 				"source/evals/**"
 			],
-			"name": "library",
-			"targetType": "library"
-		},
-		{
-			"excludedSourceFiles": [
-				"source/tests/**",
-				"source/evals/**"
-			],
+			"sourcePaths": ["source/autonom"],
+			"mainSourceFile": "source/autonom/app.d",
 			"name": "daemon",
 			"targetName": "autonom-daemon",
-			"targetType": "executable",
-			"versions": [
-				"AutonomDaemon"
-			]
+			"targetType": "executable"
 		},
 		{
 			"excludedSourceFiles": [
+				"source/autonom/app.d",
 				"source/evals/**"
 			],
+			"sourcePaths": ["source/autonom", "source/tests"],
 			"dependencies": {"unit-threaded": "2.2.6"},
 			"mainSourceFile": "bin/ut.d",
 			"name": "unit",
 			"preBuildCommands": [
-				"$DUB build --compiler=$DC --config=http-test",
+				"$DUB build --compiler=$DC --config=daemon",
 				"$DUB run unit-threaded@2.2.6 -c gen_ut_main -- -f bin/ut.d source/tests"
 			],
 			"targetName": "autonom-unit",
 			"targetType": "executable"
 		},
 		{
-			"excludedSourceFiles": [
-				"source/tests/**",
-				"source/evals/server.d"
-			],
+			"sourcePaths": ["source/evals"],
 			"mainSourceFile": "source/evals/app.d",
 			"name": "eval",
+			"preBuildCommands": ["$DUB build --compiler=$DC --config=daemon"],
 			"targetName": "autonom-eval",
 			"targetType": "executable"
-		},
-		{
-			"excludedSourceFiles": [
-				"source/tests/**",
-				"source/evals/app.d",
-				"source/evals/package.d",
-				"source/evals/session.d"
-			],
-			"mainSourceFile": "source/evals/server.d",
-			"name": "http-test",
-			"targetName": "autonom-http-test",
-			"targetType": "executable",
-			"versions": [
-				"AutonomHttpTest"
-			]
 		}
 	],
 	"dependencies": {
 		"dyaml": "0.10.0",
 		"serverino": "0.8.5"
 	},
-	"description": "Profiles, sessions, and configuration for Autonom.",
+	"description": "Autonom state and session API daemon.",
 	"license": "AGPL-3.0-only",
 	"name": "autonom",
+	"sourcePaths": [],
+	"importPaths": ["source"],
 	"targetPath": "bin",
-	"targetType": "library"
+	"targetType": "executable"
 }

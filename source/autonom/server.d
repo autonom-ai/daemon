@@ -1,18 +1,16 @@
-module autonom.daemon.server;
+module autonom.server;
 
-import CONFIG = autonom.config;
-import PROFILES = autonom.profilestore;
+import autonom.config : Config;
+import autonom.profilestore : ProfileStore, ProfileConflict;
 import autonom.session.devin : Devin;
 import serverino : Output, Request, ServerinoConfig, ServerinoProcess,
     endpoint, onServerInit, onWorkerException, onWorkerStart, route;
-
-version (AutonomDaemon)
-    import serverino : ServerinoMain;
 
 import core.sys.posix.signal : kill, SIGTERM;
 import core.thread : Thread;
 import core.time : Duration, msecs;
 import std.algorithm : startsWith;
+import std.conv : to;
 import std.exception : ErrnoException, enforce;
 import std.file : FileException;
 import std.json : JSONValue, JSONType, parseJSON;
@@ -24,8 +22,9 @@ bool stopping;
 
 package(autonom):
 
-CONFIG.Config configuration;
-PROFILES.ProfileStore profileStore;
+Config configuration;
+Devin bridge;
+ProfileStore profileStore;
 
 void respond(Output output, JSONValue body, ushort status = 200)
 {
@@ -44,6 +43,20 @@ JSONValue readBody(Request request)
     enforce(request.body.data.length <= MAX_BODY, "Request body is too large");
     JSONValue ret = parseJSON(request.body.data);
     enforce(ret.type == JSONType.object, "Expected a JSON object");
+    return ret;
+}
+
+JSONValue readLaunch(Request request)
+{
+    JSONValue ret = readBody(request);
+    enforce("prompt" in ret.object && "directory" in ret.object, "Expected prompt and directory");
+    foreach (name, value; ret.object)
+        enforce((name == "prompt" || name == "directory" || name == "model") && value.type == JSONType.string,
+            "Expected only string prompt, directory, and optional model fields");
+
+    if ("model" !in ret.object)
+        ret["model"] = JSONValue("");
+
     return ret;
 }
 
@@ -80,6 +93,9 @@ void stop(Request request, Output output)
     }
 
     enforce(readBody(request).object.length == 0, "Expected an empty JSON object");
+    if (!stopping)
+        profileStore.stopSessions();
+
     respond(output, JSONValue(["status": JSONValue("stopping")]), 202);
     if (stopping)
         return;
@@ -93,37 +109,27 @@ void stop(Request request, Output output)
 
 @onServerInit ServerinoConfig setup()
 {
-    version (AutonomHttpTest)
-        enum PORT = 18080;
-    else
-        enum PORT = 8080;
-
     return ServerinoConfig.create()
-        .addListener("127.0.0.1", PORT)
+        .addListener("127.0.0.1", environment.get("AUTONOM_PORT", "8080").to!ushort)
         .setWorkers(1)
         .setMaxWorkerLifetime(Duration.max)
-        .setMaxWorkerIdling(Duration.max);
+        .setMaxWorkerIdling(Duration.max)
+        .setMaxRequestTime(Duration.max);
 }
 
 @onWorkerStart void setupWorker()
 {
-    version (AutonomHttpTest)
-        configuration = new CONFIG.Config(environment.get("AUTONOM_TEST_CONFIG"));
-    else
-        configuration = new CONFIG.Config(environment.get("AUTONOM_CONFIG", CONFIG.Config.defaultPath));
-
-    profileStore = new PROFILES.ProfileStore(configuration, new Devin(configuration));
+    configuration = new Config(environment.get("AUTONOM_CONFIG", Config.defaultPath));
+    bridge = new Devin(configuration);
+    profileStore = new ProfileStore(configuration, bridge);
 }
 
 @onWorkerException bool handleException(Request request, Output output, Exception error)
 {
     ushort status = cast(ErrnoException)error || cast(FileException)error ? 500 :
-        cast(PROFILES.ProfileConflict)error ? 409 : 400;
+        cast(ProfileConflict)error ? 409 : 400;
     respond(output, JSONValue([
         "error": JSONValue(status == 500 ? "Could not access storage" : error.msg)
     ]), status);
     return true;
 }
-
-version (AutonomDaemon)
-    mixin ServerinoMain!(CONFIG, PROFILES);

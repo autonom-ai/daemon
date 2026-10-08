@@ -1,17 +1,19 @@
 module evals.app;
 
-import autonom.config : Config;
-import autonom.profilestore : ProfileStore;
-import autonom.session : Devin;
-import evals : Eval;
+import evals : Eval, request, waitFor;
 import evals.session : sessionLifecycle;
 
-import std.file : mkdirRecurse, rmdirRecurse, tempDir, write;
+import core.time : seconds;
+import std.exception : enforce;
+import std.file : mkdirRecurse, readText, rmdirRecurse, tempDir, write;
 import std.json : JSONValue;
+import std.net.curl : CurlException;
 import std.path : buildPath;
-import std.process : environment;
-import std.stdio : stderr, stdout;
+import std.process : Config, environment, kill, Pid, spawnProcess, tryWait, wait;
+import std.stdio : File, stderr, stdin, stdout;
 import std.uuid : randomUUID;
+
+public:
 
 int main()
 {
@@ -28,13 +30,49 @@ int main()
     scope(exit)
         rmdirRecurse(root);
 
-    write(buildPath(root, "config.yml"), "dataDir: data\ndevinCommand: "~
+    string configuration = buildPath(root, "config.yml");
+    write(configuration, "dataDir: data\ndevinCommand: "~
         JSONValue(environment.get("AUTONOM_EVAL_CLI", "devin")).toString()~"\n");
-    Config config = new Config(buildPath(root, "config.yml"));
-    Devin devin = new Devin(config);
-    Eval eval = new Eval("session lifecycle");
+    File output = File(buildPath(root, "daemon.log"), "w");
+    scope(exit)
+        output.close();
+
+    Pid daemon = spawnProcess(
+        ["bin/autonom-daemon"],
+        stdin,
+        output,
+        output,
+        ["AUTONOM_CONFIG": configuration, "AUTONOM_PORT": "18080"],
+        Config.retainStdin | Config.retainStdout | Config.retainStderr
+    );
+    scope(exit)
+    {
+        if (!tryWait(daemon).terminated)
+        {
+            kill(daemon);
+            wait(daemon);
+        }
+    }
+
+    Eval eval = new Eval("session lifecycle via daemon");
     try
-        sessionLifecycle(eval, devin, new ProfileStore(config, devin), workspace, model);
+    {
+        enforce(waitFor(delegate bool()
+        {
+            enforce(!tryWait(daemon).terminated, readText(buildPath(root, "daemon.log")));
+            try
+                return request("/api/health")["status"].str == "ok";
+            catch (CurlException)
+                return false;
+        }, 5.seconds), "Daemon did not become healthy");
+        sessionLifecycle(eval, workspace, model);
+        request("/api/stop", "{}", 202);
+        enforce(waitFor(delegate bool()
+        {
+            return tryWait(daemon).terminated;
+        }, 5.seconds), "Daemon did not stop");
+        eval.check("daemon stops cleanly", wait(daemon) == 0);
+    }
     catch (Exception error)
         eval.check("completes without error", false, error.msg);
 

@@ -1,6 +1,6 @@
 module autonom.config;
 
-import autonom.daemon.server : configuration, respond;
+import autonom.server : configuration, respond;
 import autonom.storage : openFile;
 import dyaml : Loader, Node, NodeType;
 import serverino : Output, Request, endpoint, route;
