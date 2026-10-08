@@ -38,6 +38,8 @@
 	],
 	"dependencies": {
 		"dyaml": "0.10.0",
+		"intuit": "2.0.0",
+		"mir-ion": "2.3.5",
 		"serverino": "0.8.5"
 	},
 	"description": "Autonom state and session API daemon.",

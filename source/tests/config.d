@@ -41,6 +41,31 @@ unittest
     exists(config.dataDir).should == false;
 }
 
+@Name("Config defaults to the free Mercury policy model without exposing credentials")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    fixture.config.toJSON()["policyUrl"].str.should == "https://openrouter.ai";
+    fixture.config.toJSON()["policyModel"].str.should == "inception/mercury-decide:free";
+    fixture.config.toJSON().object.length.should == 5;
+}
+
+@Name("Config accepts a policy router URL and model")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    write(fixture.path, "policyUrl: http://127.0.0.1:1234\npolicyModel: test-model\n");
+    Config config = new Config(fixture.path);
+    config.toJSON()["policyUrl"].str.should == "http://127.0.0.1:1234";
+    config.toJSON()["policyModel"].str.should == "test-model";
+}
+
 @Name("Config rejects malformed YAML and unsupported settings")
 unittest
 {

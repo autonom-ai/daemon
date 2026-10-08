@@ -9,7 +9,7 @@ import core.time : Duration, seconds;
 import std.algorithm : canFind;
 import std.conv : octal, to;
 import std.exception : enforce;
-import std.file : readText, setAttributes, write;
+import std.file : mkdirRecurse, readText, setAttributes, write;
 import std.json : JSONValue, parseJSON;
 import std.net.curl : CurlException, HTTP;
 import std.path : buildPath;
@@ -78,6 +78,7 @@ trap 'exit 0' TERM
 while :; do sleep 0.05; done
 `);
     setAttributes(fixture.config.devinCommand, octal!"700");
+    write(fixture.path, readText(fixture.path)~"policyUrl: http://127.0.0.1:1\npolicyModel: test-model\n");
     string log = buildPath(fixture.root, "daemon.log");
     File output = File(log, "w");
     scope(exit)
@@ -110,6 +111,39 @@ while :; do sleep 0.05; done
     });
     request("/api/health")["pid"].integer.should == process.processID;
     request("/api/health", 405, "{}")["error"].str.should == "Method not allowed";
+
+    JSONValue policyRequest = JSONValue([
+        "directory": JSONValue(fixture.root),
+        "tool": JSONValue("exec"),
+        "input": JSONValue(["command": JSONValue("git status")])
+    ]);
+    request("/api/policy/check", 405)["error"].str.should == "Method not allowed";
+    request("/api/policy/check", 400, "{");
+    request("/api/policy/check", 400, "{}");
+    request(
+        "/api/policy/check",
+        400,
+        policyRequest.toString(),
+        "text/plain"
+    );
+    request("/api/policy/check", 400, `{"directory":"/tmp","tool":"exec","input":[]}`);
+    request("/api/policy/check", 400, `{"directory":"/tmp","tool":"exec","unknown":true}`);
+    request("/api/policy/check", 503, policyRequest.toString())["denied"].boolean.should == true;
+    mkdirRecurse(buildPath(fixture.root, ".devin"));
+    string policyPath = buildPath(fixture.root, ".devin", "policy.yml");
+    write(policyPath, "rules:\n  - action: allow\n");
+    request("/api/policy/check", 200, policyRequest.toString())["denied"].boolean.should == false;
+    request("/api/policy/check", 200, policyRequest.toString())["reason"].should == JSONValue(null);
+    write(policyPath, "rules:\n  - action: deny\n    reason: Blocked\n");
+    request("/api/policy/check", 200, policyRequest.toString())["denied"].boolean.should == true;
+    request("/api/policy/check", 200, policyRequest.toString())["reason"].str.should == "Blocked";
+    write(policyPath, "rules: []\n");
+    request("/api/policy/check", 200, policyRequest.toString())["denied"].boolean.should == true;
+    write(policyPath, "rules:\n  - action: screen\n");
+    request("/api/policy/check", 503, policyRequest.toString())["denied"].boolean.should == true;
+    write(policyPath, "rules:\n  - action: screen\n    question: Is it harmful?\n");
+    request("/api/policy/check", 503, policyRequest.toString())["denied"].boolean.should == true;
+    request("/api/health")["status"].str.should == "ok";
 
     long worker = request("/api/health")["workerPid"].integer;
     string settings = readText(buildPath("/proc", worker.to!string, "environ"));
