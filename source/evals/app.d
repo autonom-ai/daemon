@@ -1,99 +1,75 @@
 module evals.app;
 
-import evals : Eval, request, waitFor;
+import evals : Eval;
+import evals.daemon : Daemon;
 import evals.policy : policyChecks;
-import evals.session : sessionLifecycle;
+import evals.session : Sessions;
 
-import core.time : seconds;
 import std.exception : enforce;
-import std.file : mkdirRecurse, readText, rmdirRecurse, tempDir, write;
-import std.json : JSONValue;
-import std.net.curl : CurlException;
-import std.path : buildPath;
-import std.process : Config, environment, kill, Pid, spawnProcess, tryWait, wait;
-import std.stdio : File, stderr, stdin, stdout;
-import std.uuid : randomUUID;
+import std.process : environment;
+import std.stdio : stderr, stdout;
+
+private:
+
+void finish(Eval eval, Daemon daemon, Sessions sessions)
+{
+    scope(exit)
+        daemon.close();
+
+    if (sessions !is null)
+    {
+        try
+            sessions.close(eval);
+        catch (Exception error)
+            eval.check("session cleanup", false, error.msg);
+    }
+
+    try
+    {
+        daemon.stop();
+        eval.check("daemon stops cleanly", true);
+    }
+    catch (Exception error)
+        eval.check("daemon stops cleanly", false, error.msg);
+}
+
+void run(Eval eval, bool policy, bool sessions)
+{
+    Daemon daemon = new Daemon();
+    Sessions lifecycle;
+    scope(exit)
+        finish(eval, daemon, lifecycle);
+
+    if (policy)
+        policyChecks(eval, daemon.workspace);
+    if (sessions)
+    {
+        lifecycle = new Sessions(daemon.workspace, environment.get("AUTONOM_EVAL_MODEL", "swe-2-medium"));
+        lifecycle.run(eval);
+    }
+}
 
 public:
 
 int main(string[] arguments)
 {
-    bool policy = arguments.length == 2 && arguments[1] == "--policy";
-    if (arguments.length > 1 && !policy)
+    string selection = arguments.length > 1 ? arguments[1] : "--all";
+    if (arguments.length > 2 || (selection != "--all" && selection != "--policy" && selection != "--sessions"))
     {
-        stderr.writeln("Usage: autonom-eval [--policy]");
+        stderr.writeln("Usage: autonom-eval [--all|--policy|--sessions]");
         return 2;
     }
 
-    if (policy && !environment.get("OPENROUTER_API_KEY").length)
-    {
-        stderr.writeln("Set OPENROUTER_API_KEY to run the policy eval");
-        return 2;
-    }
-
-    string model = environment.get("AUTONOM_EVAL_MODEL");
-    string workspace = environment.get("AUTONOM_EVAL_WORKSPACE");
-    if (!policy && (!model.length || !workspace.length))
-    {
-        stderr.writeln("Set AUTONOM_EVAL_MODEL (for example SWE-2) and AUTONOM_EVAL_WORKSPACE (a trusted workspace)");
-        return 2;
-    }
-
-    string root = buildPath(tempDir(), "autonom-eval-"~randomUUID().toString());
-    mkdirRecurse(root);
-    scope(exit)
-        rmdirRecurse(root);
-
-    string configuration = buildPath(root, "config.yml");
-    write(configuration, "dataDir: data\ndevinCommand: "~
-        JSONValue(environment.get("AUTONOM_EVAL_CLI", "devin")).toString()~"\n");
-    File output = File(buildPath(root, "daemon.log"), "w");
-    scope(exit)
-        output.close();
-
-    Pid daemon = spawnProcess(
-        ["bin/autonom-daemon"],
-        stdin,
-        output,
-        output,
-        ["AUTONOM_CONFIG": configuration, "AUTONOM_PORT": "18080"],
-        Config.retainStdin | Config.retainStdout | Config.retainStderr
-    );
-    scope(exit)
-    {
-        if (!tryWait(daemon).terminated)
-        {
-            kill(daemon);
-            wait(daemon);
-        }
-    }
-
-    Eval eval = new Eval(policy ? "policy screening via daemon" : "session lifecycle via daemon");
+    Eval eval = new Eval();
     try
     {
-        enforce(waitFor(delegate bool()
-        {
-            enforce(!tryWait(daemon).terminated, readText(buildPath(root, "daemon.log")));
-            try
-                return request("/api/health")["status"].str == "ok";
-            catch (CurlException)
-                return false;
-        }, 5.seconds), "Daemon did not become healthy");
-        if (policy)
-            policyChecks(eval, root);
-        else
-            sessionLifecycle(eval, workspace, model);
-
-        request("/api/stop", "{}", 202);
-        enforce(waitFor(delegate bool()
-        {
-            return tryWait(daemon).terminated;
-        }, 5.seconds), "Daemon did not stop");
-        eval.check("daemon stops cleanly", wait(daemon) == 0);
+        enforce(selection == "--sessions" || environment.get("OPENROUTER_API_KEY").length,
+            "Export OPENROUTER_API_KEY before running the policy eval");
+        run(eval, selection != "--sessions", selection != "--policy");
     }
     catch (Exception error)
-        eval.check("completes without error", false, error.msg);
+        eval.check("eval completes", false, error.msg);
 
-    eval.report(stdout);
+    stdout.writeln(eval.passed ? "PASS live evals" : "FAIL live evals");
     return eval.passed ? 0 : 1;
 }

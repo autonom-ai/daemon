@@ -160,10 +160,12 @@ private:
 package(autonom):
     Session sessionFor(string id)
     {
-        if (id !in sessions)
-            sessions[id] = bridge.session(id);
+        if (Session* cached = id in sessions)
+            return *cached;
 
-        return sessions[id];
+        Session ret = bridge.session(id);
+        sessions[ret.id] = ret;
+        return ret;
     }
 
     void stopSessions()
