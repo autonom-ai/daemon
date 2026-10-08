@@ -4,14 +4,20 @@
 - Tests: `dub run --compiler=ldc2 --config=unit --build=unittest`.
 - Eval runner: `dub build --compiler=ldc2 --config=eval`.
 - Unit tests and evals launch the production daemon on loopback port 18080; do not run them concurrently.
-- Live session evals require `AUTONOM_EVAL_MODEL` and `AUTONOM_EVAL_WORKSPACE` and create/remove real Devin sessions.
-- Policy-only live eval: `dub run --compiler=ldc2 --config=eval -- --policy`; requires only `OPENROUTER_API_KEY`.
+- Live evals: `dub run --compiler=ldc2 --config=eval`; runs policy and sessions by default. Export `OPENROUTER_API_KEY`.
+- Select a suite with `-- --policy` or `-- --sessions`; session-only evals do not require the OpenRouter key.
+- Session evals default to `swe-2-medium`; override with `AUTONOM_EVAL_MODEL` or `AUTONOM_EVAL_CLI`.
+- Evals own a temporary workspace, remove only newly created sessions on success or failure, and verify cleanup.
+- The eval-only CLI wrapper disables workspace trust checks for that empty temporary workspace, not user workspaces.
 
 # Runtime
 
 - `autonom.app` is the executable entrypoint; `autonom.server` owns the server setup and shared runtime state.
 - One persistent Serverino worker owns live session processes; do not enable idle/lifetime worker recycling.
 - `AUTONOM_CONFIG` selects the YAML configuration and `AUTONOM_PORT` overrides the default loopback port 8080.
+- Devin Desktop exports `ACP_BACKEND=windsurf`; unset it for direct CLI checks. The bridge scrubs host prefixes itself.
+- Sessions must own their IDs: Serverino request strings can reference reused buffers and cannot be retained as cache keys.
+- `POST /api/sessions/remove` accepts `{"ids":[...]}`; validates the entire batch and reports `removed` and `failed` IDs.
 
 # Policy
 

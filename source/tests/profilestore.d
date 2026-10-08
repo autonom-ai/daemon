@@ -1,6 +1,7 @@
 module tests.profilestore;
 
 import autonom.profile : Profile;
+import autonom.session : Session;
 import autonom.profilestore : ProfileStore, ProfileConflict, profiles, getProfile, profileSession;
 import tests.common : Fixture;
 import serverino : endpoint, route;
@@ -49,6 +50,20 @@ unittest
     (fixture.store.get("MARLOW").session is profile.session).should == true;
     ProfileStore store = new ProfileStore(fixture.config, fixture.bridge);
     store.get("marlow").session.id.should == "session-1";
+}
+
+@Name("ProfileStore owns session IDs independently of reused request buffers")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    char[] buffer = "session-1".dup;
+    Session session = fixture.store.register("marlow", cast(string)buffer).session;
+    buffer[] = 'X';
+    session.id.should == "session-1";
+    (fixture.store.get("marlow").session is session).should == true;
 }
 
 @Name("ProfileStore rejects invalid session IDs without corrupting the registry")

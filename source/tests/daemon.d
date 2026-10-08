@@ -68,7 +68,7 @@ unittest
     write(fixture.config.devinCommand, `#!/bin/sh
 case "$1" in
     list) printf '[{"id":"session-0"}]'; exit 0 ;;
-    rm) exit 0 ;;
+    rm) [ "$4" = missing ] && exit 1; exit 0 ;;
     --print) printf 'AUTONOM_READY'; exit 0 ;;
 esac
 for argument do prompt="$argument"; done
@@ -194,6 +194,25 @@ while :; do sleep 0.05; done
     request("/api/sessions/session-0/log", 404);
     launch["prompt"] = JSONValue("work");
     request("/api/sessions/session-1/start", 200, launch.toString());
+
+    request("/api/sessions/remove", 405)["error"].str.should == "Method not allowed";
+    request("/api/sessions/remove", 400, "{}");
+    request("/api/sessions/remove", 400, `{"ids":"session-1"}`);
+    request("/api/sessions/remove", 400, `{"ids":[42]}`);
+    request("/api/sessions/remove", 400, `{"ids":["duplicate","duplicate"]}`);
+    request("/api/sessions/remove", 400, `{"ids":[],"unexpected":true}`);
+    request("/api/sessions/batch-owned/start", 200, launch.toString());
+    request("/api/sessions/remove", 400, `{"ids":["batch-owned","../escape"]}`);
+    request("/api/sessions/batch-owned")["status"].str.should == "starting";
+    request("/api/sessions/remove", 200, `{"ids":["batch-owned"]}`)["removed"].array.should ==
+        [JSONValue("batch-owned")];
+    request("/api/sessions/batch-owned/log", 404);
+    request("/api/sessions/remove", 200, `{"ids":[]}`)["removed"].array.length.should == 0;
+    request("/api/sessions/batch-other/start", 200, launch.toString());
+    JSONValue cleanup = request("/api/sessions/remove", 503, `{"ids":["missing","batch-other"]}`);
+    cleanup["removed"].array.should == [JSONValue("batch-other")];
+    cleanup["failed"].array.should == [JSONValue("missing")];
+    request("/api/sessions/batch-other/log", 404);
 
     JSONValue configuration = request("/api/config");
     write(fixture.path, "dataDir: changed\nsessionLockDir: locks\ndevinCommand: ./devin\n");

@@ -1,8 +1,10 @@
 module tests.session;
 
 import autonom.session : Session, SessionStatus;
+import autonom.session.cleanup : removeSessions;
 import autonom.profilestore : ProfileConflict;
 import tests.common : Fixture, waitUntil;
+import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should, shouldThrow;
 
 import core.sys.linux.sys.file : flock, LOCK_EX;
@@ -14,6 +16,7 @@ import std.path : buildPath;
 import std.process : environment;
 import std.stdio : File;
 import std.string : splitLines;
+import std.traits : hasUDA;
 
 private:
 
@@ -30,6 +33,13 @@ while :; do sleep 0.05; done
 }
 
 public:
+
+@Name("Session cleanup declares its module-level HTTP endpoint")
+unittest
+{
+    hasUDA!(removeSessions, endpoint).should == true;
+    hasUDA!(removeSessions, route).should == true;
+}
 
 @Name("Session rejects invalid IDs before launching")
 unittest

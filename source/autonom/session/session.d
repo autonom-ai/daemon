@@ -137,7 +137,7 @@ public:
         foreach (character; id)
             enforce(isAlphaNum(character) || character == '-' || character == '_', "Invalid session ID");
 
-        this.id = id;
+        this.id = id.idup;
         this.bridge = bridge;
     }
 
