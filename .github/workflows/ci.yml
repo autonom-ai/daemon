@@ -10,27 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: dlang-community/setup-dlang@v2
         with:
-          node-version: 22
-          cache: npm
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-
-      - name: Install AI bridge dependencies
-        run: npm ci
-
-      - name: Check and build AI bridge
-        run: npm run check && npm run build
-
-      - name: Syntax-check Ruby source
-        run: |
-          for file in source/*.rb source/*/*.rb tests/*.rb tests/*/*.rb; do
-            ruby -c "$file" || exit 1
-          done
-
-      - name: Test Ruby core
-        run: ruby -Itests -e 'Dir["tests/**/*.rb"].sort.each { |file| require_relative file }'
+          compiler: ldc-latest
+      - name: Build library
+        run: dub build --compiler=ldc2 --config=library
+      - name: Run unit tests
+        run: dub run --compiler=ldc2 --config=unit --build=unittest
+      - name: Build eval runner
+        run: dub build --compiler=ldc2 --config=eval
+      - name: Build Serverino test host
+        run: dub build --compiler=ldc2 --config=http-test
