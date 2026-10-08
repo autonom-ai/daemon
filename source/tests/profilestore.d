@@ -51,6 +51,20 @@ unittest
     store.get("marlow").session.id.should == "session-1";
 }
 
+@Name("ProfileStore rejects invalid session IDs without corrupting the registry")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    fixture.store.register("marlow", "session-1");
+    fixture.store.register("marlow", "../escape").shouldThrow!Exception();
+    fixture.store.get("marlow").session.id.should == "session-1";
+    fixture.store.register("wren", "invalid id").shouldThrow!Exception();
+    (fixture.store.get("wren") is null).should == true;
+}
+
 @Name("ProfileStore replaces offline associations without retaining history")
 unittest
 {

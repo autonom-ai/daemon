@@ -1,8 +1,10 @@
 module autonom.session.devin.bridge;
 
 import autonom.config : Config;
+import autonom.server : bridge, readLaunch, respond;
 import autonom.session.bridge : Bridge;
 import autonom.session.devin.session : DevinSession;
+import serverino : Output, Request, endpoint, route;
 
 import std.algorithm : canFind;
 import std.exception : enforce;
@@ -19,6 +21,32 @@ enum string[] HOST_PREFIXES = [
 ];
 
 public:
+
+@endpoint @route!"/api/sessions"
+void listSessions(Request request, Output output)
+{
+    if (request.method == Request.Method.Get)
+        respond(output, JSONValue(bridge.list(request.get.read("directory"))));
+    else
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+}
+
+@endpoint @route!"/api/print"
+void printSession(Request request, Output output)
+{
+    if (request.method != Request.Method.Post)
+    {
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+        return;
+    }
+
+    JSONValue data = readLaunch(request);
+    respond(output, JSONValue(["reply": JSONValue(bridge.print(
+        data["prompt"].str,
+        data["directory"].str,
+        data["model"].str
+    ))]));
+}
 
 class Devin : Bridge
 {

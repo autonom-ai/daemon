@@ -2,6 +2,8 @@ module autonom.session.bridge;
 
 import autonom.session.session : Session;
 
+import core.sys.linux.sys.prctl : prctl, PR_SET_PDEATHSIG;
+import core.sys.posix.signal : SIGTERM;
 import core.sys.posix.unistd : setpgid;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
@@ -16,7 +18,13 @@ abstract class Bridge
 {
 private:
     static bool createProcessGroup() nothrow @nogc @trusted
-        => setpgid(0, 0) == 0;
+        => setpgid(0, 0) == 0 && prctl(
+            PR_SET_PDEATHSIG,
+            SIGTERM,
+            0,
+            0,
+            0
+        ) == 0;
 
     string[string] childEnvironment() const
     {
@@ -69,13 +77,15 @@ public:
             errors.close();
         }
 
+        PROCESS_CONFIG options = PROCESS_CONFIG.newEnv | PROCESS_CONFIG.retainStdout | PROCESS_CONFIG.retainStderr;
+        options.preExecFunction = &createProcessGroup;
         Pid process = spawnProcess(
             [command]~arguments,
             File("/dev/null", "r"),
             output,
             errors,
             childEnvironment(),
-            PROCESS_CONFIG.newEnv | PROCESS_CONFIG.retainStdout | PROCESS_CONFIG.retainStderr,
+            options,
             directory
         );
         scope(failure)

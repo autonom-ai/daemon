@@ -1,11 +1,42 @@
 module evals;
 
 import core.thread : Thread;
-import core.time : Duration, MonoTime, msecs;
+import core.time : Duration, MonoTime, msecs, seconds;
 import std.algorithm : all;
+import std.conv : to;
+import std.exception : enforce;
+import std.json : JSONValue, parseJSON;
+import std.net.curl : HTTP;
 import std.stdio : File;
 
 public:
+
+JSONValue request(
+    string path,
+    string body = null,
+    uint status = 200,
+    HTTP.Method method = HTTP.Method.undefined
+)
+{
+    HTTP client = HTTP("http://127.0.0.1:18080"~path);
+    client.proxy = "";
+    client.connectTimeout = 1.seconds;
+    client.operationTimeout = 130.seconds;
+    client.method = method;
+    if (body !is null)
+        client.setPostData(body, "application/json");
+
+    string data;
+    client.onReceive = (ubyte[] chunk)
+    {
+        data ~= cast(char[])chunk;
+        return chunk.length;
+    };
+    client.perform();
+    enforce(client.statusLine.code == status,
+        "HTTP "~client.statusLine.code.to!string~" for "~path~": "~data);
+    return parseJSON(data);
+}
 
 struct Check
 {
