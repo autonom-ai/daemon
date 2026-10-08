@@ -1,8 +1,9 @@
 module tests.profilestore;
 
 import autonom.profile : Profile;
-import autonom.profilestore : ProfileStore, ProfileConflict;
+import autonom.profilestore : ProfileStore, ProfileConflict, profiles, getProfile, profileSession;
 import tests.common : Fixture;
+import serverino : endpoint, route;
 import unit_threaded : Name, should, shouldThrow;
 
 import std.array : replicate;
@@ -10,6 +11,17 @@ import std.conv : octal;
 import std.file : FileException, getAttributes, readText, remove, symlink, write;
 import std.json : parseJSON;
 import std.path : buildPath;
+import std.traits : hasUDA;
+
+@Name("ProfileStore declares module-level HTTP endpoints")
+unittest
+{
+    static foreach (HANDLER; ["profiles", "getProfile", "profileSession"])
+    {
+        hasUDA!(mixin(HANDLER), endpoint).should == true;
+        hasUDA!(mixin(HANDLER), route).should == true;
+    }
+}
 
 @Name("ProfileStore creates canonical profile names without identity files")
 unittest

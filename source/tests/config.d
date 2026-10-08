@@ -1,11 +1,20 @@
 module tests.config;
 
-import autonom.config : Config;
+import autonom.config : Config, getConfig;
 import tests.common : Fixture;
+import serverino : endpoint, route;
 import unit_threaded : Name, should, shouldThrow;
 
 import std.file : exists, symlink, write;
 import std.path : buildPath;
+import std.traits : hasUDA;
+
+@Name("Config declares its module-level HTTP endpoint")
+unittest
+{
+    hasUDA!(getConfig, endpoint).should == true;
+    hasUDA!(getConfig, route).should == true;
+}
 
 @Name("Config resolves paths relative to the YAML file")
 unittest
