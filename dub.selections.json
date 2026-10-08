@@ -2,7 +2,13 @@
 	"fileVersion": 1,
 	"versions": {
 		"dyaml": "0.10.0",
+		"intuit": "2.0.0",
+		"mir-algorithm": "3.22.4",
+		"mir-core": "1.7.4",
+		"mir-cpuid": "1.2.11",
+		"mir-ion": "2.3.5",
 		"serverino": "0.8.5",
+		"silly": "1.1.1",
 		"tinyendian": "0.2.0",
 		"unit-threaded": "2.2.6"
 	}

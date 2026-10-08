@@ -32,6 +32,8 @@ public:
     const string dataDir;
     const string sessionLockDir;
     const string devinCommand;
+    const string policyUrl;
+    const string policyModel;
 
     static string defaultPath()
         => buildPath(environment.get("XDG_CONFIG_HOME", expandTilde("~/.config")), "autonom", "config.yml");
@@ -50,6 +52,8 @@ public:
         string data = dirName(this.path);
         string locks = defaultSessionLockDir;
         string command = "devin";
+        string url = "https://openrouter.ai";
+        string model = "inception/mercury-decide:free";
         if (exists(this.path))
         {
             File file = openFile(this.path, O_RDONLY);
@@ -75,6 +79,12 @@ public:
                     case "devinCommand":
                         command = setting;
                         break;
+                    case "policyUrl":
+                        url = setting;
+                        break;
+                    case "policyModel":
+                        model = setting;
+                        break;
                     default:
                         throw new Exception("Unknown configuration setting");
                 }
@@ -85,6 +95,8 @@ public:
         sessionLockDir = buildNormalizedPath(absolutePath(expandTilde(locks), dirName(this.path)));
         devinCommand = command.canFind('/') ?
             buildNormalizedPath(absolutePath(expandTilde(command), dirName(this.path))) : command;
+        policyUrl = url;
+        policyModel = model;
     }
 
     JSONValue toJSON() const
@@ -92,7 +104,9 @@ public:
         return JSONValue([
             "dataDir": JSONValue(dataDir),
             "sessionLockDir": JSONValue(sessionLockDir),
-            "devinCommand": JSONValue(devinCommand)
+            "devinCommand": JSONValue(devinCommand),
+            "policyUrl": JSONValue(policyUrl),
+            "policyModel": JSONValue(policyModel)
         ]);
     }
 }

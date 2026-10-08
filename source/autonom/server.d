@@ -2,7 +2,9 @@ module autonom.server;
 
 import autonom.config : Config;
 import autonom.profilestore : ProfileStore, ProfileConflict;
+import autonom.policy : Policy;
 import autonom.session.devin : Devin;
+import intuit.router.openrouter : OpenRouter;
 import serverino : Output, Request, ServerinoConfig, ServerinoProcess,
     endpoint, onServerInit, onWorkerException, onWorkerStart, route;
 
@@ -25,6 +27,7 @@ package(autonom):
 Config configuration;
 Devin bridge;
 ProfileStore profileStore;
+Policy policy;
 
 void respond(Output output, JSONValue body, ushort status = 200)
 {
@@ -122,6 +125,8 @@ void stop(Request request, Output output)
     configuration = new Config(environment.get("AUTONOM_CONFIG", Config.defaultPath));
     bridge = new Devin(configuration);
     profileStore = new ProfileStore(configuration, bridge);
+    policy = new Policy(new OpenRouter(environment.get("OPENROUTER_API_KEY"), configuration.policyUrl),
+        configuration.policyModel);
 }
 
 @onWorkerException bool handleException(Request request, Output output, Exception error)
