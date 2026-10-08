@@ -28,6 +28,7 @@
 			"mainSourceFile": "bin/ut.d",
 			"name": "unit",
 			"preBuildCommands": [
+				"$DUB build --compiler=$DC --config=http-test",
 				"$DUB run unit-threaded@2.2.6 -c gen_ut_main -- -f bin/ut.d source/tests"
 			],
 			"targetName": "autonom-unit",

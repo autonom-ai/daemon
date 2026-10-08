@@ -3,13 +3,24 @@ module autonom.daemon.server;
 import CONFIG = autonom.config;
 import PROFILES = autonom.profilestore;
 import autonom.session.devin : Devin;
-import serverino;
+import serverino : Output, Request, ServerinoConfig, ServerinoProcess,
+    endpoint, onServerInit, onWorkerException, onWorkerStart, route;
 
+version (AutonomDaemon)
+    import serverino : ServerinoMain;
+
+import core.sys.posix.signal : kill, SIGTERM;
+import core.thread : Thread;
+import core.time : Duration, msecs;
 import std.algorithm : startsWith;
 import std.exception : ErrnoException, enforce;
 import std.file : FileException;
 import std.json : JSONValue, JSONType, parseJSON;
-import std.process : environment;
+import std.process : environment, thisProcessID;
+
+private:
+
+bool stopping;
 
 package(autonom):
 
@@ -20,31 +31,78 @@ void respond(Output output, JSONValue body, ushort status = 200)
 {
     output.status = status;
     output.addHeader("content-type", "application/json");
+    output.addHeader("cache-control", "no-store");
     output ~= body.toString();
 }
 
-string readField(string FIELD)(Request request)
+JSONValue readBody(Request request)
 {
     enum MIME = "application/json";
     enum MAX_BODY = 64 * 1024;
     enforce(request.body.contentType == MIME || request.body.contentType.startsWith(MIME~";"),
         "Expected application/json");
     enforce(request.body.data.length <= MAX_BODY, "Request body is too large");
-    JSONValue data = parseJSON(request.body.data);
-    enforce(data.type == JSONType.object && data.object.length == 1 && FIELD in data.object,
-        "Expected only the "~FIELD~" field");
+    JSONValue ret = parseJSON(request.body.data);
+    enforce(ret.type == JSONType.object, "Expected a JSON object");
+    return ret;
+}
+
+string readField(string FIELD)(Request request)
+{
+    JSONValue data = readBody(request);
+    enforce(data.object.length == 1 && FIELD in data.object, "Expected only the "~FIELD~" field");
     enforce(data[FIELD].type == JSONType.string, FIELD~" must be a string");
     return data[FIELD].str;
 }
 
 public:
 
+@endpoint @route!"/api/health"
+void health(Request request, Output output)
+{
+    if (request.method == Request.Method.Get)
+        respond(output, JSONValue([
+            "status": JSONValue(stopping ? "stopping" : "ok"),
+            "pid": JSONValue(ServerinoProcess.daemonPID),
+            "workerPid": JSONValue(thisProcessID)
+        ]), stopping ? 503 : 200);
+    else
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+}
+
+@endpoint @route!"/api/stop"
+void stop(Request request, Output output)
+{
+    if (request.method != Request.Method.Post)
+    {
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+        return;
+    }
+
+    enforce(readBody(request).object.length == 0, "Expected an empty JSON object");
+    respond(output, JSONValue(["status": JSONValue("stopping")]), 202);
+    if (stopping)
+        return;
+
+    stopping = true;
+    new Thread({
+        Thread.sleep(100.msecs);
+        kill(ServerinoProcess.daemonPID, SIGTERM);
+    }).start();
+}
+
 @onServerInit ServerinoConfig setup()
 {
     version (AutonomHttpTest)
-        return ServerinoConfig.create().addListener("127.0.0.1", 18080).setWorkers(2);
+        enum PORT = 18080;
     else
-        return ServerinoConfig.create().addListener("127.0.0.1", 8080).setWorkers(2);
+        enum PORT = 8080;
+
+    return ServerinoConfig.create()
+        .addListener("127.0.0.1", PORT)
+        .setWorkers(1)
+        .setMaxWorkerLifetime(Duration.max)
+        .setMaxWorkerIdling(Duration.max);
 }
 
 @onWorkerStart void setupWorker()
