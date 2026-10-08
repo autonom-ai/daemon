@@ -1,8 +1,4 @@
-node_modules/
-dist/
-agents/
-local/
-.devin
-tools/
-.playwright-mcp/
+.dub/
+bin/
 .env
+.devin/

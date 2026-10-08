@@ -1,0 +1,59 @@
+{
+	"configurations": [
+		{
+			"excludedSourceFiles": [
+				"source/tests/**",
+				"source/evals/**"
+			],
+			"name": "library",
+			"targetType": "library"
+		},
+		{
+			"excludedSourceFiles": [
+				"source/evals/**"
+			],
+			"dependencies": {"unit-threaded": "2.2.6"},
+			"mainSourceFile": "bin/ut.d",
+			"name": "unit",
+			"preBuildCommands": [
+				"$DUB run unit-threaded@2.2.6 -c gen_ut_main -- -f bin/ut.d source/tests"
+			],
+			"targetName": "autonom-unit",
+			"targetType": "executable"
+		},
+		{
+			"excludedSourceFiles": [
+				"source/tests/**",
+				"source/evals/server.d"
+			],
+			"mainSourceFile": "source/evals/app.d",
+			"name": "eval",
+			"targetName": "autonom-eval",
+			"targetType": "executable"
+		},
+		{
+			"excludedSourceFiles": [
+				"source/tests/**",
+				"source/evals/app.d",
+				"source/evals/package.d",
+				"source/evals/session.d"
+			],
+			"mainSourceFile": "source/evals/server.d",
+			"name": "http-test",
+			"targetName": "autonom-http-test",
+			"targetType": "executable",
+			"versions": [
+				"AutonomHttpTest"
+			]
+		}
+	],
+	"dependencies": {
+		"dyaml": "0.10.0",
+		"serverino": "0.8.5"
+	},
+	"description": "Profiles, sessions, and configuration for Autonom.",
+	"license": "AGPL-3.0-only",
+	"name": "autonom",
+	"targetPath": "bin",
+	"targetType": "library"
+}
