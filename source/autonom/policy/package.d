@@ -1,4 +1,4 @@
 module autonom.policy;
 
-public import autonom.policy.policy : Policy;
-public import autonom.policy.result : PolicyResult;
+public import autonom.policy.access : Policy;
+public import autonom.policy.format : PolicyResult;
