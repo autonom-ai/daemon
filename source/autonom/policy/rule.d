@@ -1,4 +1,5 @@
-module autonom.policy.format;
+/// Workspace policy loading, rule validation, and regular-expression matching.
+module autonom.policy.rule;
 
 import autonom.storage : openFile;
 import mir.deser.yaml : deserializeYaml;
@@ -15,24 +16,9 @@ import std.regex : Regex, matchFirst, regex;
 import std.stdio : File;
 import std.string : strip;
 
-struct PolicyResult
-{
-    bool denied;
-    string reason;
-
-    JSONValue toJSON() const
-    {
-        JSONValue ret = JSONValue.emptyObject;
-        ret["denied"] = JSONValue(denied);
-        ret["reason"] = reason.length ? JSONValue(reason) : JSONValue(null);
-        return ret;
-    }
-}
-
-private:
-
 package(autonom.policy):
 
+/// The action taken when a rule matches.
 enum PolicyAction : string
 {
     @serdeKeys("deny") Deny = "deny",
@@ -40,6 +26,7 @@ enum PolicyAction : string
     @serdeKeys("screen") Screen = "screen"
 }
 
+/// A named predicate sent to the screening model.
 struct PolicyQuestion
 {
     string type;
@@ -47,6 +34,7 @@ struct PolicyQuestion
     string instructions;
 }
 
+/// A configured rule and the compiled patterns used to match tool requests.
 struct PolicyRule
 {
 private:
@@ -59,6 +47,7 @@ public:
     @serdeOptional PolicyQuestion[] questions;
     @serdeOptional double threshold = 0.5;
 
+    /// Validates the rule and compiles its match patterns before evaluation.
     void compile()
     {
         enforce(threshold.isFinite && threshold >= 0 && threshold <= 1, "Invalid policy threshold");
@@ -84,6 +73,7 @@ public:
         }
     }
 
+    /// Matches every configured pattern against the tool or a string input field.
     bool matches(string tool, JSONValue input)
     {
         foreach (field, pattern; patterns)
@@ -105,11 +95,13 @@ public:
     }
 }
 
+/// The required top-level rules list in a workspace policy file.
 struct PolicyFile
 {
     PolicyRule[] rules;
 }
 
+/// Loads and validates every rule from the workspace's .devin/policy.yml.
 PolicyRule[] loadRules(string directory)
 {
     enum MAX_SIZE = 64 * 1024;
@@ -126,5 +118,3 @@ PolicyRule[] loadRules(string directory)
 
     return ret.rules;
 }
-
-

@@ -1,20 +1,24 @@
 module autonom.app;
 
+import autonom.agent.profile;
+import autonom.agent.store;
 import autonom.config;
-import autonom.profilestore;
-import autonom.policy.endpoint;
+import autonom.hooks;
+import autonom.policy.access;
 import autonom.server;
-import autonom.session.cleanup;
-import autonom.session.devin.bridge;
-import autonom.session.session;
+import autonom.interop.cleanup;
+import autonom.interop.devin.bridge;
+import autonom.interop.session;
 import serverino;
 
 mixin ServerinoMain!(
+    autonom.agent.profile,
+    autonom.agent.store,
     autonom.config,
-    autonom.profilestore,
-    autonom.policy.endpoint,
+    autonom.hooks,
+    autonom.policy.access,
     autonom.server,
-    autonom.session.cleanup,
-    autonom.session.devin.bridge,
-    autonom.session.session
+    autonom.interop.cleanup,
+    autonom.interop.devin.bridge,
+    autonom.interop.session
 );

@@ -14,8 +14,6 @@ import std.path : absolutePath, buildNormalizedPath, buildPath, dirName, expandT
 import std.process : environment;
 import std.stdio : File;
 
-public:
-
 @endpoint @route!"/api/config"
 void getConfig(Request request, Output output)
 {

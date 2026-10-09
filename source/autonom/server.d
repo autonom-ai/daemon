@@ -1,9 +1,9 @@
 module autonom.server;
 
 import autonom.config : Config;
-import autonom.profilestore : ProfileStore, ProfileConflict;
+import autonom.agent.store : ProfileConflict, ProfileStore;
 import autonom.policy : Policy;
-import autonom.session.devin : Devin;
+import autonom.interop.devin : Devin;
 import intuit.router.openrouter : OpenRouter;
 import serverino : Output, Request, ServerinoConfig, ServerinoProcess,
     endpoint, onServerInit, onWorkerException, onWorkerStart, route;

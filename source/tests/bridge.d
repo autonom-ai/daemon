@@ -1,6 +1,6 @@
 module tests.bridge;
 
-import autonom.session : Session;
+import autonom.interop : Session, SessionStatus;
 import tests.common : Fixture, waitUntil;
 import unit_threaded : Name, should, shouldThrow;
 
@@ -16,10 +16,27 @@ void installCli(Fixture fixture)
 {
     write(fixture.config.devinCommand, `#!/bin/sh
 case "$1" in
-    list) printf '[{"id":"session-1"},{"id":"session-2"}]'; echo noise >&2 ;;
+    list)
+        if [ -f "$(dirname "$0")/sessions.txt" ]; then
+            printf '['
+            separator=
+            while read id; do
+                printf '%s{"id":"%s"}' "$separator" "$id"
+                separator=,
+            done < "$(dirname "$0")/sessions.txt"
+            printf ']'
+        else
+            printf '[{"id":"session-1"},{"id":"session-2"}]'
+        fi
+        echo noise >&2 ;;
     slow) sleep 5 ;;
     rm) [ "$4" = missing ] && { echo "no session" >&2; exit 1; }
         printf '%s\n' "$@" > "$(dirname "$0")/removed.txt" ;;
+    --print)
+        for argument do prompt="$argument"; done
+        [ "$prompt" = fail ] && { echo broken >&2; exit 3; }
+        echo session-3 >> "$(dirname "$0")/sessions.txt"
+        printf '%s ' "$@" ;;
     *) for argument do prompt="$argument"; done
        [ "$prompt" = fail ] && { echo broken >&2; exit 3; }
        printf '%s ' "$@" ;;
@@ -81,10 +98,10 @@ unittest
 
     installCli(fixture);
     Session session = fixture.bridge.session("session-1");
-    session.start("work", fixture.root);
+    session.resume("work", fixture.root);
     waitUntil(delegate bool()
     {
-        return !session.isRunning();
+        return session.status() == SessionStatus.Offline;
     });
     string log = buildPath(fixture.bridge.logDir, "session-1.log");
     exists(log).should == true;
