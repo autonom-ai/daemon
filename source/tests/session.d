@@ -1,8 +1,9 @@
 module tests.session;
 
-import autonom.session : Session, SessionStatus;
-import autonom.session.cleanup : removeSessions;
-import autonom.profilestore : ProfileConflict;
+import autonom.agent : ProfileConflict;
+import autonom.interop : Session, SessionStatus;
+import autonom.interop.cleanup : removeSessions;
+import autonom.interop.devin : DevinSession;
 import tests.common : Fixture, waitUntil;
 import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should, shouldThrow;
@@ -28,6 +29,21 @@ for argument do prompt="$argument"; done
 [ "$prompt" = fail ] && exit 7
 trap 'exit 0' TERM
 while :; do sleep 0.05; done
+`);
+    setAttributes(fixture.config.devinCommand, octal!"700");
+}
+
+void installStartCli(Fixture fixture)
+{
+    write(fixture.config.devinCommand, `#!/bin/sh
+case "$1" in
+    list)
+        [ -f "$(dirname "$0")/created.txt" ] &&
+            printf '[{"id":"%s"}]' "$(cat "$(dirname "$0")/created.txt")" || printf '[]' ;;
+    --print)
+        echo fresh-session > "$(dirname "$0")/created.txt"
+        printf 'first reply' ;;
+esac
 `);
     setAttributes(fixture.config.devinCommand, octal!"700");
 }
@@ -74,19 +90,55 @@ unittest
             lock.close();
     }
 
-    session.isOnline().should == false;
+    session.status().should == SessionStatus.Offline;
     flock(lock.fileno, LOCK_EX).should == 0;
-    session.inspect().should == SessionStatus.Online;
+    session.status().should == SessionStatus.Online;
     session.stop().shouldThrow!Exception();
     fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflict();
     lock.close();
     waitUntil(delegate bool()
     {
-        return session.inspect() == SessionStatus.Offline;
+        return session.status() == SessionStatus.Offline;
     });
 }
 
-@Name("Session passes a supplied model and literal prompt arguments")
+@Name("Session start creates a session through the bridge")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    installStartCli(fixture);
+    Session session = DevinSession.start(
+        fixture.bridge,
+        "create work",
+        fixture.root,
+        "SWE-2"
+    );
+    session.id.should == "fresh-session";
+    session.status().should == SessionStatus.Offline;
+    readText(buildPath(fixture.bridge.logDir, "fresh-session.log")).should == "first reply";
+}
+
+@Name("Session start requires exactly one new session")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    write(fixture.config.devinCommand, `#!/bin/sh
+case "$1" in
+    list) printf '[]' ;;
+    --print) printf 'no session' ;;
+esac
+`);
+    setAttributes(fixture.config.devinCommand, octal!"700");
+    DevinSession.start(fixture.bridge, "create work", fixture.root).shouldThrow!Exception();
+}
+
+@Name("Session resumes with a supplied model and literal prompt arguments")
 unittest
 {
     Fixture fixture = Fixture.create();
@@ -99,7 +151,7 @@ unittest
         session.stop();
 
     string prompt = "--model dangerous; $(touch forbidden)";
-    session.start(prompt, fixture.root, "SWE-2");
+    session.resume(prompt, fixture.root, "SWE-2");
     waitUntil(delegate bool()
     {
         return exists(buildPath(fixture.root, "arguments.txt"));
@@ -116,7 +168,7 @@ unittest
     exists(buildPath(fixture.root, "forbidden")).should == false;
 }
 
-@Name("Session rejects duplicate starts and active profile replacement")
+@Name("Session rejects duplicate resumes and active profile replacement")
 unittest
 {
     Fixture fixture = Fixture.create();
@@ -128,12 +180,12 @@ unittest
     scope(exit)
         session.stop();
 
-    session.start("work", fixture.root);
-    session.start("work", fixture.root).shouldThrow!Exception();
+    session.resume("work", fixture.root);
+    session.resume("work", fixture.root).shouldThrow!Exception();
     fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflict();
 }
 
-@Name("Session stop reaps owned processes and permits restart")
+@Name("Session stop reaps owned processes and permits resume")
 unittest
 {
     Fixture fixture = Fixture.create();
@@ -145,11 +197,10 @@ unittest
     scope(exit)
         session.stop();
 
-    session.start("work", fixture.root);
+    session.resume("work", fixture.root);
     session.stop();
-    session.isRunning().should == false;
-    session.inspect().should == SessionStatus.Offline;
-    session.start("again", fixture.root);
+    session.status().should == SessionStatus.Offline;
+    session.resume("again", fixture.root);
     session.isRunning().should == true;
 }
 
@@ -178,7 +229,7 @@ while :; do sleep 0.05; done
         environment.remove("WINDSURF_IDE_TYPE");
     }
 
-    session.start("work", fixture.root);
+    session.resume("work", fixture.root);
     waitUntil(delegate bool()
     {
         return exists(buildPath(fixture.root, "environ.txt"));
@@ -201,11 +252,10 @@ unittest
     scope(exit)
         session.stop();
 
-    session.start("fail", fixture.root);
+    session.resume("fail", fixture.root);
     waitUntil(delegate bool()
     {
-        return !session.isRunning();
+        return session.status() == SessionStatus.Failed;
     });
-    session.inspect().should == SessionStatus.Failed;
     session.exitStatus.get.should == 7;
 }

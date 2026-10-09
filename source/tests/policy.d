@@ -1,7 +1,7 @@
 module tests.policy;
 
 import autonom.policy : Policy;
-import autonom.policy.endpoint : checkPolicy;
+import autonom.api.policy : checkPolicy;
 import tests.common : Fixture;
 import intuit.router.openrouter : OpenRouter;
 import serverino : endpoint, route;
@@ -25,7 +25,7 @@ public:
     Duration timeout;
     Duration connectionTimeout;
     JSONValue payload;
-    string reply = `{"answers":{"harmful":{"type":"noul","noul":0}}}`;
+    string reply = `{"answers":{"inspect":{"type":"noul","noul":0}}}`;
     bool failed;
 
     this()
@@ -135,23 +135,31 @@ unittest
 
     installPolicy(fixture, `rules:
   - action: screen
-    question: '  Would this destroy files?  '
-    context: Only inspect repository status
+    questions:
+      - type: predicate
+        name: destructive
+        instructions: '  Would this destroy files?  '
+      - type: predicate
+        name: exfiltration
+        instructions: Would this send private data outside?
     threshold: 0.75
     reason: Destructive command
 `);
     FakeRouter router = new FakeRouter();
     Policy policy = new Policy(router, "test-model");
     JSONValue input = parseJSON(`{"command":"git status"}`);
-    router.reply = `{"answers":{"harmful":{"type":"noul","noul":0.74}}}`;
+    router.reply = `{"answers":{"destructive":{"type":"noul","noul":0.74},`~
+        `"exfiltration":{"type":"noul","noul":0.2}}}`;
     policy.check(fixture.root, "exec", input).denied.should == false;
     router.payload["model"].str.should == "test-model";
     router.payload["state"]["tool"].str.should == "exec";
     router.payload["state"]["input"].should == input;
-    router.payload["state"]["context"].str.should == "Only inspect repository status";
-    router.payload["questions"]["harmful"]["type"].str.should == "noul";
-    router.payload["questions"]["harmful"]["instructions"].str.should == "Would this destroy files?";
-    router.reply = `{"answers":{"harmful":{"type":"noul","noul":0.75}}}`;
+    router.payload["questions"]["destructive"]["type"].str.should == "noul";
+    router.payload["questions"]["destructive"]["instructions"].str.should == "Would this destroy files?";
+    router.payload["questions"]["exfiltration"]["instructions"].str.should ==
+        "Would this send private data outside?";
+    router.reply = `{"answers":{"destructive":{"type":"noul","noul":0.2},`~
+        `"exfiltration":{"type":"noul","noul":0.75}}}`;
     policy.check(fixture.root, "exec", input).denied.should == true;
     policy.check(fixture.root, "exec", input).reason.should == "Destructive command";
     router.calls.should == 3;
@@ -160,14 +168,15 @@ unittest
     router.connectionTimeout.should == 2.seconds;
 }
 
-@Name("Policy drops private fields recursively and redacts credentials without mutating input")
+@Name("Policy sends screening input unchanged without mutating it")
 unittest
 {
     Fixture fixture = Fixture.create();
     scope(exit)
         fixture.close();
 
-    installPolicy(fixture, "rules:\n  - action: screen\n    question: Is it harmful?\n");
+    installPolicy(fixture,
+        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
     FakeRouter router = new FakeRouter();
     Policy policy = new Policy(router, "test-model");
     JSONValue input = parseJSON(`{
@@ -184,37 +193,27 @@ unittest
     string original = input.toString();
     policy.check(fixture.root, "exec", input).denied.should == false;
     input.toString().should == original;
-    JSONValue screened = router.payload["state"]["input"];
-    screened["command"].str.should ==
-        "OPENROUTER_API_KEY=[REDACTED] curl -H 'Authorization: Bearer [REDACTED]' --token [REDACTED] "~
-        "[REDACTED] [REDACTED]";
-    screened["file_path"].str.should == "/tmp/note.md";
-    ("content" in screened.object).should == null;
-    ("session_id" in screened.object).should == null;
-    ("prompt_id" in screened.object).should == null;
-    ("authorization" in screened.object).should == null;
-    ("API_KEY" in screened.object).should == null;
-    screened["nested"][0].object.length.should == 1;
-    screened["nested"][0]["path"].str.should == "/tmp/other.md";
+    router.payload["state"]["input"].should == input;
 }
 
-@Name("Policy exposes explicitly selected content fields but never credentials")
+@Name("Policy passes all tool input fields to screening")
 unittest
 {
     Fixture fixture = Fixture.create();
     scope(exit)
         fixture.close();
 
-    installPolicy(fixture, "rules:\n  - action: screen\n    question: Is it harmful?\n    expose: [TeXt]\n");
+    installPolicy(fixture,
+        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
     FakeRouter router = new FakeRouter();
     Policy policy = new Policy(router, "test-model");
     policy.check(fixture.root, "post_message", parseJSON(`{
         "text":"message text","patch":"private patch","nested":{"text":"inner","token":"private token"}
     }`));
     router.payload["state"]["input"]["text"].str.should == "message text";
+    router.payload["state"]["input"]["patch"].str.should == "private patch";
     router.payload["state"]["input"]["nested"]["text"].str.should == "inner";
-    ("patch" in router.payload["state"]["input"].object).should == null;
-    ("token" in router.payload["state"]["input"]["nested"].object).should == null;
+    router.payload["state"]["input"]["nested"]["token"].str.should == "private token";
 }
 
 @Name("Policy clears shared router context after successful failed and local requests")
@@ -224,7 +223,8 @@ unittest
     scope(exit)
         fixture.close();
 
-    installPolicy(fixture, "rules:\n  - action: screen\n    question: Is it harmful?\n");
+    installPolicy(fixture,
+        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
     FakeRouter router = new FakeRouter();
     Policy policy = new Policy(router, "test-model");
     router.context.user("previous session");
@@ -249,20 +249,21 @@ unittest
     scope(exit)
         fixture.close();
 
-    installPolicy(fixture, "rules:\n  - action: screen\n    question: Is it harmful?\n");
+    installPolicy(fixture,
+        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
     FakeRouter router = new FakeRouter();
     Policy policy = new Policy(router, "test-model");
     foreach (reply; [
         `{}`,
         `{"answers":{}}`,
         `{"answers":{"other":{"type":"noul","noul":0}}}`,
-        `{"answers":{"harmful":{"type":"noul","noul":-0.1}}}`,
-        `{"answers":{"harmful":{"type":"noul","noul":1.1}}}`,
-        `{"answers":{"harmful":{"type":"noul","noul":"NaN"}}}`,
-        `{"answers":{"harmful":{"type":"noul","noul":null}}}`,
-        `{"answers":{"harmful":{"type":"noul"}}}`,
-        `{"answers":{"harmful":{"type":"choice","choice":"allow"}}}`,
-        `{"answers":{"harmful":{"type":"refusal"}}}`,
+        `{"answers":{"inspect":{"type":"noul","noul":-0.1}}}`,
+        `{"answers":{"inspect":{"type":"noul","noul":1.1}}}`,
+        `{"answers":{"inspect":{"type":"noul","noul":"NaN"}}}`,
+        `{"answers":{"inspect":{"type":"noul","noul":null}}}`,
+        `{"answers":{"inspect":{"type":"noul"}}}`,
+        `{"answers":{"inspect":{"type":"choice","choice":"allow"}}}`,
+        `{"answers":{"inspect":{"type":"refusal"}}}`,
         `{"error":{"message":"failed"}}`
     ])
     {
@@ -291,20 +292,25 @@ unittest
         "rules:\n  - reason: missing action\n",
         "rules:\n  - action: unknown\n",
         "rules:\n  - action: screen\n",
-        "rules:\n  - action: screen\n    question: ' '\n",
-        "rules:\n  - action: screen\n    question: 42\n",
+        "rules:\n  - action: screen\n    questions: {}\n",
+        "rules:\n  - action: screen\n    questions: invalid\n",
+        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: ' '}]\n",
+        "rules:\n  - action: screen\n    questions: [42]\n",
+        "rules:\n  - action: screen\n    questions: [{type: choice, name: inspect, instructions: 'Pick one'}]\n",
         "rules:\n  - action: deny\n    match: {tool: '['}\n",
         "rules:\n  - action: deny\n    match: []\n",
         "rules:\n  - action: deny\n    match: {tool: 42}\n",
         "rules:\n  - action: allow\n  - action: screen\n",
         "rules:\n  - action: allow\n    unexpected: true\n",
-        "rules:\n  - action: screen\n    question: Bad?\n    threshold: -0.1\n",
-        "rules:\n  - action: screen\n    question: Bad?\n    threshold: 1.1\n",
-        "rules:\n  - action: screen\n    question: Bad?\n    threshold: .nan\n",
-        "rules:\n  - action: screen\n    question: Bad?\n    expose: text\n",
-        "rules:\n  - action: screen\n    question: Bad?\n    expose: [token]\n",
-        "rules:\n  - action: screen\n    question: Bad?\n    expose: [API_KEY]\n",
-        "rules:\n  - action: screen\n    question: Bad?\n    expose: [session_id]\n",
+        "rules:\n  - action: screen\n    questions:\n      - {type: predicate, name: inspect, "~
+            "instructions: 'Allowed?'}\n    threshold: -0.1\n",
+        "rules:\n  - action: screen\n    questions:\n      - {type: predicate, name: inspect, "~
+            "instructions: 'Allowed?'}\n    threshold: 1.1\n",
+        "rules:\n  - action: screen\n    questions:\n      - {type: predicate, name: inspect, "~
+            "instructions: 'Allowed?'}\n    threshold: .nan\n",
+        "rules:\n  - action: screen\n    questions:\n      - {type: predicate, name: inspect, "~
+            "instructions: 'Allowed?'}\n    expose: [text]\n",
+        "rules:\n  - action: screen\n    question: 'Legacy question field'\n",
         "rules: []\npermissions: []\n"
     ])
     {

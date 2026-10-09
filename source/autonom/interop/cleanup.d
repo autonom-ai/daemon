@@ -1,12 +1,10 @@
-module autonom.session.cleanup;
+module autonom.interop.cleanup;
 
 import autonom.server : profileStore, readBody, respond;
 import serverino : Output, Request, endpoint, route;
 
 import std.exception : enforce;
 import std.json : JSONType, JSONValue;
-
-public:
 
 @endpoint @route!"/api/sessions/remove"
 void removeSessions(Request request, Output output)

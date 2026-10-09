@@ -1,8 +1,8 @@
 module tests.common;
 
+import autonom.agent : ProfileStore;
 import autonom.config : Config;
-import autonom.profilestore : ProfileStore;
-import autonom.session.devin : Devin;
+import autonom.interop.devin : Devin;
 
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;

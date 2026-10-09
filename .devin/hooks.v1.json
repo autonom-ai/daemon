@@ -1,0 +1,106 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command":
+            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/pre-tool-use\"",
+          "timeout": 6
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command":
+            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/post-tool-use\"",
+          "timeout": 6
+        }
+      ]
+    }
+  ],
+  "PermissionRequest": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command":
+            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/permission-request\"",
+          "timeout": 6
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command":
+            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/user-prompt-submit\"",
+          "timeout": 6
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command":
+            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/stop\"",
+          "timeout": 6
+        }
+      ]
+    }
+  ],
+  "PostCompaction": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command":
+            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/post-compaction\"",
+          "timeout": 6
+        }
+      ]
+    }
+  ],
+  "SessionStart": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command":
+            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-start\"",
+          "timeout": 6
+        }
+      ]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command":
+            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-end\"",
+          "timeout": 6
+        }
+      ]
+    }
+  ]
+}

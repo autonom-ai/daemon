@@ -52,21 +52,28 @@ public:
         string reply = post("/api/print", launch("Reply only AUTONOM_READY. Do not use tools or modify files."))
             ["reply"].str;
         eval.check("print follows the reply instruction", reply.canFind("AUTONOM_READY"), reply.strip);
-        string[] created;
+        string[] printed;
         foreach (id; list())
         {
             if (!previous.canFind(id))
-                created ~= id;
+                printed ~= id;
         }
+        eval.check("print creates exactly one session", printed.length == 1, printed.length.to!string);
 
-        if (!eval.check("print creates exactly one session", created.length == 1, created.length.to!string))
+        JSONValue started = post("/api/sessions", launch(
+            "Reply only AUTONOM_CREATED. Do not use tools or modify files."
+        ), 201);
+        string id = started["id"].type == JSONType.string ? started["id"].str : null;
+        if (!eval.check("start creates a session", id.length > 0, started.toString()))
             return;
 
-        string session = "/api/sessions/"~created[0];
+        string session = "/api/sessions/"~id;
+        eval.check("started session is offline", get(session)["status"].str == "offline", get(session).toString());
+        eval.check("started reply is logged", get(session~"/log")["log"].str.canFind("AUTONOM_CREATED"));
         post("/api/profiles", JSONValue(["name": JSONValue("eval")]), 201);
-        post("/api/profiles/eval/session", JSONValue(["id": JSONValue(created[0])]));
+        post("/api/profiles/eval/session", JSONValue(["id": JSONValue(id)]));
         registered = true;
-        post(session~"/start", launch(
+        post(session~"/resume", launch(
             "Do not use tools. Begin with AUTONOM_RESUMED and explain merge sort in about 1000 words."
         ));
         if (!eval.check("resumed session comes online", waitFor(delegate bool()
@@ -79,7 +86,7 @@ public:
         eval.check("active session rejects profile replacement", true);
         post(session~"/stop");
         eval.check("stop releases process and lock", get(session)["status"].str == "offline");
-        post(session~"/start", launch("Reply only AUTONOM_DONE. Do not use tools or modify files."));
+        post(session~"/resume", launch("Reply only AUTONOM_DONE. Do not use tools or modify files."));
         bool finished = waitFor(delegate bool()
         {
             return get(session)["exitStatus"].type != JSONType.null_;

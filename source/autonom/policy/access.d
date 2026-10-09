@@ -1,10 +1,9 @@
+/// Workspace policy evaluation with optional model screening.
 module autonom.policy.access;
 
-import autonom.policy.format : PolicyAction, PolicyResult, PolicyRule, loadRules;
-import autonom.server : policy, readBody, respond;
+import autonom.policy.rule : PolicyAction, PolicyRule, loadRules;
 import intuit.response.decision : Decision, DecisionQuestion, DecisionType;
 import intuit.router : IRouter, decisions;
-import serverino : Output, Request, endpoint, route;
 
 import core.time : MonoTime, seconds;
 import std.algorithm.searching : canFind;
@@ -12,6 +11,25 @@ import std.exception : enforce;
 import std.file : isDir;
 import std.json : JSONType, JSONValue;
 
+/// The outcome of a successfully evaluated workspace policy.
+struct PolicyResult
+{
+    /// Whether the tool request is denied.
+    bool denied;
+    /// Explanation of a denial, or null when allowed.
+    string reason;
+
+    /// Serializes the result, representing an absent reason as JSON null.
+    JSONValue toJSON() const
+    {
+        JSONValue ret = JSONValue.emptyObject;
+        ret["denied"] = JSONValue(denied);
+        ret["reason"] = reason.length ? JSONValue(reason) : JSONValue(null);
+        return ret;
+    }
+}
+
+/// Evaluates workspace rules using one shared router for screening.
 class Policy
 {
 private:
@@ -52,8 +70,10 @@ private:
     }
 
 public:
+    /// Model used for screen rules.
     const string model;
 
+    /// Uses the supplied router and model, setting a two-second connection timeout.
     this(IRouter router, string model)
     {
         enforce(router !is null && model.length && !model.canFind('\0'), "A policy router and model are required");
@@ -62,6 +82,15 @@ public:
         router.connectTimeout(2.seconds);
     }
 
+    /**
+     * Reloads the workspace policy and evaluates its first matching rule.
+     *
+     * Unmatched requests are denied. Screening receives the input unchanged.
+     * Router context is cleared before and after every check, including failures;
+     * callers must serialize access to the shared router.
+     *
+     * Throws: Exception when the request or policy is invalid, or screening fails.
+     */
     PolicyResult check(string directory, string tool, JSONValue input = JSONValue.emptyObject)
     {
         router.context.clear();
@@ -92,30 +121,4 @@ public:
 
         return PolicyResult(true, "No policy rule matched");
     }
-}
-
-@endpoint @route!"/api/policy/check"
-void checkPolicy(Request request, Output output)
-{
-    if (request.method != Request.Method.Post)
-    {
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
-        return;
-    }
-
-    JSONValue data = readBody(request);
-    enforce("directory" in data.object && "tool" in data.object, "Expected directory and tool");
-    enforce(data["directory"].type == JSONType.string && data["tool"].type == JSONType.string,
-        "Directory and tool must be strings");
-    foreach (name; data.object.keys)
-        enforce(name == "directory" || name == "tool" || name == "input", "Unexpected policy request field");
-
-    if ("input" !in data.object)
-        data["input"] = JSONValue.emptyObject;
-
-    enforce(data["input"].type == JSONType.object, "Tool input must be an object");
-    try
-        respond(output, policy.check(data["directory"].str, data["tool"].str, data["input"]).toJSON());
-    catch (Exception)
-        respond(output, PolicyResult(true, "Policy check failed").toJSON(), 503);
 }
