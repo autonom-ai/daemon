@@ -1,19 +1,16 @@
-module autonom.policy.policy;
+module autonom.policy.access;
 
-import autonom.policy.document : PolicyDocument;
-import autonom.policy.input : scrub;
-import autonom.policy.result : PolicyResult;
-import autonom.policy.rule : PolicyAction, PolicyRule;
+import autonom.policy.format : PolicyAction, PolicyResult, PolicyRule, loadRules;
+import autonom.server : policy, readBody, respond;
 import intuit.response.decision : Decision, DecisionQuestion, DecisionType;
 import intuit.router : IRouter, decisions;
+import serverino : Output, Request, endpoint, route;
 
 import core.time : MonoTime, seconds;
 import std.algorithm.searching : canFind;
 import std.exception : enforce;
 import std.file : isDir;
 import std.json : JSONType, JSONValue;
-
-public:
 
 class Policy
 {
@@ -32,16 +29,26 @@ private:
         router.operationTimeout(deadline - MonoTime.currTime);
         JSONValue state = JSONValue.emptyObject;
         state["tool"] = JSONValue(tool);
-        state["input"] = scrub(input, rule.expose);
-        if (rule.context.length)
-            state["context"] = JSONValue(rule.context);
+        state["input"] = input;
+        DecisionQuestion[] questions;
+        foreach (configured; rule.questions)
+        {
+            DecisionQuestion question;
+            question.type = DecisionType.Predicate;
+            question.name = configured.name;
+            question.instructions = configured.instructions;
+            questions ~= question;
+        }
 
-        DecisionQuestion question;
-        question.name = "harmful";
-        question.instructions = rule.question;
-        Decision decision = decisions(router, state, [question]);
-        enforce(decision.answer.type == DecisionType.Predicate, "Policy model returned no decision");
-        return decision.answer.probability >= rule.threshold;
+        Decision decision = decisions(router, state, questions);
+        foreach (answer; decision.answers)
+        {
+            enforce(answer.type == DecisionType.Predicate, "Policy model returned no predicate decision");
+            if (answer.probability >= rule.threshold)
+                return true;
+        }
+
+        return false;
     }
 
 public:
@@ -64,8 +71,7 @@ public:
         enforce(directory.length && isDir(directory), "An existing working directory is required");
         enforce(tool.length && !tool.canFind('\0'), "A tool name is required");
         enforce(input.type == JSONType.object, "Tool input must be an object");
-        PolicyDocument document = PolicyDocument.load(directory);
-        foreach (rule; document.rules)
+        foreach (rule; loadRules(directory))
         {
             if (!rule.matches(tool, input))
                 continue;
@@ -86,4 +92,30 @@ public:
 
         return PolicyResult(true, "No policy rule matched");
     }
+}
+
+@endpoint @route!"/api/policy/check"
+void checkPolicy(Request request, Output output)
+{
+    if (request.method != Request.Method.Post)
+    {
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+        return;
+    }
+
+    JSONValue data = readBody(request);
+    enforce("directory" in data.object && "tool" in data.object, "Expected directory and tool");
+    enforce(data["directory"].type == JSONType.string && data["tool"].type == JSONType.string,
+        "Directory and tool must be strings");
+    foreach (name; data.object.keys)
+        enforce(name == "directory" || name == "tool" || name == "input", "Unexpected policy request field");
+
+    if ("input" !in data.object)
+        data["input"] = JSONValue.emptyObject;
+
+    enforce(data["input"].type == JSONType.object, "Tool input must be an object");
+    try
+        respond(output, policy.check(data["directory"].str, data["tool"].str, data["input"]).toJSON());
+    catch (Exception)
+        respond(output, PolicyResult(true, "Policy check failed").toJSON(), 503);
 }
