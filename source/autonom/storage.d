@@ -1,11 +1,12 @@
 module autonom.storage;
 
-import core.sys.posix.fcntl : open, O_CLOEXEC, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK, O_RDWR;
+import core.sys.posix.fcntl : open, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_EXCL, O_NOFOLLOW, O_NONBLOCK, O_RDONLY, O_RDWR;
 import core.sys.posix.sys.stat : fstat, stat_t, S_IFMT, S_IFREG;
 import core.sys.posix.unistd : close, fsync;
 import std.conv : octal;
 import std.exception : enforce, errnoEnforce;
-import std.file : exists, isSymlink, remove, rename;
+import std.file : exists, FileException, isSymlink, remove, rename;
+import std.json : JSONValue, parseJSON;
 import std.path : dirName;
 import std.stdio : File;
 import std.string : toStringz;
@@ -29,8 +30,47 @@ File openFile(string path, int flags)
     return ret;
 }
 
+string readText(string path, size_t limit = 64 * 1024)
+{
+    File file = openFile(path, O_RDONLY);
+    scope(exit)
+        file.close();
+
+    enforce(file.size <= limit, "Storage file is too large");
+    string ret;
+    foreach (chunk; file.byChunk(4096))
+    {
+        enforce(chunk.length <= limit - ret.length, "Storage file is too large");
+        ret ~= cast(char[])chunk;
+    }
+
+    return ret;
+}
+
+JSONValue readJSON(string path, size_t limit = 64 * 1024)
+{
+    string content = readText(path, limit);
+    try
+        return parseJSON(content);
+    catch (Exception error)
+        throw new FileException(path, error.msg);
+}
+
 void atomicWrite(string path, string content)
 {
+    bool committed;
+    atomicWrite(path, content, committed);
+}
+
+void atomicWrite(string path, string content, out bool committed)
+{
+    committed = false;
+    enforce(!(exists(path) && isSymlink(path)), "Storage file must not be a symlink");
+    int directory = open(dirName(path).toStringz, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    errnoEnforce(directory >= 0, "Could not open storage directory");
+    scope(exit)
+        close(directory);
+
     string temporary = path~"."~randomUUID().toString()~".tmp";
     File file = openFile(temporary, O_RDWR | O_CREAT | O_EXCL);
     scope(exit)
@@ -44,4 +84,6 @@ void atomicWrite(string path, string content)
     file.flush();
     errnoEnforce(fsync(file.fileno) == 0, "Could not flush storage file");
     rename(temporary, path);
+    committed = true;
+    errnoEnforce(fsync(directory) == 0, "Could not flush storage directory");
 }

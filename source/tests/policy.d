@@ -1,7 +1,7 @@
 module tests.policy;
 
 import autonom.policy : Policy;
-import autonom.api.policy : checkPolicy;
+import autonom.policy.access : checkPolicy;
 import tests.common : Fixture;
 import intuit.router.openrouter : OpenRouter;
 import serverino : endpoint, route;

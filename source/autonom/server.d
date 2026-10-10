@@ -1,22 +1,24 @@
 module autonom.server;
 
+import autonom.agent.store : ProfileStore;
 import autonom.config : Config;
-import autonom.agent.store : ProfileConflict, ProfileStore;
+import autonom.exception : BackendFailure, Conflict, InvalidInput;
 import autonom.policy : Policy;
 import autonom.interop.devin : Devin;
 import intuit.router.openrouter : OpenRouter;
 import serverino : Output, Request, ServerinoConfig, ServerinoProcess,
-    endpoint, onServerInit, onWorkerException, onWorkerStart, route;
+    endpoint, onServerInit, onWorkerException, onWorkerStart, onWorkerStop, priority, route;
 
 import core.sys.posix.signal : kill, SIGTERM;
 import core.thread : Thread;
 import core.time : Duration, msecs;
-import std.algorithm : startsWith;
+import std.algorithm : canFind, endsWith, startsWith;
+import std.array : join;
 import std.conv : to;
-import std.exception : ErrnoException, enforce;
-import std.file : FileException;
+import std.exception : enforce;
 import std.json : JSONValue, JSONType, parseJSON;
 import std.process : environment, thisProcessID;
+import std.string : indexOf, toUpper;
 
 private:
 
@@ -37,24 +39,61 @@ void respond(Output output, JSONValue body, ushort status = 200)
     output ~= body.toString();
 }
 
+bool acceptMethod(Request request, Output output, Request.Method[] methods)
+{
+    if (methods.canFind(request.method))
+        return true;
+
+    string[] names;
+    foreach (method; methods)
+        names ~= method.to!string.toUpper;
+
+    output.addHeader("allow", names.join(", "));
+    respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    return false;
+}
+
+string routeParameter(string PATTERN)(const Request request)
+{
+    enum START = PATTERN.indexOf('<');
+    enum END = PATTERN.indexOf('>');
+    static assert(START >= 0 && END > START && PATTERN[END + 1..$].indexOf('<') < 0);
+    enum PREFIX = PATTERN[0..START];
+    enum SUFFIX = PATTERN[END + 1..$];
+    if (!request.path.startsWith(PREFIX) || !request.path.endsWith(SUFFIX) ||
+        request.path.length <= PREFIX.length + SUFFIX.length)
+        return null;
+
+    string ret = request.path[PREFIX.length..$-SUFFIX.length];
+    return ret.canFind('/') ? null : ret;
+}
+
+bool matchesPath(string PATTERN)(const Request request)
+    => routeParameter!PATTERN(request).length != 0;
+
 JSONValue readBody(Request request)
 {
     enum MIME = "application/json";
     enum MAX_BODY = 64 * 1024;
-    enforce(request.body.contentType == MIME || request.body.contentType.startsWith(MIME~";"),
+    enforce!InvalidInput(request.body.contentType == MIME || request.body.contentType.startsWith(MIME~";"),
         "Expected application/json");
-    enforce(request.body.data.length <= MAX_BODY, "Request body is too large");
-    JSONValue ret = parseJSON(request.body.data);
-    enforce(ret.type == JSONType.object, "Expected a JSON object");
+    enforce!InvalidInput(request.body.data.length <= MAX_BODY, "Request body is too large");
+    JSONValue ret;
+    try
+        ret = parseJSON(request.body.data);
+    catch (Exception)
+        throw new InvalidInput("Invalid JSON body");
+
+    enforce!InvalidInput(ret.type == JSONType.object, "Expected a JSON object");
     return ret;
 }
 
 JSONValue readLaunch(Request request)
 {
     JSONValue ret = readBody(request);
-    enforce("prompt" in ret.object && "directory" in ret.object, "Expected prompt and directory");
+    enforce!InvalidInput("prompt" in ret.object && "directory" in ret.object, "Expected prompt and directory");
     foreach (name, value; ret.object)
-        enforce((name == "prompt" || name == "directory" || name == "model") && value.type == JSONType.string,
+        enforce!InvalidInput((name == "prompt" || name == "directory" || name == "model") && value.type == JSONType.string,
             "Expected only string prompt, directory, and optional model fields");
 
     if ("model" !in ret.object)
@@ -66,8 +105,8 @@ JSONValue readLaunch(Request request)
 string readField(string FIELD)(Request request)
 {
     JSONValue data = readBody(request);
-    enforce(data.object.length == 1 && FIELD in data.object, "Expected only the "~FIELD~" field");
-    enforce(data[FIELD].type == JSONType.string, FIELD~" must be a string");
+    enforce!InvalidInput(data.object.length == 1 && FIELD in data.object, "Expected only the "~FIELD~" field");
+    enforce!InvalidInput(data[FIELD].type == JSONType.string, FIELD~" must be a string");
     return data[FIELD].str;
 }
 
@@ -95,9 +134,9 @@ void stop(Request request, Output output)
         return;
     }
 
-    enforce(readBody(request).object.length == 0, "Expected an empty JSON object");
+    enforce!InvalidInput(readBody(request).object.length == 0, "Expected an empty JSON object");
     if (!stopping)
-        profileStore.stopSessions();
+        bridge.stopSessions();
 
     respond(output, JSONValue(["status": JSONValue("stopping")]), 202);
     if (stopping)
@@ -127,14 +166,28 @@ void stop(Request request, Output output)
     profileStore = new ProfileStore(configuration, bridge);
     policy = new Policy(new OpenRouter(environment.get("OPENROUTER_API_KEY"), configuration.policyUrl),
         configuration.policyModel);
+    refresh(Request.init);
+}
+
+@endpoint @priority(100)
+void refresh(Request request)
+{
+    foreach (id; bridge.collect())
+        profileStore.unlinkSession(id);
+}
+
+@onWorkerStop void closeWorker()
+{
+    if (bridge !is null)
+        bridge.close();
 }
 
 @onWorkerException bool handleException(Request request, Output output, Exception error)
 {
-    ushort status = cast(ErrnoException)error || cast(FileException)error ? 500 :
-        cast(ProfileConflict)error ? 409 : 400;
+    ushort status = cast(InvalidInput)error ? 400 : cast(Conflict)error ? 409 :
+        cast(BackendFailure)error ? 503 : 500;
     respond(output, JSONValue([
-        "error": JSONValue(status == 500 ? "Could not access storage" : error.msg)
+        "error": JSONValue(status == 500 ? "Internal server error" : error.msg)
     ]), status);
     return true;
 }

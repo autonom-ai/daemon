@@ -12,23 +12,26 @@
 
 # Runtime
 
-- `autonom.app` is the executable entrypoint; `autonom.server` owns the server setup and shared runtime state.
-- `autonom.agent` owns profiles and their endpoints; `autonom.interop` owns session contracts and the Devin CLI bridge.
-- One persistent Serverino worker owns live session processes; do not enable idle/lifetime worker recycling.
+- `autonom.app` is the executable entrypoint; `autonom.server` assembles the worker-owned runtime and Serverino lifecycle.
+- `autonom.agent` owns profiles and durable profile-to-session assignments. `autonom.interop` owns canonical backend session handles, process executions, and CLI integration.
+- One persistent Serverino worker owns mutable registries and profile state. Execution monitor threads own only their child process and execution record; do not add Serverino workers or worker recycling.
 - `AUTONOM_CONFIG` selects the YAML configuration and `AUTONOM_PORT` overrides the default loopback port 8080.
 - Devin Desktop exports `ACP_BACKEND=windsurf`; unset it for direct CLI checks. The bridge scrubs host prefixes itself.
-- Sessions must own their IDs: Serverino request strings can reference reused buffers and cannot be retained as cache keys.
-- `POST /api/sessions` starts a session through a print and returns its handle; the print reply lands in the session log.
-- `POST /api/sessions/<id>/resume` continues a session with a prompt; the CLI only runs sessions it already knows.
-- `POST /api/sessions/remove` accepts `{"ids":[...]}`; validates the entire batch and reports `removed` and `failed` IDs.
+- Sessions own their IDs: Serverino request strings can reference reused buffers and cannot be retained as cache keys.
+- `POST /api/sessions` and `POST /api/print` return HTTP 202 with an execution ID. `GET /api/executions/<id>` exposes `running|stopping|succeeded|failed|stopped|interrupted`, exit status, error, session ID, and a print reply on success.
+- `POST /api/executions/<id>/stop` requests cancellation without waiting for the CLI process.
+- `POST /api/sessions/<id>/resume` continues a session with a prompt and returns its execution ID; the execution exposes a failed status if the backend rejects the session.
+- `DELETE /api/sessions/<id>` returns one removal-execution record. `POST /api/sessions/remove` validates the whole batch and returns `{"ids":[...],"executions":[{"id":"...","sessionId":"..."}],"failed":[...]}`. Removal executes asynchronously; poll each execution and trust only `status: succeeded`.
 - `.devin/hooks.v1.json` forwards all eight Devin hook events to `POST /api/hooks/<kebab-case-event>` using curl.
 - Hook endpoints validate `hook_event_name` and return `{}` without granting permissions or blocking actions.
 - Hook forwarding uses loopback and `AUTONOM_PORT` (default 8080), disables proxies, and times out after five seconds.
-- Synchronous CLI calls occupy the sole request worker; hooks during print/session creation may time out.
+- Start, print, resume, and removal commands run as bounded, persisted executions outside the Serverino request worker; hooks can be served while those processes run.
+- Backend session listing remains synchronous and is limited to two seconds; model-screening policy checks remain synchronous and are limited to eight seconds.
 
 # Profiles
 
-- Profiles live under `dataDir/agents`: `sessions.json` records permanent session links, and each profile directory holds its own `session.json` binding.
+- Profiles live under `dataDir/agents`. `state.json` is the authoritative versioned snapshot of permanent session-to-profile assignments and current profile bindings.
+- Legacy `sessions.json` and per-profile `session.json` files are imported once when no snapshot exists; they are retained and never rewritten. Each subsequent change atomically replaces the single snapshot.
 - Store state is held in memory and flushed atomically on change; there are no lock files because the single worker owns every mutation.
 - A profile is locked while its bound session is running or online; rebinding it to another session requires that session to be stopped.
 - Sessions keep their profile permanently, and removing a session clears the profile binding; lookups work by name or by session.

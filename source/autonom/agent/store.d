@@ -2,28 +2,31 @@ module autonom.agent.store;
 
 import autonom.agent.profile : Profile;
 import autonom.config : Config;
+import autonom.exception : Conflict, InvalidInput;
 import autonom.interop.bridge : Bridge;
 import autonom.interop.session : Session;
-import autonom.server : profileStore, readField, respond;
-import autonom.storage : atomicWrite, openFile;
+import autonom.server : acceptMethod, matchesPath, profileStore, readField, respond, routeParameter;
+import autonom.storage : atomicWrite, readJSON;
 import serverino : Output, Request, endpoint, route;
 
-import core.sys.posix.fcntl : O_RDONLY;
-import std.algorithm : sort, startsWith;
-import std.array : join, split;
+import std.algorithm : sort;
 import std.ascii : isAlphaNum;
 import std.conv : octal;
 import std.exception : enforce;
-import std.file : DirEntry, FileException, SpanMode, dirEntries, exists, isSymlink, mkdir, mkdirRecurse, remove,
+import std.file : DirEntry, SpanMode, dirEntries, exists, isDir, isSymlink, mkdir, mkdirRecurse, rmdir,
     setAttributes;
-import std.json : JSONType, JSONValue, parseJSON;
+import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath;
-import std.stdio : File;
 import std.string : toLower;
+
+public:
 
 @endpoint @route!"/api/profiles"
 void profiles(Request request, Output output)
 {
+    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
+        return;
+
     if (request.method == Request.Method.Get)
     {
         JSONValue[] ret;
@@ -32,22 +35,21 @@ void profiles(Request request, Output output)
 
         respond(output, JSONValue(ret));
     }
-    else if (request.method == Request.Method.Post)
-        respond(output, profileStore.create(readField!"name"(request)).toJSON(), 201);
     else
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+        respond(output, profileStore.create(readField!"name"(request)).toJSON(), 201);
 }
 
-@endpoint @route!(sessionRoute)
+@endpoint @route!(matchesPath!"/api/profiles/<name>/session")
 void profileSession(Request request, Output output)
 {
-    Profile profile = profileStore.get(request.path["/api/profiles/".length..$].split('/')[0]);
+    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
+        return;
+
+    Profile profile = profileStore.get(routeParameter!"/api/profiles/<name>/session"(request));
     if (profile is null)
         respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
     else if (request.method == Request.Method.Post)
         respond(output, profileStore.register(profile.name, readField!"id"(request)).toJSON());
-    else if (request.method != Request.Method.Get)
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
     else if (profile.session !is null)
         respond(output, profile.session.toJSON());
     else
@@ -56,28 +58,18 @@ void profileSession(Request request, Output output)
 
 private:
 
-bool sessionRoute(const Request request)
-{
-    enum PREFIX = "/api/profiles/";
-    if (!request.path.startsWith(PREFIX))
-        return false;
-
-    string[] segments = request.path[PREFIX.length..$].split('/');
-    return segments.length == 2 && segments[1] == "session";
-}
-
 string canonicalName(string name)
 {
-    enforce(name.length && name.length <= 64 && isAlphaNum(name[0]), "Invalid profile name");
+    enforce!InvalidInput(name.length && name.length <= 64 && isAlphaNum(name[0]), "Invalid profile name");
     foreach (character; name)
-        enforce(isAlphaNum(character) || character == '-' || character == '_', "Invalid profile name");
+        enforce!InvalidInput(isAlphaNum(character) || character == '-' || character == '_', "Invalid profile name");
 
-    return name.toLower;
+    return name.toLower.idup;
 }
 
 public:
 
-class ProfileConflict : Exception
+class ProfileConflict : Conflict
 {
 public:
     this(string message, string file = __FILE__, size_t line = __LINE__)
@@ -89,10 +81,9 @@ public:
 /**
  * In-memory profile state with durable session mappings.
  *
- * The shared `sessions.json` records permanent session-to-profile links, while
- * each profile directory holds its own `session.json` binding. A profile is
- * locked while its bound session is running or online, which prevents rebinding
- * until the session stops.
+ * Permanent assignments and current bindings commit together in state.json.
+ * Legacy sessions.json and per-profile session.json files are imported only
+ * when no authoritative snapshot exists and are retained without modification.
  */
 class ProfileStore
 {
@@ -100,93 +91,105 @@ private:
     Bridge bridge;
     Profile[string] profiles;
     string[string] assignments;
-    Session[string] sessions;
+    string[string] bindings;
 
-    string assignmentPath() const
-        => buildPath(directory, "sessions.json");
-
-    string bindingPath(string name) const
-        => buildPath(directory, name, "session.json");
-
-    static JSONValue readJSON(string path)
-    {
-        File file = openFile(path, O_RDONLY);
-        scope(exit)
-            file.close();
-
-        try
-            return parseJSON(cast(string)file.byChunk(4096).join);
-        catch (Exception error)
-            throw new FileException(path, error.msg);
-    }
+    string statePath() const
+        => buildPath(directory, "state.json");
 
     bool locked(Profile profile)
         => profile.session !is null && (profile.session.isRunning() || bridge.online(profile.session.id));
 
     void load()
     {
-        string path = assignmentPath();
-        if (exists(path))
+        if (exists(statePath))
         {
-            JSONValue data = readJSON(path);
-            enforce(data.type == JSONType.object, "Invalid session mapping");
-            foreach (session, name; data.object)
+            JSONValue data = readJSON(statePath);
+            enforce(data.type == JSONType.object && data.object.length == 3 && "version" in data.object &&
+                data["version"] == JSONValue(1) && "assignments" in data.object && "bindings" in data.object,
+                "Invalid profile state");
+            enforce(data["assignments"].type == JSONType.object && data["bindings"].type == JSONType.object,
+                "Invalid profile state");
+            foreach (id, name; data["assignments"].object)
             {
-                enforce(session.length && name.type == JSONType.string, "Invalid session mapping");
-                assignments[session.idup] = canonicalName(name.str);
+                Session.validateId(id);
+                enforce(name.type == JSONType.string, "Invalid session mapping");
+                assignments[id.idup] = canonicalName(name.str);
+            }
+
+            foreach (name, value; data["bindings"].object)
+            {
+                enforce(name == canonicalName(name) && (value.type == JSONType.string || value.isNull),
+                    "Invalid profile binding");
+                string path = buildPath(directory, name);
+                enforce(isDir(path) && !isSymlink(path), "Profile directory is unavailable");
+                bindings[name.idup] = value.isNull ? null : value.str.idup;
             }
         }
-
-        foreach (DirEntry entry; dirEntries(directory, SpanMode.shallow))
+        else
         {
-            if (!entry.isDir || entry.isSymlink)
-                continue;
-
-            string name = entry.name.baseName;
-            enforce(name == canonicalName(name), "Invalid stored profile name");
-            Profile profile = new Profile(name);
-            profiles[name] = profile;
-            path = bindingPath(name);
+            string path = buildPath(directory, "sessions.json");
             if (exists(path))
             {
                 JSONValue data = readJSON(path);
-                enforce(data.type == JSONType.object && "session_id" in data.object &&
-                    data["session_id"].type == JSONType.string, "Invalid profile session");
-                profile.session = sessionFor(data["session_id"].str);
+                enforce(data.type == JSONType.object, "Invalid session mapping");
+                foreach (id, name; data.object)
+                {
+                    Session.validateId(id);
+                    enforce(name.type == JSONType.string, "Invalid session mapping");
+                    assignments[id.idup] = canonicalName(name.str);
+                }
+            }
+
+            foreach (DirEntry entry; dirEntries(directory, SpanMode.shallow))
+            {
+                if (!entry.isDir || entry.isSymlink)
+                    continue;
+
+                string name = entry.name.baseName;
+                enforce(name == canonicalName(name), "Invalid stored profile name");
+                bindings[name.idup] = null;
+                path = buildPath(directory, name, "session.json");
+                if (exists(path))
+                {
+                    JSONValue data = readJSON(path);
+                    enforce(data.type == JSONType.object && "session_id" in data.object &&
+                        data["session_id"].type == JSONType.string, "Invalid profile session");
+                    bindings[name] = data["session_id"].str.idup;
+                }
             }
         }
 
-        foreach (name, profile; profiles)
-        {
-            if (profile.session is null)
-                continue;
+        foreach (id, name; assignments)
+            enforce(name in bindings, "The linked profile no longer exists");
 
-            string* owner = profile.session.id in assignments;
-            enforce(owner !is null && *owner == name, "Invalid session mapping");
+        foreach (name, id; bindings)
+        {
+            if (id.length)
+            {
+                Session.validateId(id);
+                enforce(id in assignments && assignments[id] == name, "Invalid session mapping");
+            }
+
+            profiles[name] = new Profile(name, id.length ? bridge.session(id) : null);
+        }
+
+        if (!exists(statePath) && bindings.length)
+        {
+            bool committed;
+            save(assignments, bindings, committed);
         }
     }
 
-    void saveAssignments()
+    void save(string[string] nextAssignments, string[string] nextBindings, out bool committed)
     {
         JSONValue data = JSONValue.emptyObject;
-        foreach (session, name; assignments)
-            data[session] = JSONValue(name);
+        data["version"] = JSONValue(1);
+        data["assignments"] = JSONValue(nextAssignments);
+        data["bindings"] = JSONValue.emptyObject;
+        foreach (name, id; nextBindings)
+            data["bindings"][name] = id.length ? JSONValue(id) : JSONValue(null);
 
-        atomicWrite(assignmentPath(), data.toString());
-    }
-
-    void saveBinding(Profile profile)
-    {
-        string path = bindingPath(profile.name);
-        if (profile.session is null)
-        {
-            if (exists(path))
-                remove(path);
-
-            return;
-        }
-
-        atomicWrite(path, JSONValue(["session_id": JSONValue(profile.session.id)]).toString());
+        atomicWrite(statePath, data.toString(), committed);
     }
 
 public:
@@ -230,10 +233,7 @@ public:
 
         Profile profile = get(*owner);
         enforce(profile !is null, "The linked profile no longer exists");
-        if (profile.session is null || profile.session.id == id)
-            return profile;
-
-        return null;
+        return profile.session is null || profile.session.id == id ? profile : null;
     }
 
     /// Creates a profile, failing when the name is taken.
@@ -242,11 +242,27 @@ public:
         name = canonicalName(name);
         enforce!ProfileConflict(name !in profiles, "Profile already exists");
         string path = buildPath(directory, name);
-        enforce(!(exists(path) && isSymlink(path)), "Profile directory must not be a symlink");
+        enforce(!exists(path), "Profile directory already exists");
         mkdir(path);
+        bool committed;
+        scope(failure)
+            if (!committed)
+                rmdir(path);
+
         setAttributes(path, octal!"700");
         Profile ret = new Profile(name);
-        profiles[name] = ret;
+        string[string] nextBindings = bindings.dup;
+        nextBindings[name] = null;
+        scope(exit)
+        {
+            if (committed)
+            {
+                bindings = nextBindings;
+                profiles[name] = ret;
+            }
+        }
+
+        save(assignments, nextBindings, committed);
         return ret;
     }
 
@@ -259,61 +275,80 @@ public:
     Profile register(string name, string id)
     {
         name = canonicalName(name);
-        Session session = sessionFor(id);
-        if (string* owner = session.id in assignments)
+        Session.validateId(id);
+        enforce!ProfileConflict(!bridge.isRemoved(id), "Session was removed");
+        if (string* owner = id in assignments)
             enforce!ProfileConflict(*owner == name, "Session is already linked to another profile");
 
-        Profile profile = get(name);
-        if (profile is null)
-            profile = create(name);
+        Profile ret = get(name);
+        if (ret !is null && ret.session !is null && ret.session.id != id)
+            enforce!ProfileConflict(!locked(ret), "Profile is in use by an active session");
 
-        if (profile.session !is null && profile.session.id != session.id)
+        bool created = ret is null;
+        string path = buildPath(directory, name);
+        bool committed;
+        if (created)
         {
-            enforce!ProfileConflict(!locked(profile), "Profile is in use by an active session");
-            sessions.remove(profile.session.id);
+            enforce(!exists(path), "Profile directory already exists");
+            mkdir(path);
         }
 
-        profile.session = session;
-        assignments[session.id] = name;
-        saveAssignments();
-        saveBinding(profile);
-        return profile;
-    }
+        scope(failure)
+            if (created && !committed)
+                rmdir(path);
 
-    /// Gets the live session handle for an ID, creating it on first use.
-    Session sessionFor(string id)
-    {
-        if (Session* cached = id in sessions)
-            return *cached;
+        if (created)
+        {
+            setAttributes(path, octal!"700");
+            ret = new Profile(name);
+        }
 
-        Session ret = bridge.session(id);
-        sessions[ret.id] = ret;
+        Session session = bridge.session(id);
+        string[string] nextAssignments = assignments.dup;
+        string[string] nextBindings = bindings.dup;
+        nextAssignments[session.id] = name;
+        nextBindings[name] = session.id;
+        scope(exit)
+        {
+            if (committed)
+            {
+                assignments = nextAssignments;
+                bindings = nextBindings;
+                profiles[name] = ret;
+                ret.bind(session);
+            }
+        }
+
+        save(nextAssignments, nextBindings, committed);
         return ret;
     }
 
-    /// Removes the session and clears any profile binding to it.
-    void removeSession(string id)
+    /// Clears profile state after its backend session has been removed.
+    void unlinkSession(string id)
     {
-        sessionFor(id).remove();
+        Session.validateId(id);
+        if (id !in assignments)
+            return;
+
         Profile profile = profileFor(id);
+        string[string] nextAssignments = assignments.dup;
+        string[string] nextBindings = bindings.dup;
+        nextAssignments.remove(id);
         if (profile !is null)
+            nextBindings[profile.name] = null;
+
+        bool committed;
+        scope(exit)
         {
-            profile.session = null;
-            saveBinding(profile);
+            if (committed)
+            {
+                assignments = nextAssignments;
+                bindings = nextBindings;
+                if (profile !is null)
+                    profile.bind(null);
+            }
         }
 
-        assignments.remove(id);
-        saveAssignments();
-        sessions.remove(id);
-    }
-
-    /// Stops every session process owned by this store.
-    void stopSessions()
-    {
-        foreach (session; sessions)
-        {
-            if (session.isRunning())
-                session.stop();
-        }
+        save(nextAssignments, nextBindings, committed);
     }
 }
