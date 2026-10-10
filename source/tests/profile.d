@@ -34,12 +34,55 @@ unittest
         fixture.close();
 
     Profile profile = fixture.store.create("Marlow");
+    static assert(!__traits(compiles, profile.session = fixture.bridge.session("session-1")));
     profile.name.should == "marlow";
     (profile.session is null).should == true;
     fixture.store.list().length.should == 1;
     exists(buildPath(fixture.store.directory, "marlow")).should == true;
     exists(buildPath(fixture.store.directory, "marlow", "identity.md")).should == false;
     fixture.store.create("MARLOW").shouldThrow!ProfileConflict();
+}
+
+@Name("Profile imports legacy mappings once without modifying their files")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    mkdirRecurse(buildPath(fixture.store.directory, "marlow"));
+    string assignments = buildPath(fixture.store.directory, "sessions.json");
+    string binding = buildPath(fixture.store.directory, "marlow", "session.json");
+    write(assignments, `{"session-1":"marlow"}`);
+    write(binding, `{"session_id":"session-1"}`);
+    ProfileStore store = new ProfileStore(fixture.config, fixture.bridge);
+    store.get("marlow").session.id.should == "session-1";
+    store.register("marlow", "session-2");
+    readText(assignments).should == `{"session-1":"marlow"}`;
+    readText(binding).should == `{"session_id":"session-1"}`;
+    store = new ProfileStore(fixture.config, fixture.bridge);
+    store.get("marlow").session.id.should == "session-2";
+}
+
+@Name("Profile failed persistence leaves bindings and assignments unchanged")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    fixture.store.register("marlow", "session-1");
+    string path = buildPath(fixture.store.directory, "state.json");
+    string target = buildPath(fixture.root, "target.json");
+    write(target, "{}");
+    if (exists(path))
+        remove(path);
+
+    symlink(target, path);
+    fixture.store.register("marlow", "session-2").shouldThrow!Exception();
+    fixture.store.get("marlow").session.id.should == "session-1";
+    (fixture.store.profileFor("session-2") is null).should == true;
+    readText(target).should == "{}";
 }
 
 @Name("Profile registration persists across instances")
@@ -95,8 +138,9 @@ unittest
         fixture.close();
 
     fixture.store.register("marlow", "session-1");
-    parseJSON(readText(buildPath(fixture.store.directory, "sessions.json")))["session-1"].str.should == "marlow";
-    parseJSON(readText(buildPath(fixture.store.directory, "marlow", "session.json")))["session_id"].str.should ==
+    parseJSON(readText(buildPath(fixture.store.directory, "state.json")))["assignments"]["session-1"].str.should ==
+        "marlow";
+    parseJSON(readText(buildPath(fixture.store.directory, "state.json")))["bindings"]["marlow"].str.should ==
         "session-1";
 }
 
@@ -182,11 +226,12 @@ unittest
     write(fixture.config.devinCommand, "#!/bin/sh\nexit 0\n");
     setAttributes(fixture.config.devinCommand, octal!"700");
     fixture.store.register("marlow", "session-1");
-    fixture.store.removeSession("session-1");
+    fixture.bridge.session("session-1").remove();
+    fixture.store.unlinkSession("session-1");
     (fixture.store.get("marlow").session is null).should == true;
     (fixture.store.profileFor("session-1") is null).should == true;
     exists(buildPath(fixture.store.directory, "marlow", "session.json")).should == false;
-    parseJSON(readText(buildPath(fixture.store.directory, "sessions.json"))).object.length.should == 0;
+    parseJSON(readText(buildPath(fixture.store.directory, "state.json")))["assignments"].object.length.should == 0;
     ProfileStore store = new ProfileStore(fixture.config, fixture.bridge);
     (store.get("marlow").session is null).should == true;
 }
@@ -236,7 +281,7 @@ unittest
         fixture.close();
 
     fixture.store.register("marlow", "session-1");
-    string path = buildPath(fixture.store.directory, "sessions.json");
+    string path = buildPath(fixture.store.directory, "state.json");
     (getAttributes(path) & octal!"777").should == octal!"600";
     string target = buildPath(fixture.root, "target.json");
     write(target, "{}");

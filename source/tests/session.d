@@ -1,9 +1,8 @@
 module tests.session;
 
 import autonom.agent : ProfileConflict;
-import autonom.interop : Session, SessionStatus;
+import autonom.interop : Devin, Execution, ExecutionStatus, Session, SessionStatus;
 import autonom.interop.cleanup : removeSessions;
-import autonom.interop.devin : DevinSession;
 import tests.common : Fixture, waitUntil;
 import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should, shouldThrow;
@@ -13,6 +12,7 @@ import std.algorithm : canFind;
 import std.array : replicate;
 import std.conv : octal;
 import std.file : exists, mkdirRecurse, readText, setAttributes, write;
+import std.json : JSONValue, parseJSON;
 import std.path : buildPath;
 import std.process : environment;
 import std.stdio : File;
@@ -36,13 +36,16 @@ while :; do sleep 0.05; done
 void installStartCli(Fixture fixture)
 {
     write(fixture.config.devinCommand, `#!/bin/sh
+export_path=
+previous=
+for argument do
+    if [ "$previous" = --export ]; then export_path=$argument; fi
+    previous=$argument
+done
 case "$1" in
-    list)
-        [ -f "$(dirname "$0")/created.txt" ] &&
-            printf '[{"id":"%s"}]' "$(cat "$(dirname "$0")/created.txt")" || printf '[]' ;;
     --print)
-        echo fresh-session > "$(dirname "$0")/created.txt"
-        printf 'first reply' ;;
+        printf 'first reply'
+        printf '{"session_id":"fresh-session"}' > "$export_path" ;;
 esac
 `);
     setAttributes(fixture.config.devinCommand, octal!"700");
@@ -90,15 +93,15 @@ unittest
             lock.close();
     }
 
-    session.status().should == SessionStatus.Offline;
+    session.status.should == SessionStatus.Offline;
     flock(lock.fileno, LOCK_EX).should == 0;
-    session.status().should == SessionStatus.Online;
+    session.status.should == SessionStatus.Online;
     session.stop().shouldThrow!Exception();
     fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflict();
     lock.close();
     waitUntil(delegate bool()
     {
-        return session.status() == SessionStatus.Offline;
+        return session.status == SessionStatus.Offline;
     });
 }
 
@@ -110,18 +113,17 @@ unittest
         fixture.close();
 
     installStartCli(fixture);
-    Session session = DevinSession.start(
-        fixture.bridge,
-        "create work",
-        fixture.root,
-        "SWE-2"
-    );
-    session.id.should == "fresh-session";
-    session.status().should == SessionStatus.Offline;
+    Execution execution = fixture.bridge.start("create work", fixture.root, "SWE-2");
+    execution.wait();
+    execution.status.should == ExecutionStatus.Succeeded;
+    execution.sessionId.should == "fresh-session";
+    Session session = fixture.bridge.session(execution.sessionId);
+    fixture.bridge.collect();
+    session.status.should == SessionStatus.Offline;
     readText(buildPath(fixture.bridge.logDir, "fresh-session.log")).should == "first reply";
 }
 
-@Name("Session start requires exactly one new session")
+@Name("Session start fails without an exported backend session ID")
 unittest
 {
     Fixture fixture = Fixture.create();
@@ -129,13 +131,13 @@ unittest
         fixture.close();
 
     write(fixture.config.devinCommand, `#!/bin/sh
-case "$1" in
-    list) printf '[]' ;;
-    --print) printf 'no session' ;;
-esac
+printf 'no session'
 `);
     setAttributes(fixture.config.devinCommand, octal!"700");
-    DevinSession.start(fixture.bridge, "create work", fixture.root).shouldThrow!Exception();
+    Execution execution = fixture.bridge.start("create work", fixture.root);
+    execution.wait();
+    execution.status.should == ExecutionStatus.Failed;
+    execution.sessionId.length.should == 0;
 }
 
 @Name("Session resumes with a supplied model and literal prompt arguments")
@@ -162,6 +164,8 @@ unittest
         "--print",
         "--model",
         "SWE-2",
+        "--export",
+        session.execution.exportPath,
         "--",
         prompt
     ];
@@ -199,7 +203,7 @@ unittest
 
     session.resume("work", fixture.root);
     session.stop();
-    session.status().should == SessionStatus.Offline;
+    session.status.should == SessionStatus.Offline;
     session.resume("again", fixture.root);
     session.isRunning().should == true;
 }
@@ -255,7 +259,40 @@ unittest
     session.resume("fail", fixture.root);
     waitUntil(delegate bool()
     {
-        return session.status() == SessionStatus.Failed;
+        return session.status == SessionStatus.Failed;
     });
     session.exitStatus.get.should == 7;
+}
+
+@Name("Bridge marks an execution interrupted when its recorded process was lost")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    installCli(fixture);
+    Session session = fixture.bridge.session("session-1");
+    session.resume("work", fixture.root);
+    waitUntil(delegate bool()
+    {
+        return session.isRunning();
+    });
+
+    string id = session.execution.id;
+    fixture.bridge.close();
+    string recordPath = buildPath(fixture.config.dataDir, "executions", id~".json");
+    JSONValue data = parseJSON(readText(recordPath));
+    data["status"] = JSONValue("running");
+    data["exitStatus"] = JSONValue(null);
+    write(recordPath, data.toString());
+
+    Devin restarted = new Devin(fixture.config);
+    scope(exit)
+        restarted.close();
+
+    Session recovered = restarted.session("session-1");
+    recovered.execution.status.should == ExecutionStatus.Interrupted;
+    recovered.status.should == SessionStatus.Failed;
+    recovered.exitStatus.isNull.should == true;
 }

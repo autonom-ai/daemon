@@ -5,9 +5,24 @@ import evals : Eval, get, post, waitFor;
 import core.time : seconds;
 import std.algorithm.searching : canFind;
 import std.conv : to;
+import std.exception : enforce;
 import std.json : JSONType, JSONValue;
 import std.string : strip;
 import std.uri : encodeComponent;
+
+private:
+
+JSONValue finishExecution(JSONValue accepted)
+{
+    string path = "/api/executions/"~accepted["id"].str;
+    JSONValue ret;
+    enforce(waitFor(delegate bool()
+    {
+        ret = get(path);
+        return ret["status"].str != "running" && ret["status"].str != "stopping";
+    }, 130.seconds), "CLI execution did not finish");
+    return ret;
+}
 
 public:
 
@@ -16,6 +31,7 @@ class Sessions
 private:
     string listing;
     string[] previous;
+    string[] createdSessionIds;
     string directory;
     string model;
     bool registered;
@@ -49,23 +65,27 @@ public:
 
     void run(Eval eval)
     {
-        string reply = post("/api/print", launch("Reply only AUTONOM_READY. Do not use tools or modify files."))
-            ["reply"].str;
+        JSONValue printed = finishExecution(post(
+            "/api/print",
+            launch("Reply only AUTONOM_READY. Do not use tools or modify files."),
+            202
+        ));
+        string reply = printed["reply"].str;
         eval.check("print follows the reply instruction", reply.canFind("AUTONOM_READY"), reply.strip);
-        string[] printed;
-        foreach (id; list())
-        {
-            if (!previous.canFind(id))
-                printed ~= id;
-        }
-        eval.check("print creates exactly one session", printed.length == 1, printed.length.to!string);
+        string printedId = printed["sessionId"].type == JSONType.string ? printed["sessionId"].str : null;
+        bool printCreatedSession = printedId.length > 0 && !previous.canFind(printedId);
+        eval.check("print creates exactly one session", printCreatedSession, printed.toString());
+        if (printCreatedSession)
+            createdSessionIds ~= printedId;
 
-        JSONValue started = post("/api/sessions", launch(
+        JSONValue accepted = post("/api/sessions", launch(
             "Reply only AUTONOM_CREATED. Do not use tools or modify files."
-        ), 201);
-        string id = started["id"].type == JSONType.string ? started["id"].str : null;
+        ), 202);
+        JSONValue started = finishExecution(accepted);
+        string id = started["sessionId"].type == JSONType.string ? started["sessionId"].str : null;
         if (!eval.check("start creates a session", id.length > 0, started.toString()))
             return;
+        createdSessionIds ~= id;
 
         string session = "/api/sessions/"~id;
         eval.check("started session is offline", get(session)["status"].str == "offline", get(session).toString());
@@ -84,8 +104,10 @@ public:
 
         post("/api/profiles/eval/session", JSONValue(["id": JSONValue("replacement-session")]), 409);
         eval.check("active session rejects profile replacement", true);
-        post(session~"/stop");
-        eval.check("stop releases process and lock", get(session)["status"].str == "offline");
+        post(session~"/stop", JSONValue.emptyObject, 202);
+        JSONValue stopped = finishExecution(JSONValue(["id": JSONValue(get(session)["executionId"].str)]));
+        eval.check("stop releases process and lock", stopped["status"].str == "stopped" &&
+            get(session)["status"].str == "offline");
         post(session~"/resume", launch("Reply only AUTONOM_DONE. Do not use tools or modify files."));
         bool finished = waitFor(delegate bool()
         {
@@ -100,15 +122,16 @@ public:
 
     void close(Eval eval)
     {
-        JSONValue ids = JSONValue.emptyArray;
-        foreach (id; list())
+        JSONValue ids = JSONValue(createdSessionIds);
+        JSONValue removed = post("/api/sessions/remove", JSONValue(["ids": ids]), 202);
+        bool allRemoved = removed["ids"] == ids && removed["executions"].array.length == ids.array.length;
+        foreach (execution; removed["executions"].array)
         {
-            if (!previous.canFind(id))
-                ids.array ~= JSONValue(id);
+            JSONValue completion = finishExecution(execution);
+            allRemoved = allRemoved && completion["kind"].str == "remove" &&
+                completion["status"].str == "succeeded";
         }
-
-        JSONValue removed = post("/api/sessions/remove", JSONValue(["ids": ids]));
-        eval.check("removes every eval-created session", removed["removed"] == ids, ids.toString());
+        eval.check("removes every eval-created session", allRemoved, removed.toString());
         string[] remaining = list();
         bool restored = remaining.length == previous.length;
         foreach (id; remaining)
