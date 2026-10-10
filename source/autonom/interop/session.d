@@ -1,105 +1,87 @@
 module autonom.interop.session;
 
-import autonom.server : profileStore, readBody, readLaunch, respond;
-import autonom.storage : openFile;
+import autonom.exception : InvalidInput;
+import autonom.interop.execution : Execution;
+import autonom.server : acceptMethod, bridge, matchesPath, readBody, readLaunch, respond, routeParameter;
+import autonom.storage : readText;
 import serverino : Output, Request, endpoint, route;
 
-import core.sys.posix.fcntl : O_RDONLY;
-import std.algorithm : findSplit, startsWith;
-import std.array : join;
 import std.ascii : isAlphaNum;
 import std.exception : enforce;
 import std.file : exists;
 import std.json : JSONValue;
-import std.stdio : File;
 import std.typecons : Nullable;
 
 private:
 
-bool sessionRoute(string ACTION)(const Request request)
+Session lookupSession(string PATTERN)(Request request, Output output)
 {
-    enum PREFIX = "/api/sessions/";
-    if (!request.path.startsWith(PREFIX))
-        return false;
+    Session ret = bridge.findSession(routeParameter!PATTERN(request));
+    if (ret is null)
+        respond(output, JSONValue(["error": JSONValue("Session not found")]), 404);
 
-    typeof(findSplit("", "/")) segments = request.path[PREFIX.length..$].findSplit("/");
-    static if (ACTION.length)
-        return segments[1].length && segments[2] == ACTION;
-    else
-        return !segments[1].length;
+    return ret;
 }
-
-auto ref requestSession(Request request)
-    => profileStore.sessionFor(request.path["/api/sessions/".length..$].findSplit("/")[0]);
 
 public:
 
-@endpoint @route!(sessionRoute!"")
+@endpoint @route!(matchesPath!"/api/sessions/<id>")
 void getSession(Request request, Output output)
 {
-    if (request.method == Request.Method.Get)
-        respond(output, request.requestSession.toJSON());
-    else if (request.method == Request.Method.Delete)
-    {
-        profileStore.removeSession(request.requestSession.id);
-        respond(output, JSONValue(["removed": JSONValue(true)]));
-    }
+    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Delete]))
+        return;
+
+    if (request.method == Request.Method.Delete)
+        respond(output, bridge.remove(routeParameter!"/api/sessions/<id>"(request)).toJSON(), 202);
     else
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    {
+        Session session = lookupSession!"/api/sessions/<id>"(request, output);
+        if (session !is null)
+            respond(output, session.toJSON());
+    }
 }
 
-@endpoint @route!(sessionRoute!"resume")
+@endpoint @route!(matchesPath!"/api/sessions/<id>/resume")
 void resumeSession(Request request, Output output)
 {
-    if (request.method != Request.Method.Post)
-    {
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    if (!acceptMethod(request, output, [Request.Method.Post]))
         return;
-    }
 
     JSONValue data = readLaunch(request);
-    Session session = request.requestSession;
+    Session session = bridge.session(routeParameter!"/api/sessions/<id>/resume"(request));
     session.resume(data["prompt"].str, data["directory"].str, data["model"].str);
     respond(output, session.toJSON());
 }
 
-@endpoint @route!(sessionRoute!"stop")
+@endpoint @route!(matchesPath!"/api/sessions/<id>/stop")
 void stopSession(Request request, Output output)
 {
-    if (request.method != Request.Method.Post)
-    {
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    if (!acceptMethod(request, output, [Request.Method.Post]))
         return;
-    }
 
-    enforce(readBody(request).object.length == 0, "Expected an empty JSON object");
-    Session session = request.requestSession;
-    session.stop();
-    respond(output, session.toJSON());
+    enforce!InvalidInput(readBody(request).object.length == 0, "Expected an empty JSON object");
+    Session session = lookupSession!"/api/sessions/<id>/stop"(request, output);
+    if (session is null)
+        return;
+
+    session.requestStop();
+    respond(output, session.toJSON(), 202);
 }
 
-@endpoint @route!(sessionRoute!"log")
+@endpoint @route!(matchesPath!"/api/sessions/<id>/log")
 void sessionLog(Request request, Output output)
 {
-    if (request.method != Request.Method.Get)
-    {
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    if (!acceptMethod(request, output, [Request.Method.Get]))
         return;
-    }
 
-    Session session = request.requestSession;
-    string path = session.logPath;
-    if (path.length == 0 || !exists(path))
-    {
+    Session session = lookupSession!"/api/sessions/<id>/log"(request, output);
+    if (session is null)
+        return;
+
+    if (!exists(session.logPath))
         respond(output, JSONValue(["error": JSONValue("Session log not found")]), 404);
-        return;
-    }
-
-    File file = openFile(path, O_RDONLY);
-    scope(exit)
-        file.close();
-
-    respond(output, JSONValue(["log": JSONValue(cast(string)file.byChunk(4096).join)]));
+    else
+        respond(output, JSONValue(["log": JSONValue(readText(session.logPath, 1024 * 1024))]));
 }
 
 enum SessionStatus : string
@@ -107,41 +89,72 @@ enum SessionStatus : string
     Offline = "offline",
     Starting = "starting",
     Online = "online",
+    Stopping = "stopping",
     Failed = "failed"
 }
 
 /// Contract for a managed agent session.
 abstract class Session
 {
+private:
+    Execution _execution;
+
+package(autonom.interop):
+    void bindExecution(Execution execution)
+    {
+        _execution = execution;
+    }
+
 public:
     const string id;
 
+    static void validateId(string id)
+    {
+        enforce!InvalidInput(id.length && id.length <= 128 && isAlphaNum(id[0]), "Invalid session ID");
+        foreach (character; id)
+            enforce!InvalidInput(isAlphaNum(character) || character == '-' || character == '_', "Invalid session ID");
+    }
+
     this(string id)
     {
-        enforce(id.length && id.length <= 128 && isAlphaNum(id[0]), "Invalid session ID");
-        foreach (character; id)
-            enforce(isAlphaNum(character) || character == '-' || character == '_', "Invalid session ID");
-
+        validateId(id);
         this.id = id.idup;
     }
+
+    Execution execution()
+        => _execution;
 
     /// Gets the current session status.
     abstract SessionStatus status();
 
-    /// Reports whether the process owned by this handle is running.
-    abstract bool isRunning();
+    /// Reports whether the execution owned by this handle is running, without polling its process.
+    bool isRunning()
+        => _execution !is null && _execution.running;
 
     /// Continues the session with a prompt, starting its process.
     abstract void resume(string prompt, string directory, string model = null);
 
+    abstract void requestStop();
+
     /// Stops the session process owned by this handle.
-    abstract void stop();
+    void stop()
+    {
+        requestStop();
+        if (_execution !is null)
+            _execution.wait();
+    }
 
     /// Removes the session and its artifacts.
     abstract void remove();
 
     /// Gets the exit status of the last session process, or null while unknown.
-    abstract ref const(Nullable!int) exitStatus() const;
+    Nullable!int exitStatus()
+    {
+        if (_execution is null || _execution.exitStatus.isNull)
+            return Nullable!int.init;
+
+        return Nullable!int(cast(int)_execution.exitStatus.integer);
+    }
 
     /// Gets the path of the session log, or null when the session has no log.
     abstract string logPath();
@@ -150,8 +163,9 @@ public:
     {
         return JSONValue([
             "id": JSONValue(id),
-            "status": JSONValue(cast(string)status()),
-            "exitStatus": exitStatus.isNull ? JSONValue(null) : JSONValue(exitStatus.get)
+            "status": JSONValue(cast(string)status),
+            "exitStatus": exitStatus.isNull ? JSONValue(null) : JSONValue(exitStatus.get),
+            "executionId": _execution is null ? JSONValue(null) : JSONValue(_execution.id)
         ]);
     }
 }

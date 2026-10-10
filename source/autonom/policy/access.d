@@ -1,15 +1,47 @@
 /// Workspace policy evaluation with optional model screening.
 module autonom.policy.access;
 
+import autonom.exception : InvalidInput;
 import autonom.policy.rule : PolicyAction, PolicyRule, loadRules;
+import autonom.server : policy, readBody, respond;
 import intuit.response.decision : Decision, DecisionQuestion, DecisionType;
 import intuit.router : IRouter, decisions;
+import serverino : Output, Request, endpoint, route;
 
 import core.time : MonoTime, seconds;
 import std.algorithm.searching : canFind;
 import std.exception : enforce;
 import std.file : isDir;
 import std.json : JSONType, JSONValue;
+
+public:
+
+/// Checks a tool request, returning a denial with HTTP 503 when evaluation fails.
+@endpoint @route!"/api/policy/check"
+void checkPolicy(Request request, Output output)
+{
+    if (request.method != Request.Method.Post)
+    {
+        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+        return;
+    }
+
+    JSONValue data = readBody(request);
+    enforce!InvalidInput("directory" in data.object && "tool" in data.object, "Expected directory and tool");
+    enforce!InvalidInput(data["directory"].type == JSONType.string && data["tool"].type == JSONType.string,
+        "Directory and tool must be strings");
+    foreach (name; data.object.keys)
+        enforce!InvalidInput(name == "directory" || name == "tool" || name == "input", "Unexpected policy request field");
+
+    if ("input" !in data.object)
+        data["input"] = JSONValue.emptyObject;
+
+    enforce!InvalidInput(data["input"].type == JSONType.object, "Tool input must be an object");
+    try
+        respond(output, policy.check(data["directory"].str, data["tool"].str, data["input"]).toJSON());
+    catch (Exception)
+        respond(output, PolicyResult(true, "Policy check failed").toJSON(), 503);
+}
 
 /// The outcome of a successfully evaluated workspace policy.
 struct PolicyResult
@@ -43,7 +75,7 @@ private:
         if (router.active != model)
             router.active(model);
 
-        enforce(MonoTime.currTime < deadline, "Policy request timed out");
+        enforce!InvalidInput(MonoTime.currTime < deadline, "Policy request timed out");
         router.operationTimeout(deadline - MonoTime.currTime);
         JSONValue state = JSONValue.emptyObject;
         state["tool"] = JSONValue(tool);
@@ -61,7 +93,7 @@ private:
         Decision decision = decisions(router, state, questions);
         foreach (answer; decision.answers)
         {
-            enforce(answer.type == DecisionType.Predicate, "Policy model returned no predicate decision");
+            enforce!InvalidInput(answer.type == DecisionType.Predicate, "Policy model returned no predicate decision");
             if (answer.probability >= rule.threshold)
                 return true;
         }
@@ -76,7 +108,7 @@ public:
     /// Uses the supplied router and model, setting a two-second connection timeout.
     this(IRouter router, string model)
     {
-        enforce(router !is null && model.length && !model.canFind('\0'), "A policy router and model are required");
+        enforce!InvalidInput(router !is null && model.length && !model.canFind('\0'), "A policy router and model are required");
         this.router = router;
         this.model = model;
         router.connectTimeout(2.seconds);
@@ -97,9 +129,9 @@ public:
         scope(exit)
             router.context.clear();
 
-        enforce(directory.length && isDir(directory), "An existing working directory is required");
-        enforce(tool.length && !tool.canFind('\0'), "A tool name is required");
-        enforce(input.type == JSONType.object, "Tool input must be an object");
+        enforce!InvalidInput(directory.length && isDir(directory), "An existing working directory is required");
+        enforce!InvalidInput(tool.length && !tool.canFind('\0'), "A tool name is required");
+        enforce!InvalidInput(input.type == JSONType.object, "Tool input must be an object");
         foreach (rule; loadRules(directory))
         {
             if (!rule.matches(tool, input))

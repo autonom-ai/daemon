@@ -43,7 +43,8 @@ JSONValue request(
         return chunk.length;
     };
     client.perform();
-    client.statusLine.code.should == status;
+    enforce(client.statusLine.code == status,
+        "HTTP "~client.statusLine.code.to!string~" for "~path~": "~body);
     return parseJSON(body);
 }
 
@@ -75,6 +76,18 @@ string invokeHook(string command, JSONValue payload, int expected = 0)
     return cast(string)output.byChunk(4096).join;
 }
 
+JSONValue waitForExecution(JSONValue accepted)
+{
+    string path = "/api/executions/"~accepted["id"].str;
+    JSONValue ret;
+    waitUntil(delegate bool()
+    {
+        ret = request(path);
+        return ret["status"].str != "running" && ret["status"].str != "stopping";
+    });
+    return ret;
+}
+
 public:
 
 @Name("Daemon declares health and stop HTTP endpoints")
@@ -95,6 +108,13 @@ unittest
         fixture.close();
 
     write(fixture.config.devinCommand, `#!/bin/sh
+export_path=
+previous=
+for argument do
+    if [ "$previous" = --export ]; then export_path=$argument; fi
+    prompt=$argument
+    previous=$argument
+done
 case "$1" in
     list)
         if [ -f "$(dirname "$0")/sessions.txt" ]; then
@@ -113,7 +133,16 @@ case "$1" in
     --print)
         count=0
         [ -f "$(dirname "$0")/sessions.txt" ] && count=$(wc -l < "$(dirname "$0")/sessions.txt")
-        echo "created-$count" >> "$(dirname "$0")/sessions.txt"
+        session_id="created-$count"
+        if [ "$prompt" = callback ]; then
+            status=$(curl -qfsS -m 1 -x '' -o /dev/null -w '%{http_code}' --json \
+                '{"hook_event_name":"SessionStart"}' \
+                "http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-start") || exit 9
+            printf '%s' "$status" > "$(dirname "$0")/callback.txt"
+            sleep 0.1
+        fi
+        echo "$session_id" >> "$(dirname "$0")/sessions.txt"
+        printf '{"session_id":"%s"}' "$session_id" > "$export_path"
         printf 'AUTONOM_READY'; exit 0 ;;
 esac
 for argument do prompt="$argument"; done
@@ -289,21 +318,31 @@ while :; do sleep 0.05; done
     request("/api/profiles").array.length.should == 12;
     request("/api/sessions").array[0].str.should == "session-0";
     JSONValue launch = JSONValue([
-        "prompt": JSONValue("work"),
+        "prompt": JSONValue("callback"),
         "directory": JSONValue(fixture.root)
     ]);
-    JSONValue started = request("/api/sessions", 201, launch.toString());
-    started["id"].str.should == "created-0";
-    started["status"].str.should == "offline";
+    JSONValue started = request("/api/sessions", 202, launch.toString());
+    JSONValue startedExecution = waitForExecution(started);
+    startedExecution["kind"].str.should == "start";
+    startedExecution["status"].str.should == "succeeded";
+    startedExecution["sessionId"].str.should == "created-0";
+    readText(buildPath(fixture.root, "callback.txt")).should == "200";
+    request("/api/health")["status"].str.should == "ok";
+    request("/api/sessions/created-0")["status"].str.should == "offline";
     request("/api/sessions/created-0/log")["log"].str.should == "AUTONOM_READY";
     launch["directory"] = JSONValue(buildPath(fixture.root, "missing"));
     request("/api/sessions", 400, launch.toString());
     launch["directory"] = JSONValue(fixture.root);
-    request("/api/print", 200, launch.toString())["reply"].str.should == "AUTONOM_READY";
+    JSONValue printed = request("/api/print", 202, launch.toString());
+    waitForExecution(printed)["reply"].str.should == "AUTONOM_READY";
     request("/api/sessions/session-0/resume", 200, launch.toString())["status"].str.should == "starting";
-    request("/api/sessions/session-0/resume", 400, launch.toString());
+    request("/api/sessions/session-0/resume", 409, launch.toString());
     request("/api/profiles/agent-0/session", 409, `{"id":"replacement"}`);
-    request("/api/sessions/session-0/stop", 200, "{}")["status"].str.should == "offline";
+    request("/api/sessions/session-0/stop", 202, "{}");
+    waitUntil(delegate bool()
+    {
+        return request("/api/sessions/session-0")["status"].str == "offline";
+    });
     launch["prompt"] = JSONValue("fail");
     request("/api/sessions/session-0/resume", 200, launch.toString());
     waitUntil(delegate bool()
@@ -312,13 +351,14 @@ while :; do sleep 0.05; done
     });
     request("/api/profiles/agent-0/session")["exitStatus"].integer.should == 7;
     request("/api/sessions/session-0/log")["log"].str.canFind("fail").should == true;
-    request(
+    JSONValue removedSession = request(
         "/api/sessions/session-0",
-        200,
+        202,
         null,
         "application/json",
         HTTP.Method.del
     );
+    waitForExecution(removedSession)["status"].str.should == "succeeded";
     request("/api/profiles/agent-0")["session"].should == JSONValue(null);
     request("/api/sessions/session-0/log", 404);
     launch["prompt"] = JSONValue("work");
@@ -333,14 +373,24 @@ while :; do sleep 0.05; done
     request("/api/sessions/batch-owned/resume", 200, launch.toString());
     request("/api/sessions/remove", 400, `{"ids":["batch-owned","../escape"]}`);
     request("/api/sessions/batch-owned")["status"].str.should == "starting";
-    request("/api/sessions/remove", 200, `{"ids":["batch-owned"]}`)["removed"].array.should ==
-        [JSONValue("batch-owned")];
+    JSONValue ownedRemoval = request("/api/sessions/remove", 202, `{"ids":["batch-owned"]}`);
+    waitForExecution(request("/api/executions/"~ownedRemoval["executions"][0]["id"].str))
+        ["status"].str.should == "succeeded";
     request("/api/sessions/batch-owned/log", 404);
-    request("/api/sessions/remove", 200, `{"ids":[]}`)["removed"].array.length.should == 0;
+    JSONValue emptyCleanup = request("/api/sessions/remove", 200, `{"ids":[]}`);
+    emptyCleanup["executions"].array.length.should == 0;
     request("/api/sessions/batch-other/resume", 200, launch.toString());
-    JSONValue cleanup = request("/api/sessions/remove", 503, `{"ids":["missing","batch-other"]}`);
-    cleanup["removed"].array.should == [JSONValue("batch-other")];
-    cleanup["failed"].array.should == [JSONValue("missing")];
+    JSONValue cleanup = request("/api/sessions/remove", 202, `{"ids":["missing","batch-other"]}`);
+    cleanup["executions"].array.length.should == 2;
+    cleanup["failed"].array.length.should == 0;
+    JSONValue missing = waitForExecution(request(
+        "/api/executions/"~cleanup["executions"][0]["id"].str
+    ));
+    missing["status"].str.should == "failed";
+    JSONValue deleted = waitForExecution(request(
+        "/api/executions/"~cleanup["executions"][1]["id"].str
+    ));
+    deleted["status"].str.should == "succeeded";
     request("/api/sessions/batch-other/log", 404);
 
     JSONValue configuration = request("/api/config");
@@ -381,6 +431,8 @@ while :; do sleep 0.05; done
             return request("/api/health")["status"].str == "ok";
         catch (CurlException)
             return false;
+        catch (Exception error)
+            throw new Exception(readText(log)~"\n"~error.msg);
     });
     request("/api/profiles").array.length.should == 12;
     request("/api/profiles/agent-0")["session"].should == JSONValue(null);

@@ -1,49 +1,46 @@
 module autonom.agent.profile;
 
 import autonom.interop.session : Session;
-import autonom.server : profileStore, respond;
+import autonom.server : acceptMethod, profileStore, respond, matchesPath, routeParameter;
 import serverino : Output, Request, endpoint, route;
 
-import std.algorithm : startsWith;
-import std.array : split;
 import std.json : JSONValue;
 
-@endpoint @route!(profileRoute)
+@endpoint @route!(matchesPath!"/api/profiles/<name>")
 void getProfile(Request request, Output output)
 {
-    Profile profile = profileStore.get(request.path["/api/profiles/".length..$].split('/')[0]);
+    if (!acceptMethod(request, output, [Request.Method.Get]))
+        return;
+
+    Profile profile = profileStore.get(routeParameter!"/api/profiles/<name>"(request));
     if (profile is null)
         respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
-    else if (request.method == Request.Method.Get)
-        respond(output, profile.toJSON());
     else
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+        respond(output, profile.toJSON());
 }
-
-private:
-
-bool profileRoute(const Request request)
-{
-    enum PREFIX = "/api/profiles/";
-    if (!request.path.startsWith(PREFIX))
-        return false;
-
-    return request.path[PREFIX.length..$].split('/').length == 1;
-}
-
-public:
 
 /// A named agent identity linked to at most one session.
 class Profile
 {
+private:
+    Session _session;
+
+package(autonom.agent):
+    void bind(Session session)
+    {
+        _session = session;
+    }
+
 public:
     const string name;
-    Session session;
+
+    Session session()
+        => _session;
 
     this(string name, Session session = null)
     {
-        this.name = name;
-        this.session = session;
+        this.name = name.idup;
+        _session = session;
     }
 
     JSONValue toJSON()

@@ -1,10 +1,11 @@
 module tests.bridge;
 
-import autonom.interop : Session, SessionStatus;
+import autonom.interop : Execution, ExecutionStatus, Session, SessionStatus;
 import tests.common : Fixture, waitUntil;
 import unit_threaded : Name, should, shouldThrow;
 
 import core.time : msecs;
+import std.algorithm.searching : canFind;
 import std.conv : octal;
 import std.file : exists, readText, setAttributes, write;
 import std.path : buildPath;
@@ -33,9 +34,16 @@ case "$1" in
     rm) [ "$4" = missing ] && { echo "no session" >&2; exit 1; }
         printf '%s\n' "$@" > "$(dirname "$0")/removed.txt" ;;
     --print)
-        for argument do prompt="$argument"; done
+        export_path=
+        previous=
+        for argument do
+            if [ "$previous" = --export ]; then export_path=$argument; fi
+            prompt=$argument
+            previous=$argument
+        done
         [ "$prompt" = fail ] && { echo broken >&2; exit 3; }
         echo session-3 >> "$(dirname "$0")/sessions.txt"
+        printf '{"session_id":"session-3"}' > "$export_path"
         printf '%s ' "$@" ;;
     *) for argument do prompt="$argument"; done
        [ "$prompt" = fail ] && { echo broken >&2; exit 3; }
@@ -46,6 +54,21 @@ esac
 }
 
 public:
+
+@Name("Bridge owns one canonical handle per session independently of profiles")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    char[] buffer = "session-1".dup;
+    Session session = fixture.bridge.session(cast(string)buffer);
+    buffer[] = 'X';
+    session.id.should == "session-1";
+    (fixture.bridge.session("session-1") is session).should == true;
+    (fixture.store.register("marlow", "session-1").session is session).should == true;
+}
 
 @Name("Bridge lists CLI session IDs from stdout only")
 unittest
@@ -66,8 +89,11 @@ unittest
         fixture.close();
 
     installCli(fixture);
-    fixture.bridge.print("hello $(world)", fixture.root, "SWE-2").strip.should ==
-        "--print --model SWE-2 -- hello $(world)";
+    Execution execution = fixture.bridge.print("hello $(world)", fixture.root, "SWE-2");
+    execution.wait();
+    execution.status.should == ExecutionStatus.Succeeded;
+    execution.sessionId.should == "session-3";
+    execution.toJSON()["reply"].str.canFind("hello $(world)").should == true;
     fixture.bridge.print("", fixture.root).shouldThrow!Exception();
 }
 
@@ -79,13 +105,10 @@ unittest
         fixture.close();
 
     installCli(fixture);
-    bool reported;
-    try
-        fixture.bridge.print("fail", fixture.root);
-    catch (Exception error)
-        reported = error.msg == "CLI command failed (exit 3): broken\n";
-
-    reported.should == true;
+    Execution failed = fixture.bridge.print("fail", fixture.root);
+    failed.wait();
+    failed.status.should == ExecutionStatus.Failed;
+    failed.toJSON()["error"].str.should == "CLI command failed (exit 3)";
     fixture.bridge.run(["slow"], fixture.root, 100.msecs).shouldThrow!Exception();
 }
 
@@ -101,12 +124,14 @@ unittest
     session.resume("work", fixture.root);
     waitUntil(delegate bool()
     {
-        return session.status() == SessionStatus.Offline;
+        return session.status == SessionStatus.Offline;
     });
     string log = buildPath(fixture.bridge.logDir, "session-1.log");
     exists(log).should == true;
     session.remove();
     readText(buildPath(fixture.root, "removed.txt")).splitLines.should == ["rm", "--force", "--", "session-1"];
     exists(log).should == false;
-    fixture.bridge.remove("missing").shouldThrow!Exception();
+    Execution missing = fixture.bridge.remove("missing");
+    missing.wait();
+    missing.status.should == ExecutionStatus.Failed;
 }

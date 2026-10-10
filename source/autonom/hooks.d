@@ -1,5 +1,6 @@
 module autonom.hooks;
 
+import autonom.exception : InvalidInput;
 import autonom.server : readBody, respond;
 import serverino : Output, Request, endpoint, route;
 
@@ -17,9 +18,9 @@ void respondHook(string EVENT)(Request request, Output output)
     }
 
     JSONValue data = readBody(request);
-    enforce("hook_event_name" in data.object && data["hook_event_name"].type == JSONType.string,
+    enforce!InvalidInput("hook_event_name" in data.object && data["hook_event_name"].type == JSONType.string,
         "Expected a string hook_event_name");
-    enforce(data["hook_event_name"].str == EVENT, "Expected the "~EVENT~" hook event");
+    enforce!InvalidInput(data["hook_event_name"].str == EVENT, "Expected the "~EVENT~" hook event");
     respond(output, JSONValue(cast(JSONValue[string])null));
 }
 
