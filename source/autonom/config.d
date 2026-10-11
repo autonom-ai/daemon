@@ -7,7 +7,6 @@ import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
 
 import std.algorithm.searching : canFind;
-import std.exception : enforce;
 import std.path;
 import std.process : environment;
 
@@ -43,13 +42,19 @@ class Config
         dataDir = base;
         sessionLockDir = defaultSessionLockDir;
         YamlAlgebraic settings = readText(configPath).deserializeYaml!YamlAlgebraic(configPath);
-        enforce(settings.kind == YamlAlgebraic.Kind.object, "Configuration must be a YAML mapping");
+        if (settings.kind != YamlAlgebraic.Kind.object)
+            throw new Exception("Configuration must be a YAML mapping");
+
         bool[string] seen;
         foreach (pair; settings.object.pairs)
         {
-            enforce(pair.key.kind == YamlAlgebraic.Kind.string, "Configuration setting names must be strings");
+            if (pair.key.kind != YamlAlgebraic.Kind.string)
+                throw new Exception("Configuration setting names must be strings");
+
             string key = pair.key.get!string.idup;
-            enforce(key !in seen, "Duplicate configuration setting: "~key);
+            if (key in seen)
+                throw new Exception("Duplicate configuration setting: "~key);
+
             seen[key] = true;
             if (key == "router")
             {
@@ -57,9 +62,13 @@ class Config
                 continue;
             }
 
-            enforce(pair.value.kind == YamlAlgebraic.Kind.string, "Configuration settings must be strings");
+            if (pair.value.kind != YamlAlgebraic.Kind.string)
+                throw new Exception("Configuration settings must be strings");
+
             string value = pair.value.get!string.idup;
-            enforce(value.length && !value.canFind('\0'), "Configuration settings must not be empty");
+            if (!value.length || value.canFind('\0'))
+                throw new Exception("Configuration settings must not be empty");
+
             switch (key)
             {
             case "dataDir":
@@ -79,8 +88,10 @@ class Config
             }
         }
 
-        enforce(devinCommand.length, "Configuration requires devinCommand");
-        enforce(router !is null, "Configuration requires router");
+        if (!devinCommand.length)
+            throw new Exception("Configuration requires devinCommand");
+        if (router is null)
+            throw new Exception("Configuration requires router");
         dataDir = resolvePath(dataDir, base);
         sessionLockDir = resolvePath(sessionLockDir, base);
         if (devinCommand.canFind('/'))

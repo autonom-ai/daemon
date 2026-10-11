@@ -12,7 +12,6 @@ import core.time : Duration, MonoTime, msecs, seconds;
 import std.algorithm : any, endsWith, sort, startsWith;
 import std.array : join;
 import std.conv : to;
-import std.exception : enforce;
 import std.file;
 import std.path : baseName, buildPath, dirName;
 import std.process;
@@ -66,7 +65,8 @@ protected:
         foreach (entry; executions)
             active += entry.running;
 
-        enforce!ConflictException(active < 8, "Execution capacity reached");
+        if (active >= 8)
+            throw new ConflictException("Execution capacity reached");
         execution.start(
             [command]~arguments,
             childEnvironment(),
@@ -89,8 +89,10 @@ public:
         this.logDir = logDir;
         this.scrubPrefixes = scrubPrefixes;
         executionDir = buildPath(dirName(logDir), "executions");
-        enforce(!(exists(logDir) && isSymlink(logDir)) &&
-            !(exists(executionDir) && isSymlink(executionDir)), "Backend storage must not be a symlink");
+        if ((exists(logDir) && isSymlink(logDir)) ||
+            (exists(executionDir) && isSymlink(executionDir)))
+            throw new Exception("Backend storage must not be a symlink");
+
         if (!exists(executionDir))
             return;
 
@@ -99,7 +101,9 @@ public:
             if (!entry.name.endsWith(".json"))
                 continue;
 
-            enforce(entry.isFile && !entry.isSymlink, "Execution record must be a regular file");
+            if (!entry.isFile || entry.isSymlink)
+                throw new Exception("Execution record must be a regular file");
+
             Execution execution = Execution.load(executionDir, logDir, entry.name.baseName[0..$-5]);
             executions[execution.id] = execution;
         }
@@ -267,14 +271,20 @@ public:
         typeof(tryWait(Pid.init)) result;
         while (!(result = tryWait(process)).terminated)
         {
-            enforce!BackendException(MonoTime.currTime < deadline, "CLI command timed out");
+            if (MonoTime.currTime >= deadline)
+                throw new BackendException("CLI command timed out");
+
             Thread.sleep(10.msecs);
         }
 
         finished = true;
-        enforce!BackendException(result.status == 0, "CLI command failed (exit "~result.status.to!string~")");
+        if (result.status != 0)
+            throw new BackendException("CLI command failed (exit "~result.status.to!string~")");
+
         output.rewind();
-        enforce(output.size <= 1024 * 1024, "CLI response is too large");
+        if (output.size > 1024 * 1024)
+            throw new Exception("CLI response is too large");
+
         return cast(string)output.byChunk(4096).join;
     }
 }

@@ -7,7 +7,6 @@ import autonom.interop.devin;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
 import std.conv : to;
-import std.exception : enforce;
 import std.file : mkdirRecurse, rmdirRecurse, tempDir, write;
 import std.json : JSONValue, parseJSON;
 import std.net.curl : HTTP;
@@ -41,8 +40,9 @@ JSONValue request(
         return chunk.length;
     };
     client.perform();
-    enforce(client.statusLine.code == status,
-        "HTTP "~client.statusLine.code.to!string~" for "~path~": "~body);
+    if (client.statusLine.code != status)
+        throw new Exception("HTTP "~client.statusLine.code.to!string~" for "~path~": "~body);
+
     return parseJSON(body);
 }
 
@@ -83,7 +83,9 @@ void waitUntil(bool delegate() condition, Duration timeout = 5.seconds)
     MonoTime deadline = MonoTime.currTime + timeout;
     while (!condition())
     {
-        enforce(MonoTime.currTime < deadline, "Timed out waiting for test condition");
+        if (MonoTime.currTime >= deadline)
+            throw new Exception("Timed out waiting for test condition");
+
         Thread.sleep(10.msecs);
     }
 }

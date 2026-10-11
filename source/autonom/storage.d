@@ -4,7 +4,7 @@ import core.sys.posix.fcntl;
 import core.sys.posix.sys.stat : fstat, stat_t, S_IFMT, S_IFREG;
 import core.sys.posix.unistd : close, fsync;
 import std.conv : octal;
-import std.exception : enforce, errnoEnforce;
+import std.exception : ErrnoException;
 import std.file;
 import std.json : JSONValue, parseJSON;
 import std.path : dirName;
@@ -16,15 +16,21 @@ package(autonom):
 
 File openFile(string path, int flags)
 {
-    enforce(!isSymlink(dirName(path)), "Storage directory must not be a symlink");
+    if (isSymlink(dirName(path)))
+        throw new Exception("Storage directory must not be a symlink");
+
     int descriptor = open(path.toStringz, flags | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, octal!"600");
-    errnoEnforce(descriptor >= 0, "Could not open storage file");
+    if (descriptor < 0)
+        throw new ErrnoException("Could not open storage file");
+
     scope(failure)
         close(descriptor);
 
     stat_t attributes;
-    errnoEnforce(fstat(descriptor, &attributes) == 0, "Could not inspect storage file");
-    enforce((attributes.st_mode & S_IFMT) == S_IFREG, "Storage must be a regular file");
+    if (fstat(descriptor, &attributes) != 0)
+        throw new ErrnoException("Could not inspect storage file");
+    if ((attributes.st_mode & S_IFMT) != S_IFREG)
+        throw new Exception("Storage must be a regular file");
     File ret;
     ret.fdopen(descriptor, (flags & O_RDWR) ? "r+" : "r");
     return ret;
@@ -36,11 +42,15 @@ string readText(string path, size_t limit = 64 * 1024)
     scope(exit)
         file.close();
 
-    enforce(file.size <= limit, "Storage file is too large");
+    if (file.size > limit)
+        throw new Exception("Storage file is too large");
+
     string ret;
     foreach (chunk; file.byChunk(4096))
     {
-        enforce(chunk.length <= limit - ret.length, "Storage file is too large");
+        if (chunk.length > limit - ret.length)
+            throw new Exception("Storage file is too large");
+
         ret ~= cast(char[])chunk;
     }
 
@@ -65,9 +75,13 @@ void atomicWrite(string path, string content)
 void atomicWrite(string path, string content, out bool committed)
 {
     committed = false;
-    enforce(!(exists(path) && isSymlink(path)), "Storage file must not be a symlink");
+    if (exists(path) && isSymlink(path))
+        throw new Exception("Storage file must not be a symlink");
+
     int directory = open(dirName(path).toStringz, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-    errnoEnforce(directory >= 0, "Could not open storage directory");
+    if (directory < 0)
+        throw new ErrnoException("Could not open storage directory");
+
     scope(exit)
         close(directory);
 
@@ -82,8 +96,11 @@ void atomicWrite(string path, string content, out bool committed)
 
     file.write(content);
     file.flush();
-    errnoEnforce(fsync(file.fileno) == 0, "Could not flush storage file");
+    if (fsync(file.fileno) != 0)
+        throw new ErrnoException("Could not flush storage file");
+
     rename(temporary, path);
     committed = true;
-    errnoEnforce(fsync(directory) == 0, "Could not flush storage directory");
+    if (fsync(directory) != 0)
+        throw new ErrnoException("Could not flush storage directory");
 }

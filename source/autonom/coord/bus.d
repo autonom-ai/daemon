@@ -8,7 +8,6 @@ import autonom.exception;
 import autonom.storage;
 
 import std.algorithm : sort;
-import std.exception : enforce;
 import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath;
@@ -27,7 +26,9 @@ string canonicalRoomName(string name)
     if (name.length && name[0] == '#')
         name = name[1 .. $];
 
-    enforce!InvalidInputException(validName(name), "Invalid room name");
+    if (!validName(name))
+        throw new InvalidInputException("Invalid room name");
+
     return name.toLower.idup;
 }
 
@@ -71,11 +72,15 @@ private:
             return null;
 
         JSONValue data = readJSON(path);
-        enforce(data.type == JSONType.object, "Invalid read cursors");
+        if (data.type != JSONType.object)
+            throw new Exception("Invalid read cursors");
+
         size_t[string] ret;
         foreach (name, value; data.object)
         {
-            enforce(value.type == JSONType.integer && value.integer >= 0, "Invalid read cursors");
+            if (value.type != JSONType.integer || value.integer < 0)
+                throw new Exception("Invalid read cursors");
+
             ret[name.idup] = cast(size_t)value.integer;
         }
 
@@ -164,7 +169,9 @@ private:
     {
         if (exists(roomsDir))
         {
-            enforce(!isSymlink(roomsDir), "Coordination directory must not be a symlink");
+            if (isSymlink(roomsDir))
+                throw new Exception("Coordination directory must not be a symlink");
+
             foreach (DirEntry entry; dirEntries(roomsDir, SpanMode.shallow))
             {
                 if (!entry.isDir || entry.isSymlink)
@@ -191,7 +198,9 @@ public:
     {
         this.store = store;
         directory = buildPath(configuration.dataDir, "coord");
-        enforce(!(exists(directory) && isSymlink(directory)), "Coordination directory must not be a symlink");
+        if (exists(directory) && isSymlink(directory))
+            throw new Exception("Coordination directory must not be a symlink");
+
         mkdirRecurse(directory);
         load();
     }
@@ -284,9 +293,13 @@ public:
     Room createRoom(string name, string ownerProfileName)
     {
         name = canonicalRoomName(name);
-        enforce!ConflictException(name !in rooms, "Room already exists");
+        if (name in rooms)
+            throw new ConflictException("Room already exists");
+
         string path = buildPath(roomsDir, name);
-        enforce(!exists(path), "Room directory already exists");
+        if (exists(path))
+            throw new Exception("Room directory already exists");
+
         mkdirRecurse(roomsDir);
         Room ret = Room.create(name, path, ownerProfileName);
         rooms[name] = ret;

@@ -12,7 +12,7 @@ import serverino;
 import std.algorithm : sort;
 import std.ascii;
 import std.conv : octal;
-import std.exception : basicExceptionCtors, enforce;
+import std.exception : basicExceptionCtors;
 import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath;
@@ -59,7 +59,9 @@ private:
 
 string canonicalName(string name)
 {
-    enforce!InvalidInputException(validName(name), "Invalid profile name");
+    if (!validName(name))
+        throw new InvalidInputException("Invalid profile name");
+
     return name.toLower.idup;
 }
 
@@ -103,24 +105,31 @@ private:
         if (exists(statePath))
         {
             JSONValue data = readJSON(statePath);
-            enforce(data.type == JSONType.object && data.object.length == 3 && "version" in data.object &&
-                data["version"] == JSONValue(1) && "assignments" in data.object && "bindings" in data.object,
-                "Invalid profile state");
-            enforce(data["assignments"].type == JSONType.object && data["bindings"].type == JSONType.object,
-                "Invalid profile state");
+            if (data.type != JSONType.object || data.object.length != 3 || "version" !in data.object ||
+                data["version"] != JSONValue(1) || "assignments" !in data.object || "bindings" !in data.object)
+                throw new Exception("Invalid profile state");
+
+            if (data["assignments"].type != JSONType.object || data["bindings"].type != JSONType.object)
+                throw new Exception("Invalid profile state");
+
             foreach (id, name; data["assignments"].object)
             {
                 Session.validateId(id);
-                enforce(name.type == JSONType.string, "Invalid session mapping");
+                if (name.type != JSONType.string)
+                    throw new Exception("Invalid session mapping");
+
                 assignments[id.idup] = canonicalName(name.str);
             }
 
             foreach (name, value; data["bindings"].object)
             {
-                enforce(name == canonicalName(name) && (value.type == JSONType.string || value.isNull),
-                    "Invalid profile binding");
+                if (name != canonicalName(name) || (value.type != JSONType.string && !value.isNull))
+                    throw new Exception("Invalid profile binding");
+
                 string path = buildPath(directory, name);
-                enforce(isDir(path) && !isSymlink(path), "Profile directory is unavailable");
+                if (!isDir(path) || isSymlink(path))
+                    throw new Exception("Profile directory is unavailable");
+
                 bindings[name.idup] = value.isNull ? null : value.str.idup;
             }
         }
@@ -130,11 +139,15 @@ private:
             if (exists(path))
             {
                 JSONValue data = readJSON(path);
-                enforce(data.type == JSONType.object, "Invalid session mapping");
+                if (data.type != JSONType.object)
+                    throw new Exception("Invalid session mapping");
+
                 foreach (id, name; data.object)
                 {
                     Session.validateId(id);
-                    enforce(name.type == JSONType.string, "Invalid session mapping");
+                    if (name.type != JSONType.string)
+                        throw new Exception("Invalid session mapping");
+
                     assignments[id.idup] = canonicalName(name.str);
                 }
             }
@@ -145,28 +158,36 @@ private:
                     continue;
 
                 string name = entry.name.baseName;
-                enforce(name == canonicalName(name), "Invalid stored profile name");
+                if (name != canonicalName(name))
+                    throw new Exception("Invalid stored profile name");
+
                 bindings[name.idup] = null;
                 path = buildPath(directory, name, "session.json");
                 if (exists(path))
                 {
                     JSONValue data = readJSON(path);
-                    enforce(data.type == JSONType.object && "session_id" in data.object &&
-                        data["session_id"].type == JSONType.string, "Invalid profile session");
+                    if (data.type != JSONType.object || "session_id" !in data.object ||
+                        data["session_id"].type != JSONType.string)
+                        throw new Exception("Invalid profile session");
+
                     bindings[name] = data["session_id"].str.idup;
                 }
             }
         }
 
         foreach (id, name; assignments)
-            enforce(name in bindings, "The linked profile no longer exists");
+        {
+            if (name !in bindings)
+                throw new Exception("The linked profile no longer exists");
+        }
 
         foreach (name, id; bindings)
         {
             if (id.length)
             {
                 Session.validateId(id);
-                enforce(id in assignments && assignments[id] == name, "Invalid session mapping");
+                if (id !in assignments || assignments[id] != name)
+                    throw new Exception("Invalid session mapping");
             }
 
             profiles[name] = new Profile(name, id.length ? bridge.session(id) : null);
@@ -198,8 +219,9 @@ public:
     {
         this.bridge = bridge;
         directory = buildPath(configuration.dataDir, "agents");
-        enforce(!(exists(configuration.dataDir) && isSymlink(configuration.dataDir)) &&
-            !(exists(directory) && isSymlink(directory)), "Profile directory must not be a symlink");
+        if ((exists(configuration.dataDir) && isSymlink(configuration.dataDir)) ||
+            (exists(directory) && isSymlink(directory)))
+            throw new Exception("Profile directory must not be a symlink");
         mkdirRecurse(directory);
         load();
     }
@@ -228,17 +250,25 @@ public:
             return null;
 
         Profile profile = get(*owner);
-        enforce(profile !is null, "The linked profile no longer exists");
+        if (profile is null)
+            throw new Exception("The linked profile no longer exists");
+
         return profile.session is null || profile.session.id == id ? profile : null;
     }
 
     Profile create(string name)
     {
         name = canonicalName(name);
-        enforce!ProfileConflictException(name != HUMAN_NAME, "The human profile is reserved");
-        enforce!ProfileConflictException(name !in profiles, "Profile already exists");
+        if (name == HUMAN_NAME)
+            throw new ProfileConflictException("The human profile is reserved");
+
+        if (name in profiles)
+            throw new ProfileConflictException("Profile already exists");
+
         string path = buildPath(directory, name);
-        enforce(!exists(path), "Profile directory already exists");
+        if (exists(path))
+            throw new Exception("Profile directory already exists");
+
         mkdir(path);
         bool committed;
         scope(failure)
@@ -265,22 +295,31 @@ public:
     Profile register(string name, string id)
     {
         name = canonicalName(name);
-        enforce!ProfileConflictException(name != HUMAN_NAME, "The human profile is reserved");
+        if (name == HUMAN_NAME)
+            throw new ProfileConflictException("The human profile is reserved");
+
         Session.validateId(id);
-        enforce!ProfileConflictException(!bridge.isRemoved(id), "Session was removed");
+        if (bridge.isRemoved(id))
+            throw new ProfileConflictException("Session was removed");
+
         if (string* owner = id in assignments)
-            enforce!ProfileConflictException(*owner == name, "Session is already linked to another profile");
+        {
+            if (*owner != name)
+                throw new ProfileConflictException("Session is already linked to another profile");
+        }
 
         Profile ret = get(name);
-        if (ret !is null && ret.session !is null && ret.session.id != id)
-            enforce!ProfileConflictException(!locked(ret), "Profile is in use by an active session");
+        if (ret !is null && ret.session !is null && ret.session.id != id && locked(ret))
+            throw new ProfileConflictException("Profile is in use by an active session");
 
         bool created = ret is null;
         string path = buildPath(directory, name);
         bool committed;
         if (created)
         {
-            enforce(!exists(path), "Profile directory already exists");
+            if (exists(path))
+                throw new Exception("Profile directory already exists");
+
             mkdir(path);
         }
 
