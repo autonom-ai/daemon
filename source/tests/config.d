@@ -5,6 +5,7 @@ import intuit.router.openrouter;
 import tests.common;
 import unit_threaded : Name, should, shouldThrow;
 
+import core.time : hours, minutes, seconds;
 import std.file : exists, symlink, write;
 import std.path : buildPath;
 
@@ -122,6 +123,38 @@ unittest
     ])
     {
         write(fixture.path, "devinCommand: devin\n"~router);
+        (new Config(fixture.path)).shouldThrow!Exception();
+    }
+}
+
+@Name("Config parses wake settings and durations")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    fixture.config.compactOnResume.should == false;
+    fixture.config.offlineStartAfter.should == 1.hours;
+    fixture.config.offlineCompactAfter.should == 1.hours;
+    fixture.config.sessionDatabase.should == buildPath(fixture.root, "sessions.db");
+
+    write(fixture.path, "devinCommand: devin\ncompactOnResume: true\nofflineStartAfter: 30m\nofflineCompactAfter: 90\n"~ROUTER);
+    Config config = new Config(fixture.path);
+    config.compactOnResume.should == true;
+    config.offlineStartAfter.should == 30.minutes;
+    config.offlineCompactAfter.should == 90.seconds;
+
+    foreach (content; [
+        `compactOnResume: "yes"`~"\n",
+        "compactOnResume: 1\n",
+        "offlineStartAfter: soon\n",
+        "offlineStartAfter: 0s\n",
+        "offlineStartAfter: -5\n",
+        "offlineCompactAfter: []\n"
+    ])
+    {
+        write(fixture.path, "devinCommand: devin\n"~content~ROUTER);
         (new Config(fixture.path)).shouldThrow!Exception();
     }
 }

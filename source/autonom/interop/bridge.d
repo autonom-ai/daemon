@@ -59,7 +59,12 @@ protected:
         );
     }
 
-    Execution launch(Execution execution, string[] arguments, Execution prerequisite = null)
+    Execution launch(
+        Execution execution,
+        string[] arguments,
+        Execution prerequisite = null,
+        Execution dependency = null
+    )
     {
         size_t active;
         foreach (entry; executions)
@@ -71,7 +76,8 @@ protected:
             [command]~arguments,
             childEnvironment(),
             execution.kind == ExecutionKind.Remove ? 10.seconds : 120.seconds,
-            prerequisite
+            prerequisite,
+            dependency
         );
         executions[execution.id] = execution;
         return execution;

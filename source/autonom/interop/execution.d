@@ -1,5 +1,7 @@
 module autonom.interop.execution;
 
+// TODO: Execution records should eventually be replaced by the CLI session database (autonom.interop.devin.db).
+
 import autonom.interop.session;
 import autonom.server;
 import autonom.storage;
@@ -14,7 +16,7 @@ import core.sys.posix.unistd : setpgid;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
 import std.conv : octal, to;
-import std.datetime : Clock;
+import std.datetime : Clock, UTC;
 import std.exception : ErrnoException;
 import std.file;
 import std.json : JSONType, JSONValue;
@@ -60,6 +62,7 @@ enum ExecutionKind : string
     Start = "start",
     Print = "print",
     Resume = "resume",
+    Compact = "compact",
     Remove = "remove"
 }
 
@@ -80,6 +83,7 @@ private:
     {
         ExecutionStatus status = ExecutionStatus.Running;
         string sessionId;
+        string finishedAt;
         JSONValue exitStatus = JSONValue(null);
         string error;
     }
@@ -109,6 +113,8 @@ private:
             return ExecutionKind.Print;
         case "resume":
             return ExecutionKind.Resume;
+        case "compact":
+            return ExecutionKind.Compact;
         case "remove":
             return ExecutionKind.Remove;
         default:
@@ -140,12 +146,13 @@ private:
     JSONValue record(State state)
     {
         return JSONValue([
-            "version": JSONValue(1),
+            "version": JSONValue(2),
             "id": JSONValue(id),
             "kind": JSONValue(cast(string)kind),
             "workspace": JSONValue(workspace),
             "model": JSONValue(model),
             "createdAt": JSONValue(createdAt),
+            "finishedAt": state.finishedAt.length ? JSONValue(state.finishedAt) : JSONValue(null),
             "status": JSONValue(cast(string)state.status),
             "sessionId": state.sessionId.length ? JSONValue(state.sessionId) : JSONValue(null),
             "exitStatus": state.exitStatus,
@@ -165,6 +172,7 @@ private:
             _state.exitStatus = JSONValue(exitStatus);
             _state.status = stopRequested ? ExecutionStatus.Stopped :
                 exitStatus == 0 && !timedOut ? ExecutionStatus.Succeeded : ExecutionStatus.Failed;
+            _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
             if (timedOut)
                 _state.error = "CLI command timed out";
             else if (_state.status == ExecutionStatus.Failed)
@@ -200,7 +208,8 @@ private:
         string[] arguments,
         string[string] environment,
         Duration timeout,
-        Execution prerequisite
+        Execution prerequisite,
+        Execution dependency
     )
     {
         Pid process;
@@ -212,6 +221,8 @@ private:
         {
             if (prerequisite !is null)
                 prerequisite.stop();
+            if (dependency !is null)
+                dependency.wait();
 
             File output = openFile(outputPath, O_RDWR | O_CREAT | O_EXCL);
             File errors = openFile(errorPath, O_RDWR | O_CREAT | O_EXCL);
@@ -228,6 +239,7 @@ private:
                 if (stopRequested)
                 {
                     _state.status = ExecutionStatus.Stopped;
+                    _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
                     save();
                     return;
                 }
@@ -282,6 +294,7 @@ private:
             {
                 _state.status = ExecutionStatus.Failed;
                 _state.exitStatus = result.terminated ? JSONValue(result.status) : JSONValue(null);
+                _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
                 _state.error = "Could not complete execution or validate its session export";
                 try
                     save();
@@ -316,7 +329,7 @@ public:
         this.id = id.idup;
         this.kind = kind;
         this.workspace = workspace.idup;
-        this.model = model.idup;
+        this.model = model.length ? model.idup : "";
         this.createdAt = createdAt.length ? createdAt.idup : Clock.currTime().toUTC().toISOExtString();
         mutex = new Mutex();
         joinMutex = new Mutex();
@@ -328,6 +341,9 @@ public:
 
     string sessionId()
         => snapshot.sessionId;
+
+    string finishedAt()
+        => snapshot.finishedAt;
 
     JSONValue exitStatus()
         => snapshot.exitStatus;
@@ -368,7 +384,8 @@ public:
         string[] arguments,
         string[string] environment,
         Duration timeout = 120.seconds,
-        Execution prerequisite = null
+        Execution prerequisite = null,
+        Execution dependency = null
     )
     {
         mkdirRecurse(directory);
@@ -381,7 +398,7 @@ public:
 
         save();
         monitor = new Thread({
-            execute(owned, environment, timeout, prerequisite);
+            execute(owned, environment, timeout, prerequisite, dependency);
         });
         monitor.start();
     }
@@ -430,7 +447,8 @@ public:
     static Execution load(string directory, string logDirectory, string id)
     {
         JSONValue data = readJSON(buildPath(directory, id~".json"));
-        if (data.type != JSONType.object || "version" !in data.object || data["version"] != JSONValue(1))
+        if (data.type != JSONType.object || "version" !in data.object ||
+            (data["version"] != JSONValue(1) && data["version"] != JSONValue(2)))
             throw new Exception("Invalid execution record");
 
         foreach (field; ["id", "kind", "workspace", "model", "createdAt", "status"])
@@ -448,6 +466,9 @@ public:
             throw new Exception("Invalid execution exit");
         if (!data["error"].isNull && data["error"].type != JSONType.string)
             throw new Exception("Invalid execution error");
+        if (data["version"] == JSONValue(2) &&
+            ("finishedAt" !in data.object || (!data["finishedAt"].isNull && data["finishedAt"].type != JSONType.string)))
+            throw new Exception("Invalid execution finish");
 
         Execution ret = new Execution(
             directory,
@@ -465,9 +486,13 @@ public:
         ret._state.status = parseStatus(data["status"].str);
         ret._state.exitStatus = data["exitStatus"];
         ret._state.error = data["error"].isNull ? null : data["error"].str;
+        if (data["version"] == JSONValue(2) && !data["finishedAt"].isNull)
+            ret._state.finishedAt = data["finishedAt"].str.idup;
+
         if (ret.running)
         {
             ret._state.status = ExecutionStatus.Interrupted;
+            ret._state.finishedAt = Clock.currTime(UTC()).toISOExtString();
             ret._state.error = "Daemon stopped before execution completed";
             ret.save();
         }

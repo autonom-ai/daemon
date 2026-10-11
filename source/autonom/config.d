@@ -6,7 +6,10 @@ import intuit.router : IRouter;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
 
+import core.time : Duration, hours, seconds;
 import std.algorithm.searching : canFind;
+import std.ascii : isDigit;
+import std.conv : to;
 import std.path;
 import std.process : environment;
 
@@ -15,13 +18,80 @@ private:
 string resolvePath(string path, string base)
     => buildNormalizedPath(absolutePath(expandTilde(path), base));
 
+Duration parseDuration(string text, string name)
+{
+    if (!text.length)
+        throw new Exception(name~" must be a duration such as 30m or 1h");
+
+    long scale = 1;
+    string digits = text;
+    char unit = text[$ - 1];
+    if (!isDigit(unit))
+    {
+        switch (unit)
+        {
+        case 's':
+            break;
+
+        case 'm':
+            scale = 60;
+            break;
+
+        case 'h':
+            scale = 3600;
+            break;
+
+        case 'd':
+            scale = 86400;
+            break;
+
+        default:
+            throw new Exception(name~" must be a duration such as 30m or 1h");
+        }
+
+        digits = text[0 .. $ - 1];
+    }
+
+    long value;
+    try
+        value = digits.to!long;
+    catch (Exception)
+        throw new Exception(name~" must be a duration such as 30m or 1h");
+
+    if (value < 1)
+        throw new Exception(name~" must be a positive duration");
+
+    return (value * scale).seconds;
+}
+
+Duration readDuration(YamlAlgebraic value, string name)
+{
+    if (value.kind == YamlAlgebraic.Kind.integer)
+    {
+        long seconds = value.get!long;
+        if (seconds < 1)
+            throw new Exception(name~" must be a positive duration");
+
+        return seconds.seconds;
+    }
+
+    if (value.kind != YamlAlgebraic.Kind.string)
+        throw new Exception(name~" must be a duration such as 30m or 1h");
+
+    return parseDuration(value.get!string, name);
+}
+
 public:
 
 class Config
 {
     string dataDir;
     string sessionLockDir;
+    string sessionDatabase;
     string devinCommand;
+    bool compactOnResume;
+    Duration offlineStartAfter = 1.hours;
+    Duration offlineCompactAfter = 1.hours;
     IRouter router;
 
     static string defaultPath()
@@ -62,6 +132,27 @@ class Config
                 continue;
             }
 
+            switch (key)
+            {
+            case "compactOnResume":
+                if (pair.value.kind != YamlAlgebraic.Kind.boolean)
+                    throw new Exception("compactOnResume must be true or false");
+
+                compactOnResume = pair.value.get!bool;
+                continue;
+
+            case "offlineStartAfter":
+                offlineStartAfter = readDuration(pair.value, key);
+                continue;
+
+            case "offlineCompactAfter":
+                offlineCompactAfter = readDuration(pair.value, key);
+                continue;
+
+            default:
+                break;
+            }
+
             if (pair.value.kind != YamlAlgebraic.Kind.string)
                 throw new Exception("Configuration settings must be strings");
 
@@ -94,6 +185,7 @@ class Config
             throw new Exception("Configuration requires router");
         dataDir = resolvePath(dataDir, base);
         sessionLockDir = resolvePath(sessionLockDir, base);
+        sessionDatabase = buildPath(dirName(sessionLockDir), "sessions.db");
         if (devinCommand.canFind('/'))
             devinCommand = resolvePath(devinCommand, base);
     }
