@@ -1,17 +1,15 @@
 module tests.coord;
 
-import autonom.agent.profile : HUMAN_NAME, Profile;
-import autonom.agent.store : ProfileConflict;
-import autonom.coord.access : messages, room, roomAdmins, roomMembership, roomMessages, rooms;
-import autonom.coord.bus : Bus;
-import autonom.coord.room : Room;
-import autonom.coord.stream : Entry, MAX_ENTRIES;
-import tests.common : Fixture;
+import autonom.agent;
+import autonom.coord;
+import autonom.coord.access;
+import autonom.coord.stream;
+import tests.common;
 import serverino : endpoint, route;
 import unit_threaded : Name, should, shouldThrow;
 
 import std.conv : to;
-import std.file : append, exists, readText, symlink, write;
+import std.file;
 import std.json : JSONValue;
 import std.path : buildPath;
 import std.traits : hasUDA;
@@ -226,8 +224,8 @@ unittest
     Room room = bus.createRoom("general", marlow.name);
     bus.createRoom("general", marlow.name).shouldThrow!Exception();
     bus.createRoom("bad name", marlow.name).shouldThrow!Exception();
-    fixture.store.create(HUMAN_NAME).shouldThrow!ProfileConflict();
-    fixture.store.register(HUMAN_NAME, "session-2").shouldThrow!ProfileConflict();
+    fixture.store.create(HUMAN_NAME).shouldThrow!ProfileConflictException();
+    fixture.store.register(HUMAN_NAME, "session-2").shouldThrow!ProfileConflictException();
 
     string path = buildPath(room.directory, "messages.jsonl");
     string target = buildPath(fixture.root, "target.jsonl");

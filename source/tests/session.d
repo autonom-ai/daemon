@@ -1,9 +1,9 @@
 module tests.session;
 
-import autonom.agent : ProfileConflict;
-import autonom.interop : Devin, Execution, ExecutionStatus, Session, SessionStatus;
-import autonom.interop.session : removeSessions;
-import tests.common : Fixture, waitUntil;
+import autonom.agent;
+import autonom.interop;
+import autonom.interop.session;
+import tests.common;
 import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should, shouldThrow;
 
@@ -11,7 +11,7 @@ import core.sys.linux.sys.file : flock, LOCK_EX;
 import std.algorithm : canFind;
 import std.array : replicate;
 import std.conv : octal;
-import std.file : exists, mkdirRecurse, readText, setAttributes, write;
+import std.file;
 import std.json : JSONValue, parseJSON;
 import std.path : buildPath;
 import std.process : environment;
@@ -96,7 +96,7 @@ unittest
     flock(lock.fileno, LOCK_EX).should == 0;
     session.status.should == SessionStatus.Online;
     session.stop().shouldThrow!Exception();
-    fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflict();
+    fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflictException();
     lock.close();
     waitUntil(delegate bool()
     {
@@ -185,7 +185,7 @@ unittest
 
     session.resume("work", fixture.root);
     session.resume("work", fixture.root).shouldThrow!Exception();
-    fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflict();
+    fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflictException();
 }
 
 @Name("Session stop reaps owned processes and permits resume")
@@ -224,11 +224,17 @@ while :; do sleep 0.05; done
     scope(exit)
         session.stop();
 
+    string previousApiKey = environment.get("OPENROUTER_API_KEY");
     environment["ACP_BACKEND"] = "windsurf";
+    environment["OPENROUTER_API_KEY"] = "test-router-key";
     environment["WINDSURF_IDE_TYPE"] = "windsurf";
     scope(exit)
     {
         environment.remove("ACP_BACKEND");
+        if (previousApiKey is null)
+            environment.remove("OPENROUTER_API_KEY");
+        else
+            environment["OPENROUTER_API_KEY"] = previousApiKey;
         environment.remove("WINDSURF_IDE_TYPE");
     }
 
@@ -239,6 +245,7 @@ while :; do sleep 0.05; done
     });
     string spawned = readText(buildPath(fixture.root, "environ.txt"));
     spawned.canFind("ACP_BACKEND=").should == false;
+    spawned.canFind("OPENROUTER_API_KEY=").should == false;
     spawned.canFind("WINDSURF_IDE_TYPE=").should == false;
     spawned.canFind("PATH=").should == true;
 }

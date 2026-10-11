@@ -1,9 +1,9 @@
 module autonom.interop.bridge;
 
-import autonom.exception : BackendFailure, Conflict;
-import autonom.interop.execution : Execution, ExecutionKind, ExecutionStatus;
-import autonom.interop.session : Session;
-import autonom.storage : openFile;
+import autonom.exception;
+import autonom.interop.execution;
+import autonom.interop.session;
+import autonom.storage;
 
 import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_RDWR;
 import core.sys.posix.signal : SIGKILL;
@@ -13,13 +13,12 @@ import std.algorithm : any, endsWith, sort, startsWith;
 import std.array : join;
 import std.conv : to;
 import std.exception : enforce;
-import std.file : DirEntry, SpanMode, dirEntries, exists, isSymlink, mkdirRecurse, removeFile = remove;
+import std.file;
 import std.path : baseName, buildPath, dirName;
-import std.process : environment, PROCESS_CONFIG = Config, Pid, spawnProcess, tryWait, wait;
+import std.process;
 import std.stdio : File;
-import std.uuid : randomUUID;
+import std.uuid;
 
-/// Contract for a CLI-backed agent bridge.
 abstract class Bridge
 {
 private:
@@ -61,14 +60,13 @@ protected:
         );
     }
 
-    /// Spawns the session CLI process, capturing its output in the execution and session logs.
     Execution launch(Execution execution, string[] arguments, Execution prerequisite = null)
     {
         size_t active;
         foreach (entry; executions)
             active += entry.running;
 
-        enforce!Conflict(active < 8, "Execution capacity reached");
+        enforce!ConflictException(active < 8, "Execution capacity reached");
         execution.start(
             [command]~arguments,
             childEnvironment(),
@@ -107,7 +105,6 @@ public:
         }
     }
 
-    /// Gets the canonical session handle for the given ID, creating it on first use.
     Session session(string id)
     {
         Session.validateId(id);
@@ -178,7 +175,6 @@ public:
         return removed.keys;
     }
 
-    /// Stops every session process owned by this bridge, including unprofiled executions.
     void stopSessions()
     {
         foreach (execution; executions)
@@ -214,17 +210,13 @@ public:
             throw failure;
     }
 
-    /// Reports whether the backend considers the session active.
     abstract bool online(string id);
 
-    /// Removes the backend session and its local artifacts.
     abstract Execution remove(string id);
 
-    /// Gets the path of the session log.
     string logPath(string id) const
         => buildPath(logDir, id~".log");
 
-    /// Opens the session log for appending.
     File openLog(string id)
     {
         Session.validateId(id);
@@ -232,16 +224,14 @@ public:
         return openFile(logPath(id), O_RDWR | O_CREAT | O_APPEND);
     }
 
-    /// Removes the session log when present.
     void removeLog(string id)
     {
         Session.validateId(id);
         string path = logPath(id);
         if (exists(path))
-            removeFile(path);
+            std.file.remove(path);
     }
 
-    /// Runs a short CLI metadata command to completion and returns its stdout.
     string run(string[] arguments, string directory = null, Duration timeout = 2.seconds)
     {
         File output = File.tmpfile();
@@ -252,7 +242,7 @@ public:
             errors.close();
         }
 
-        PROCESS_CONFIG options = PROCESS_CONFIG.newEnv | PROCESS_CONFIG.retainStdout | PROCESS_CONFIG.retainStderr;
+        Config options = Config.newEnv | Config.retainStdout | Config.retainStderr;
         options.preExecFunction = &Execution.createProcessGroup;
         Pid process = spawnProcess(
             [command]~arguments,
@@ -277,12 +267,12 @@ public:
         typeof(tryWait(Pid.init)) result;
         while (!(result = tryWait(process)).terminated)
         {
-            enforce!BackendFailure(MonoTime.currTime < deadline, "CLI command timed out");
+            enforce!BackendException(MonoTime.currTime < deadline, "CLI command timed out");
             Thread.sleep(10.msecs);
         }
 
         finished = true;
-        enforce!BackendFailure(result.status == 0, "CLI command failed (exit "~result.status.to!string~")");
+        enforce!BackendException(result.status == 0, "CLI command failed (exit "~result.status.to!string~")");
         output.rewind();
         enforce(output.size <= 1024 * 1024, "CLI response is too large");
         return cast(string)output.byChunk(4096).join;

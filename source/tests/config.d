@@ -1,20 +1,12 @@
 module tests.config;
 
-import autonom.config : Config, getConfig;
-import tests.common : Fixture;
-import serverino : endpoint, route;
+import autonom.config;
+import intuit.router.openrouter;
+import tests.common;
 import unit_threaded : Name, should, shouldThrow;
 
 import std.file : exists, symlink, write;
 import std.path : buildPath;
-import std.traits : hasUDA;
-
-@Name("Config declares its module-level HTTP endpoint")
-unittest
-{
-    hasUDA!(getConfig, endpoint).should == true;
-    hasUDA!(getConfig, route).should == true;
-}
 
 @Name("Config resolves paths relative to the YAML file")
 unittest
@@ -28,46 +20,64 @@ unittest
     fixture.config.devinCommand.should == buildPath(fixture.root, "devin");
 }
 
-@Name("Config missing file uses defaults without creating storage")
+@Name("Config defaults only the data and lock directories")
 unittest
 {
     Fixture fixture = Fixture.create();
     scope(exit)
         fixture.close();
 
-    Config config = new Config(buildPath(fixture.root, "missing", "config.yml"));
-    config.dataDir.should == buildPath(fixture.root, "missing");
+    string path = buildPath(fixture.root, "defaults.yml");
+    write(path, "devinCommand: devin\n"~ROUTER);
+    Config config = new Config(path);
+    config.dataDir.should == fixture.root;
+    config.sessionLockDir.should == Config.defaultSessionLockDir;
     config.devinCommand.should == "devin";
-    exists(config.dataDir).should == false;
 }
 
-@Name("Config defaults to the free Mercury policy model without exposing credentials")
+@Name("Config builds its configured OpenRouter")
 unittest
 {
     Fixture fixture = Fixture.create();
     scope(exit)
         fixture.close();
 
-    fixture.config.toJSON()["policyUrl"].str.should == "https://openrouter.ai";
-    fixture.config.toJSON()["policyModel"].str.should == "inception/mercury-decide:free";
-    fixture.config.toJSON().object.length.should == 5;
-    (fixture.config.router !is null).should == true;
-    fixture.config.router.name.should == "OpenRouter";
-}
-
-@Name("Config accepts a policy router URL and model")
-unittest
-{
-    Fixture fixture = Fixture.create();
-    scope(exit)
-        fixture.close();
-
-    write(fixture.path, "policyUrl: http://127.0.0.1:1234\npolicyModel: test-model\n");
+    write(fixture.path, `devinCommand: devin
+router:
+  type: openrouter
+  key: test-key
+  url: https://router.example
+  name: autonom-test
+  referer: https://example.test
+  title: Autonom Test
+`);
     Config config = new Config(fixture.path);
-    config.toJSON()["policyUrl"].str.should == "http://127.0.0.1:1234";
-    config.toJSON()["policyModel"].str.should == "test-model";
-    (config.router !is null).should == true;
-    config.router.name.should == "OpenRouter";
+    OpenRouter router = cast(OpenRouter)config.router;
+    (router !is null).should == true;
+    router.name.should == "autonom-test";
+    router.referer.should == "https://example.test";
+    router.title.should == "Autonom Test";
+}
+
+@Name("Config requires an existing file, devinCommand, and router")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    string missingDirectory = buildPath(fixture.root, "missing");
+    (new Config(buildPath(missingDirectory, "config.yml"))).shouldThrow!Exception();
+    exists(missingDirectory).should == false;
+
+    foreach (content; [
+        "devinCommand: devin\n",
+        ROUTER
+    ])
+    {
+        write(fixture.path, content);
+        (new Config(fixture.path)).shouldThrow!Exception();
+    }
 }
 
 @Name("Config rejects malformed YAML and unsupported settings")
@@ -77,15 +87,41 @@ unittest
     scope(exit)
         fixture.close();
 
+    string complete = "devinCommand: devin\n"~ROUTER;
     foreach (content; [
-        "dataDir: [",
-        "[]",
-        "unknown: test",
-        "dataDir: 42",
-        "dataDir: ''"
+        "dataDir: [\n",
+        "[]\n",
+        "unknown: test\n",
+        "policyUrl: http://127.0.0.1:1234\n",
+        "policyModel: test-model\n",
+        "dataDir: 42\n",
+        "dataDir: ''\n",
+        "dataDir: null\n"
     ])
     {
-        write(fixture.path, content);
+        write(fixture.path, content~complete);
+        (new Config(fixture.path)).shouldThrow!Exception();
+    }
+}
+
+@Name("Config rejects incomplete and unsupported routers")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    foreach (router; [
+        "router: []\n",
+        "router: {}\n",
+        "router:\n  type: unsupported\n  key: test-key\n  url: https://openrouter.ai\n  name: OpenRouter\n",
+        "router:\n  type: openrouter\n  url: https://openrouter.ai\n  name: OpenRouter\n",
+        "router:\n  type: openrouter\n  key: ''\n  url: https://openrouter.ai\n  name: OpenRouter\n",
+        "router:\n  type: openrouter\n  key: test-key\n  url: ftp://openrouter.ai\n  name: OpenRouter\n",
+        "router:\n  type: openrouter\n  key: test-key\n  url: https://openrouter.ai\n"
+    ])
+    {
+        write(fixture.path, "devinCommand: devin\n"~router);
         (new Config(fixture.path)).shouldThrow!Exception();
     }
 }

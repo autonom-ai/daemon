@@ -1,30 +1,31 @@
 module autonom.interop.devin.bridge;
 
-import autonom.config : Config;
-import autonom.exception : BackendFailure, Conflict, InvalidInput;
-import autonom.interop.bridge : Bridge;
-import autonom.interop.devin.session : DevinSession;
-import autonom.interop.execution : Execution, ExecutionKind;
-import autonom.interop.session : Session;
+import autonom.config;
+import autonom.exception;
+import autonom.interop.bridge;
+import autonom.interop.devin.session;
+import autonom.interop.execution;
+import autonom.interop.session;
 import autonom.server : acceptMethod, bridge, readLaunch, respond;
-import autonom.storage : openFile;
-import serverino : Output, Request, endpoint, route;
+import autonom.storage;
+import serverino;
 
 import core.stdc.errno : errno, EWOULDBLOCK;
 import core.sys.linux.sys.file : flock, LOCK_EX, LOCK_NB;
 import core.sys.posix.fcntl : O_RDONLY;
 import std.algorithm : canFind;
 import std.exception : enforce, errnoEnforce;
-import std.file : exists, isDir;
+import std.file;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.path : buildPath;
 import std.stdio : File;
 
 private:
 
-enum string[] HOST_PREFIXES = [
+enum string[] SCRUB_PREFIXES = [
     "ACP_",
     "ELECTRON_",
+    "OPENROUTER_API_KEY",
     "VSCODE_",
     "WINDSURF_"
 ];
@@ -56,7 +57,6 @@ void printSession(Request request, Output output)
     respond(output, bridge.print(data["prompt"].str, data["directory"].str, data["model"].str).toJSON(), 202);
 }
 
-/// Devin CLI bridge.
 class Devin : Bridge
 {
 private:
@@ -71,7 +71,7 @@ private:
         string id = null
     )
     {
-        enforce!InvalidInput(directory.length && exists(directory) && isDir(directory),
+        enforce!InvalidInputException(directory.length && exists(directory) && isDir(directory),
             "An existing working directory is required");
         string[] args = arguments(prompt, model);
         Execution ret = newExecution(kind, directory, model, id);
@@ -91,15 +91,15 @@ public:
 
     this(Config configuration)
     {
-        super(configuration.devinCommand, buildPath(configuration.dataDir, "sessions"), HOST_PREFIXES);
+        super(configuration.devinCommand, buildPath(configuration.dataDir, "sessions"), SCRUB_PREFIXES);
         sessionLockDir = configuration.sessionLockDir;
         collect();
     }
 
     static string[] arguments(string prompt, string model = null)
     {
-        enforce!InvalidInput(prompt.length && !prompt.canFind('\0'), "A prompt is required");
-        enforce!InvalidInput(!model.canFind('\0'), "Invalid model name");
+        enforce!InvalidInputException(prompt.length && !prompt.canFind('\0'), "A prompt is required");
+        enforce!InvalidInputException(!model.canFind('\0'), "Invalid model name");
         string[] ret = ["--print"];
         if (model.length)
             ret ~= ["--model", model.idup];
@@ -129,14 +129,16 @@ public:
         if (session.isRunning() && session.execution.kind == ExecutionKind.Remove)
             return session.execution;
 
-        enforce!Conflict(session.isRunning() || !online(id), "Cannot remove a session owned by another process");
+        enforce!ConflictException(
+            session.isRunning() || !online(id),
+            "Cannot remove a session owned by another process"
+        );
         Execution ret = newExecution(ExecutionKind.Remove, null, null, session.id);
         launch(ret, ["rm", "--force", "--", session.id], session.execution);
         session.bindExecution(ret);
         return ret;
     }
 
-    /// Continues the session through a print, capturing its output in the session log.
     Execution resume(
         string id,
         string prompt,
@@ -145,32 +147,25 @@ public:
     )
         => submit(ExecutionKind.Resume, prompt, directory, model, id);
 
-    /**
-     * Starts a new session through a print, returning its execution handle.
-     *
-     * The print reply is written to the session log.
-     */
     Execution start(string prompt, string directory, string model = null)
         => submit(ExecutionKind.Start, prompt, directory, model);
 
-    /// Runs a one-shot prompt asynchronously; its execution exposes the completed reply.
     Execution print(string prompt, string directory, string model = null)
         => submit(ExecutionKind.Print, prompt, directory, model);
 
-    /// Lists session IDs for a directory and discovers their canonical handles.
     string[] list(string directory = null)
     {
         JSONValue data;
         try
             data = parseJSON(run(["list", "--format", "json"], directory));
         catch (Exception)
-            throw new BackendFailure("Could not list backend sessions");
+            throw new BackendException("Could not list backend sessions");
 
-        enforce!BackendFailure(data.type == JSONType.array, "Invalid backend session list");
+        enforce!BackendException(data.type == JSONType.array, "Invalid backend session list");
         string[] ret;
         foreach (entry; data.array)
         {
-            enforce!BackendFailure(entry.type == JSONType.object && "id" in entry.object &&
+            enforce!BackendException(entry.type == JSONType.object && "id" in entry.object &&
                 entry["id"].type == JSONType.string, "Invalid backend session list");
             Session.validateId(entry["id"].str);
             ret ~= session(entry["id"].str).id;

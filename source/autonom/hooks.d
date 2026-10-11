@@ -1,11 +1,11 @@
 module autonom.hooks;
 
-import autonom.agent.profile : Profile;
-import autonom.exception : InvalidInput;
-import autonom.interop.session : Session;
-import autonom.policy : PolicyResult;
-import autonom.server : bridge, bus, policy, profileStore, readBody, respond;
-import serverino : Output, Request, endpoint, route;
+import autonom.agent;
+import autonom.exception;
+import autonom.interop.session;
+import autonom.policy;
+import autonom.server;
+import serverino;
 
 import std.algorithm.searching : startsWith;
 import std.exception : enforce;
@@ -15,16 +15,13 @@ private:
 
 enum MCP_PREFIX = "mcp__autonom-coord__";
 
-/// Reports whether a tool belongs to the coordination MCP.
 bool coordinationTool(string tool)
     => tool.startsWith(MCP_PREFIX);
 
-/// Reports whether the tool call reads the ping stream, which unread pings must not block.
 bool readsPings(string tool, JSONValue input)
     => tool == MCP_PREFIX~"read_messages" && "source" in input.object &&
         input["source"].type == JSONType.string && input["source"].str == "pings";
 
-/// Blocks the request while the session's profile has unread pings, writing the response when it does.
 bool blockedByPings(
     string tool,
     JSONValue input,
@@ -60,8 +57,6 @@ bool blockedByPings(
     return true;
 }
 
-// TODO: SessionStart, UserPromptSubmit, and PostToolUse context injection (profile briefing, unread
-// dms, and pings) once the coordination MCP surfaces rooms and messages to agents.
 
 void respondHook(string EVENT)(Request request, Output output)
 {
@@ -72,9 +67,9 @@ void respondHook(string EVENT)(Request request, Output output)
     }
 
     JSONValue data = readBody(request);
-    enforce!InvalidInput("hook_event_name" in data.object && data["hook_event_name"].type == JSONType.string,
+    enforce!InvalidInputException("hook_event_name" in data.object && data["hook_event_name"].type == JSONType.string,
         "Expected a string hook_event_name");
-    enforce!InvalidInput(data["hook_event_name"].str == EVENT, "Expected the "~EVENT~" hook event");
+    enforce!InvalidInputException(data["hook_event_name"].str == EVENT, "Expected the "~EVENT~" hook event");
     respond(output, JSONValue(cast(JSONValue[string])null));
 }
 
@@ -90,9 +85,9 @@ void preToolUse(Request request, Output output)
     }
 
     JSONValue data = readBody(request);
-    enforce!InvalidInput("hook_event_name" in data.object && data["hook_event_name"].type == JSONType.string,
+    enforce!InvalidInputException("hook_event_name" in data.object && data["hook_event_name"].type == JSONType.string,
         "Expected a string hook_event_name");
-    enforce!InvalidInput(data["hook_event_name"].str == "PreToolUse", "Expected the PreToolUse hook event");
+    enforce!InvalidInputException(data["hook_event_name"].str == "PreToolUse", "Expected the PreToolUse hook event");
 
     if ("tool_name" !in data.object || data["tool_name"].type != JSONType.string || data["tool_name"].str.length == 0)
     {
@@ -104,7 +99,7 @@ void preToolUse(Request request, Output output)
     JSONValue input = JSONValue.emptyObject;
     if ("tool_input" in data.object)
     {
-        enforce!InvalidInput(data["tool_input"].type == JSONType.object, "Tool input must be an object");
+        enforce!InvalidInputException(data["tool_input"].type == JSONType.object, "Tool input must be an object");
         input = data["tool_input"];
     }
 
@@ -192,8 +187,6 @@ void userPromptSubmit(Request request, Output output)
     respondHook!"UserPromptSubmit"(request, output);
 }
 
-// TODO: Scheduler events supporting time, pings, dms, room messages, GitHub CLI, and Linear so agents
-// can stop and then be able to start back up (apropos wait_for_message).
 
 @endpoint @route!"/api/hooks/stop"
 void stop(Request request, Output output)

@@ -1,6 +1,6 @@
 module evals.session;
 
-import evals : Eval, get, post, waitFor;
+import evals;
 
 import core.time : seconds;
 import std.algorithm.searching : canFind;
@@ -8,7 +8,7 @@ import std.conv : to;
 import std.exception : enforce;
 import std.json : JSONType, JSONValue;
 import std.string : strip;
-import std.uri : encodeComponent;
+import std.uri;
 
 private:
 

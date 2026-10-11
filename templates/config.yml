@@ -1,0 +1,9 @@
+dataDir: ~/.local/share/autonom
+devinCommand: devin
+router:
+  type: openrouter
+  key: ""
+  url: https://openrouter.ai
+  name: OpenRouter
+  referer: ""
+  title: ""

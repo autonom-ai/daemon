@@ -1,27 +1,23 @@
 module autonom.coord.stream;
 
-import autonom.storage : openFile;
+import autonom.storage;
 
 import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_RDONLY, O_RDWR;
 import std.array : join;
 import std.datetime : Clock, UTC;
-import std.file : exists, mkdirRecurse;
+import std.file;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.path : dirName;
 import std.stdio : File;
 import std.string : indexOf, splitLines;
-import std.uuid : randomUUID;
+import std.uuid;
 
 public:
 
-/// Entries a stream keeps in memory.
 enum MAX_ENTRIES = 1000;
-/// Bytes a stream reads when it loads its log.
 enum MAX_LOG_BYTES = 4 * 1024 * 1024;
-/// Hectonanoseconds in a millisecond.
-enum HNSSECS_PER_MSEC = 10_000;
+enum HECTONANOSECONDS_PER_MILLISECOND = 10_000;
 
-/// One message on the bus.
 struct Entry
 {
 private:
@@ -54,25 +50,18 @@ private:
     }
 
 public:
-    /// Stable identifier for the entry.
     string id;
-    /// Millisecond epoch of the post.
     long timestamp;
-    /// Profile name of the sender.
     string from;
-    /// Message text.
     string text;
-    /// Recipient profile name for a direct message.
     string to;
-    /// Room name for a room message.
     string room;
 
-    /// Creates an entry for a sender with optional routing.
     static Entry create(string from, string text, string to = null, string room = null)
     {
         Entry ret;
         ret.id = randomUUID().toString();
-        ret.timestamp = Clock.currTime(UTC()).stdTime / HNSSECS_PER_MSEC;
+        ret.timestamp = Clock.currTime(UTC()).stdTime / HECTONANOSECONDS_PER_MILLISECOND;
         ret.from = from;
         ret.text = text;
         ret.to = to;
@@ -80,7 +69,6 @@ public:
         return ret;
     }
 
-    /// Serializes the entry, omitting absent routing.
     JSONValue toJSON()
     {
         JSONValue ret = JSONValue.emptyObject;
@@ -98,7 +86,6 @@ public:
     }
 }
 
-/// An append-only message log with its most recent entries held in memory.
 class Stream
 {
 private:
@@ -153,9 +140,7 @@ private:
     }
 
 public:
-    /// Stream key, such as room:general, dms:marlow, or pings:marlow.
     const string name;
-    /// Path of the append-only log.
     const string path;
 
     this(string name, string path)
@@ -165,11 +150,9 @@ public:
         load();
     }
 
-    /// Entries held in memory, oldest first.
     Entry[] entries()
         => window;
 
-    /// Entries at or after an in-memory position.
     Entry[] since(size_t position)
     {
         if (position >= window.length)
@@ -178,7 +161,6 @@ public:
         return window[position .. $];
     }
 
-    /// Appends an entry to the log and to the window.
     void append(Entry entry)
     {
         mkdirRecurse(dirName(path));

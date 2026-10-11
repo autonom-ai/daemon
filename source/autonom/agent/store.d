@@ -1,20 +1,19 @@
 module autonom.agent.store;
 
-import autonom.agent.profile : HUMAN_NAME, Profile;
-import autonom.config : Config;
-import autonom.exception : Conflict, InvalidInput;
-import autonom.interop.bridge : Bridge;
-import autonom.interop.session : Session;
-import autonom.server : acceptMethod, matchesPath, profileStore, readField, respond, routeParameter;
-import autonom.storage : atomicWrite, readJSON;
-import serverino : Output, Request, endpoint, route;
+import autonom.agent.profile;
+import autonom.config;
+import autonom.exception;
+import autonom.interop.bridge;
+import autonom.interop.session;
+import autonom.server;
+import autonom.storage;
+import serverino;
 
 import std.algorithm : sort;
-import std.ascii : isAlphaNum;
+import std.ascii;
 import std.conv : octal;
-import std.exception : enforce;
-import std.file : DirEntry, SpanMode, dirEntries, exists, isDir, isSymlink, mkdir, mkdirRecurse, rmdir,
-    setAttributes;
+import std.exception : basicExceptionCtors, enforce;
+import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath;
 import std.string : toLower;
@@ -60,13 +59,12 @@ private:
 
 string canonicalName(string name)
 {
-    enforce!InvalidInput(validName(name), "Invalid profile name");
+    enforce!InvalidInputException(validName(name), "Invalid profile name");
     return name.toLower.idup;
 }
 
 public:
 
-/// Reports whether a name is valid for a profile or room.
 bool validName(string name)
 {
     if (!name.length || name.length > 64 || !isAlphaNum(name[0]))
@@ -81,22 +79,11 @@ bool validName(string name)
     return true;
 }
 
-class ProfileConflict : Conflict
+class ProfileConflictException : ConflictException
 {
-public:
-    this(string message, string file = __FILE__, size_t line = __LINE__)
-    {
-        super(message, file, line);
-    }
+    mixin basicExceptionCtors;
 }
 
-/**
- * In-memory profile state with durable session mappings.
- *
- * Permanent assignments and current bindings commit together in state.json.
- * Legacy sessions.json and per-profile session.json files are imported only
- * when no authoritative snapshot exists and are retained without modification.
- */
 class ProfileStore
 {
 private:
@@ -217,7 +204,6 @@ public:
         load();
     }
 
-    /// Lists profiles ordered by name.
     Profile[] list()
     {
         string[] names = profiles.keys;
@@ -229,14 +215,12 @@ public:
         return ret;
     }
 
-    /// Gets a profile by name, or null when unknown.
     Profile get(string name)
     {
         Profile* found = canonicalName(name) in profiles;
         return found is null ? null : *found;
     }
 
-    /// Gets the profile currently linked to a session, or null when unlinked.
     Profile profileFor(string id)
     {
         string* owner = id in assignments;
@@ -248,12 +232,11 @@ public:
         return profile.session is null || profile.session.id == id ? profile : null;
     }
 
-    /// Creates a profile, failing when the name is taken.
     Profile create(string name)
     {
         name = canonicalName(name);
-        enforce!ProfileConflict(name != HUMAN_NAME, "The human profile is reserved");
-        enforce!ProfileConflict(name !in profiles, "Profile already exists");
+        enforce!ProfileConflictException(name != HUMAN_NAME, "The human profile is reserved");
+        enforce!ProfileConflictException(name !in profiles, "Profile already exists");
         string path = buildPath(directory, name);
         enforce(!exists(path), "Profile directory already exists");
         mkdir(path);
@@ -279,24 +262,18 @@ public:
         return ret;
     }
 
-    /**
-     * Links a session to a profile.
-     *
-     * Sessions keep their profile permanently, while a profile can move to a
-     * new session only while its current session is stopped and offline.
-     */
     Profile register(string name, string id)
     {
         name = canonicalName(name);
-        enforce!ProfileConflict(name != HUMAN_NAME, "The human profile is reserved");
+        enforce!ProfileConflictException(name != HUMAN_NAME, "The human profile is reserved");
         Session.validateId(id);
-        enforce!ProfileConflict(!bridge.isRemoved(id), "Session was removed");
+        enforce!ProfileConflictException(!bridge.isRemoved(id), "Session was removed");
         if (string* owner = id in assignments)
-            enforce!ProfileConflict(*owner == name, "Session is already linked to another profile");
+            enforce!ProfileConflictException(*owner == name, "Session is already linked to another profile");
 
         Profile ret = get(name);
         if (ret !is null && ret.session !is null && ret.session.id != id)
-            enforce!ProfileConflict(!locked(ret), "Profile is in use by an active session");
+            enforce!ProfileConflictException(!locked(ret), "Profile is in use by an active session");
 
         bool created = ret is null;
         string path = buildPath(directory, name);
@@ -337,7 +314,6 @@ public:
         return ret;
     }
 
-    /// Clears profile state after its backend session has been removed.
     void unlinkSession(string id)
     {
         Session.validateId(id);

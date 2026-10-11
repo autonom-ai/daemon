@@ -1,12 +1,12 @@
 module autonom.interop.execution;
 
-import autonom.interop.session : Session;
-import autonom.server : acceptMethod, bridge, matchesPath, respond, routeParameter;
-import autonom.storage : atomicWrite, openFile, readJSON, readText;
-import serverino : Output, Request, endpoint, route;
+import autonom.interop.session;
+import autonom.server;
+import autonom.storage;
+import serverino;
 
 import core.stdc.errno : errno, ESRCH;
-import core.sync.mutex : Mutex;
+import core.sync.mutex;
 import core.sys.linux.sys.prctl : prctl, PR_SET_PDEATHSIG;
 import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_EXCL, O_RDWR;
 import core.sys.posix.signal : kill, SIGKILL, SIGTERM;
@@ -16,16 +16,15 @@ import core.time : Duration, MonoTime, msecs, seconds;
 import std.conv : octal, to;
 import std.datetime : Clock;
 import std.exception : enforce, errnoEnforce;
-import std.file : mkdirRecurse, setAttributes;
+import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : buildPath;
-import std.process : PROCESS_CONFIG = Config, Pid, spawnProcess, tryWait, reap = wait;
+import std.process;
 import std.stdio : File;
-import std.uuid : UUID;
+import std.uuid;
 
 public:
 
-/// Reads a persisted CLI execution or returns 404 when its ID is unknown.
 @endpoint @route!(matchesPath!"/api/executions/<id>")
 void getExecution(Request request, Output output)
 {
@@ -39,7 +38,6 @@ void getExecution(Request request, Output output)
         respond(output, execution.toJSON());
 }
 
-/// Requests that a running execution stop, returning its updated snapshot.
 @endpoint @route!(matchesPath!"/api/executions/<id>/stop")
 void stopExecution(Request request, Output output)
 {
@@ -57,7 +55,6 @@ void stopExecution(Request request, Output output)
     respond(output, execution.toJSON(), 202);
 }
 
-/// Backend operation represented by a durable execution.
 enum ExecutionKind : string
 {
     Start = "start",
@@ -66,7 +63,6 @@ enum ExecutionKind : string
     Remove = "remove"
 }
 
-/// Persisted lifecycle states exposed by an execution handle.
 enum ExecutionStatus : string
 {
     Running = "running",
@@ -77,7 +73,6 @@ enum ExecutionStatus : string
     Interrupted = "interrupted"
 }
 
-/// A durable record and process monitor for one CLI operation.
 class Execution
 {
 private:
@@ -237,7 +232,7 @@ private:
                 }
             }
 
-            PROCESS_CONFIG options = PROCESS_CONFIG.newEnv;
+            Config options = Config.newEnv;
             options.preExecFunction = &createProcessGroup;
             process = spawnProcess(
                 arguments,
@@ -278,7 +273,7 @@ private:
             if (process !is null && !result.terminated)
             {
                 signal(process, SIGKILL);
-                result.status = reap(process);
+                result.status = std.process.wait(process);
                 result.terminated = true;
             }
 
@@ -297,15 +292,10 @@ private:
     }
 
 public:
-    /// Stable ID for the execution resource and its persisted record.
     const string id;
-    /// Operation executed by the backend.
     const ExecutionKind kind;
-    /// Working directory supplied to the CLI, or null for removal.
     const string workspace;
-    /// Requested model, or null when the backend default is used.
     const string model;
-    /// UTC creation timestamp used to order recovered executions.
     const string createdAt;
 
     this(
@@ -421,7 +411,6 @@ public:
         wait();
     }
 
-    /// Returns the API snapshot, including the completed reply for print operations.
     JSONValue toJSON()
     {
         State state = snapshot;

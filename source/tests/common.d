@@ -1,8 +1,8 @@
 module tests.common;
 
-import autonom.agent : ProfileStore;
-import autonom.config : Config;
-import autonom.interop.devin : Devin;
+import autonom.agent;
+import autonom.config;
+import autonom.interop.devin;
 
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
@@ -12,11 +12,12 @@ import std.file : mkdirRecurse, rmdirRecurse, tempDir, write;
 import std.json : JSONValue, parseJSON;
 import std.net.curl : HTTP;
 import std.path : buildPath;
-import std.uuid : randomUUID;
+import std.uuid;
 
 public:
 
-/// Performs an HTTP request against the daemon under test.
+enum ROUTER = "router:\n  type: openrouter\n  key: test-key\n  url: https://openrouter.ai\n  name: OpenRouter\n";
+
 JSONValue request(
     string path,
     uint status = 200,
@@ -63,7 +64,8 @@ public:
             rmdirRecurse(ret.root);
 
         ret.path = buildPath(ret.root, "config.yml");
-        write(ret.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: "~JSONValue(command).toString()~"\n");
+        write(ret.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: "~
+            JSONValue(command).toString()~"\n"~ROUTER);
         ret.config = new Config(ret.path);
         ret.bridge = new Devin(ret.config);
         ret.store = new ProfileStore(ret.config, ret.bridge);
