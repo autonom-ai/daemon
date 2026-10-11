@@ -14,7 +14,6 @@ import core.time : Duration, msecs;
 import std.algorithm : canFind, endsWith, startsWith;
 import std.array : join;
 import std.conv : to;
-import std.exception : enforce;
 import std.json : JSONValue, JSONType, parseJSON;
 import std.process : environment, thisProcessID;
 import std.string : indexOf, toUpper;
@@ -75,28 +74,33 @@ JSONValue readBody(Request request)
 {
     enum MIME = "application/json";
     enum MAX_BODY = 64 * 1024;
-    enforce!InvalidInputException(request.body.contentType == MIME || request.body.contentType.startsWith(MIME~";"),
-        "Expected application/json");
-    enforce!InvalidInputException(request.body.data.length <= MAX_BODY, "Request body is too large");
+    if (request.body.contentType != MIME && !request.body.contentType.startsWith(MIME~";"))
+        throw new InvalidInputException("Expected application/json");
+    if (request.body.data.length > MAX_BODY)
+        throw new InvalidInputException("Request body is too large");
+
     JSONValue ret;
     try
         ret = parseJSON(request.body.data);
     catch (Exception)
         throw new InvalidInputException("Invalid JSON body");
 
-    enforce!InvalidInputException(ret.type == JSONType.object, "Expected a JSON object");
+    if (ret.type != JSONType.object)
+        throw new InvalidInputException("Expected a JSON object");
+
     return ret;
 }
 
 JSONValue readLaunch(Request request)
 {
     JSONValue ret = readBody(request);
-    enforce!InvalidInputException("prompt" in ret.object && "directory" in ret.object, "Expected prompt and directory");
+    if ("prompt" !in ret.object || "directory" !in ret.object)
+        throw new InvalidInputException("Expected prompt and directory");
     foreach (name, value; ret.object)
-        enforce!InvalidInputException(
-            (name == "prompt" || name == "directory" || name == "model") && value.type == JSONType.string,
-            "Expected only string prompt, directory, and optional model fields"
-        );
+    {
+        if ((name != "prompt" && name != "directory" && name != "model") || value.type != JSONType.string)
+            throw new InvalidInputException("Expected only string prompt, directory, and optional model fields");
+    }
 
     if ("model" !in ret.object)
         ret["model"] = JSONValue("");
@@ -107,8 +111,11 @@ JSONValue readLaunch(Request request)
 string readField(string FIELD)(Request request)
 {
     JSONValue data = readBody(request);
-    enforce!InvalidInputException(data.object.length == 1 && FIELD in data.object, "Expected only the "~FIELD~" field");
-    enforce!InvalidInputException(data[FIELD].type == JSONType.string, FIELD~" must be a string");
+    if (data.object.length != 1 || FIELD !in data.object)
+        throw new InvalidInputException("Expected only the "~FIELD~" field");
+    if (data[FIELD].type != JSONType.string)
+        throw new InvalidInputException(FIELD~" must be a string");
+
     return data[FIELD].str;
 }
 
@@ -136,7 +143,8 @@ void stop(Request request, Output output)
         return;
     }
 
-    enforce!InvalidInputException(readBody(request).object.length == 0, "Expected an empty JSON object");
+    if (readBody(request).object.length != 0)
+        throw new InvalidInputException("Expected an empty JSON object");
     if (!stopping)
         bridge.stopSessions();
 

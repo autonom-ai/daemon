@@ -8,7 +8,6 @@ import serverino;
 
 import std.algorithm.searching : canFind;
 import std.conv : to;
-import std.exception : enforce;
 import std.json : JSONType, JSONValue;
 import std.string : strip;
 
@@ -21,16 +20,23 @@ enum MAX_TEXT = 4000;
 Profile caller(Request request)
 {
     string session = request.get.read("session");
-    enforce!InvalidInputException(session.length, "A session is required");
+    if (!session.length)
+        throw new InvalidInputException("A session is required");
+
     Profile ret = profileStore.profileFor(session);
-    enforce!ConflictException(ret !is null, "No profile is registered for this session");
+    if (ret is null)
+        throw new ConflictException("No profile is registered for this session");
+
     return ret;
 }
 
 void onlyFields(JSONValue data, string[] fields)
 {
     foreach (name; data.object.keys)
-        enforce!InvalidInputException(fields.canFind(name), "Unexpected "~name~" field");
+    {
+        if (!fields.canFind(name))
+            throw new InvalidInputException("Unexpected "~name~" field");
+    }
 }
 
 size_t readLimit(Request request)
@@ -53,23 +59,29 @@ size_t readLimit(Request request)
 
 string messageText(JSONValue data)
 {
-    enforce!InvalidInputException(
-        "text" in data.object && data["text"].type == JSONType.string,
-        "A message needs text"
-    );
+    if ("text" !in data.object || data["text"].type != JSONType.string)
+        throw new InvalidInputException("A message needs text");
+
     string ret = data["text"].str;
-    enforce!InvalidInputException(ret.strip.length, "A message needs text");
-    enforce!InvalidInputException(ret.length <= MAX_TEXT, "Message text is too long");
+    if (!ret.strip.length)
+        throw new InvalidInputException("A message needs text");
+    if (ret.length > MAX_TEXT)
+        throw new InvalidInputException("Message text is too long");
+
     return ret;
 }
 
 string[] names(JSONValue value, string message)
 {
-    enforce!InvalidInputException(value.type == JSONType.array, message);
+    if (value.type != JSONType.array)
+        throw new InvalidInputException(message);
+
     string[] ret = new string[0];
     foreach (entry; value.array)
     {
-        enforce!InvalidInputException(entry.type == JSONType.string, message);
+        if (entry.type != JSONType.string)
+            throw new InvalidInputException(message);
+
         ret ~= entry.str;
     }
 
@@ -178,10 +190,9 @@ void rooms(Request request, Output output)
 
     JSONValue data = readBody(request);
     onlyFields(data, ["name"]);
-    enforce!InvalidInputException(
-        "name" in data.object && data["name"].type == JSONType.string,
-        "A room name is required"
-    );
+    if ("name" !in data.object || data["name"].type != JSONType.string)
+        throw new InvalidInputException("A room name is required");
+
     respond(output, bus.roomEntry(bus.createRoom(data["name"].str, profile.name), profile), 201);
 }
 
@@ -266,7 +277,9 @@ void roomMembership(Request request, Output output)
 
     JSONValue data = readBody(request);
     onlyFields(data, ["involved"]);
-    enforce!InvalidInputException("involved" in data.object, "Expected the involved field");
+    if ("involved" !in data.object)
+        throw new InvalidInputException("Expected the involved field");
+
     if (data["involved"].isNull)
         room.involveEveryone();
     else
@@ -301,14 +314,17 @@ void roomAdmins(Request request, Output output)
     {
         JSONValue data = readBody(request);
         onlyFields(data, ["profile"]);
-        enforce!InvalidInputException("profile" in data.object && data["profile"].type == JSONType.string,
-            "A profile is required");
+        if ("profile" !in data.object || data["profile"].type != JSONType.string)
+            throw new InvalidInputException("A profile is required");
+
         target = profileByName(data["profile"].str, output);
     }
     else
     {
         string name = request.get.read("profile");
-        enforce!InvalidInputException(name.length, "A profile is required");
+        if (!name.length)
+            throw new InvalidInputException("A profile is required");
+
         target = profileByName(name, output);
     }
 
@@ -333,7 +349,9 @@ void messages(Request request, Output output)
     if (request.method == Request.Method.Get)
     {
         string source = request.get.read("source");
-        enforce!InvalidInputException(source == "dms" || source == "pings", "Source must be dms or pings");
+        if (source != "dms" && source != "pings")
+            throw new InvalidInputException("Source must be dms or pings");
+
         size_t limit = readLimit(request);
         JSONValue ret = JSONValue.emptyObject;
         ret["source"] = JSONValue(source);
@@ -344,7 +362,9 @@ void messages(Request request, Output output)
 
     JSONValue data = readBody(request);
     onlyFields(data, ["to", "text", "ping"]);
-    enforce!InvalidInputException("to" in data.object && data["to"].type == JSONType.string, "A recipient is required");
+    if ("to" !in data.object || data["to"].type != JSONType.string)
+        throw new InvalidInputException("A recipient is required");
+
     Profile to = profileByName(data["to"].str, output);
     if (to is null)
         return;

@@ -5,7 +5,6 @@ import autonom.interop.devin.bridge;
 import autonom.interop.execution;
 import autonom.interop.session;
 
-import std.exception : enforce;
 
 class DevinSession : Session
 {
@@ -39,7 +38,9 @@ public:
 
     override void resume(string prompt, string directory, string model = null)
     {
-        enforce!ConflictException(!isRunning() && !bridge.online(id), "Session is already active");
+        if (isRunning() || bridge.online(id))
+            throw new ConflictException("Session is already active");
+
         bindExecution(bridge.resume(id, prompt, directory, model));
     }
 
@@ -47,8 +48,8 @@ public:
     {
         if (isRunning())
             execution.requestStop();
-        else
-            enforce!ConflictException(!bridge.online(id), "Cannot stop a session owned by another process");
+        else if (bridge.online(id))
+            throw new ConflictException("Cannot stop a session owned by another process");
     }
 
     override void remove()

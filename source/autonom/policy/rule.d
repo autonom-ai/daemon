@@ -6,7 +6,6 @@ import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
 
 import std.algorithm.searching : canFind;
-import std.exception : enforce;
 import std.json : JSONType, JSONValue;
 import std.math.traits : isFinite;
 import std.path : buildPath;
@@ -30,17 +29,22 @@ struct PolicyFile
     {
         string path = buildPath(directory, ".devin", "policy.yml");
         YamlAlgebraic document = readText(path).deserializeYaml!YamlAlgebraic(path);
-        enforce(document.kind == YamlAlgebraic.Kind.object, "Policy must be a mapping");
+        if (document.kind != YamlAlgebraic.Kind.object)
+            throw new Exception("Policy must be a mapping");
 
         string stringValue(YamlAlgebraic value, string field)
         {
-            enforce(value.kind == YamlAlgebraic.Kind.string, field~" must be a string");
+            if (value.kind != YamlAlgebraic.Kind.string)
+                throw new Exception(field~" must be a string");
+
             return value.get!string.idup;
         }
 
         YamlAlgebraic required(YamlMap mapping, string field, string context)
         {
-            enforce(field in mapping, context~" requires "~field);
+            if (field !in mapping)
+                throw new Exception(context~" requires "~field);
+
             return mapping[field];
         }
 
@@ -50,18 +54,23 @@ struct PolicyFile
             foreach (pair; mapping.pairs)
             {
                 string field = stringValue(pair.key, context~" field name");
-                enforce(fields.canFind(field), "Unknown "~context~" field: "~field);
-                enforce(field !in seen, "Duplicate "~context~" field: "~field);
+                if (!fields.canFind(field))
+                    throw new Exception("Unknown "~context~" field: "~field);
+                if (field in seen)
+                    throw new Exception("Duplicate "~context~" field: "~field);
+
                 seen[field] = true;
             }
         }
 
         DecisionQuestion readQuestion(YamlAlgebraic value)
         {
-            enforce(value.kind == YamlAlgebraic.Kind.object, "Screen questions must be mappings");
+            if (value.kind != YamlAlgebraic.Kind.object)
+                throw new Exception("Screen questions must be mappings");
+
             onlyFields(value.object, ["type", "name", "instructions"], "screen question");
-            enforce(stringValue(required(value.object, "type", "Screen question"), "Question type") == "predicate",
-                "Screen questions must use predicate types");
+            if (stringValue(required(value.object, "type", "Screen question"), "Question type") != "predicate")
+                throw new Exception("Screen questions must use predicate types");
 
             DecisionQuestion ret;
             ret.type = DecisionType.Predicate;
@@ -75,7 +84,9 @@ struct PolicyFile
 
         PolicyRule readRule(YamlAlgebraic value)
         {
-            enforce(value.kind == YamlAlgebraic.Kind.object, "Policy rules must be mappings");
+            if (value.kind != YamlAlgebraic.Kind.object)
+                throw new Exception("Policy rules must be mappings");
+
             onlyFields(
                 value.object,
                 ["action", "match", "reason", "questions", "models", "threshold"],
@@ -103,11 +114,15 @@ struct PolicyFile
             if ("match" in value.object && !value.object["match"].isNull)
             {
                 YamlAlgebraic matches = value.object["match"];
-                enforce(matches.kind == YamlAlgebraic.Kind.object, "Policy match must be a mapping");
+                if (matches.kind != YamlAlgebraic.Kind.object)
+                    throw new Exception("Policy match must be a mapping");
+
                 foreach (pair; matches.object.pairs)
                 {
                     string field = stringValue(pair.key, "Policy match field name");
-                    enforce(field !in ret.match, "Duplicate policy match field: "~field);
+                    if (field in ret.match)
+                        throw new Exception("Duplicate policy match field: "~field);
+
                     ret.match[field] = stringValue(pair.value, "Policy match pattern");
                 }
             }
@@ -118,7 +133,9 @@ struct PolicyFile
             if ("questions" in value.object && !value.object["questions"].isNull)
             {
                 YamlAlgebraic questions = value.object["questions"];
-                enforce(questions.kind == YamlAlgebraic.Kind.array, "Screen questions must be a list");
+                if (questions.kind != YamlAlgebraic.Kind.array)
+                    throw new Exception("Screen questions must be a list");
+
                 foreach (YamlAlgebraic question; questions.array)
                     ret.questions ~= readQuestion(question);
             }
@@ -126,7 +143,9 @@ struct PolicyFile
             if ("models" in value.object)
             {
                 YamlAlgebraic models = value.object["models"];
-                enforce(models.kind == YamlAlgebraic.Kind.array, "Screen models must be a list");
+                if (models.kind != YamlAlgebraic.Kind.array)
+                    throw new Exception("Screen models must be a list");
+
                 ret.models = new string[0];
                 foreach (YamlAlgebraic model; models.array)
                     ret.models ~= stringValue(model, "Screen model identifier");
@@ -149,7 +168,9 @@ struct PolicyFile
 
         onlyFields(document.object, ["rules"], "policy file");
         YamlAlgebraic rules = required(document.object, "rules", "Policy file");
-        enforce(rules.kind == YamlAlgebraic.Kind.array, "Policy rules must be a list");
+        if (rules.kind != YamlAlgebraic.Kind.array)
+            throw new Exception("Policy rules must be a list");
+
         PolicyFile ret;
         foreach (YamlAlgebraic rule; rules.array)
             ret.rules ~= readRule(rule);
@@ -173,22 +194,34 @@ public:
 
     void compile()
     {
-        enforce(threshold.isFinite && threshold >= 0 && threshold <= 1, "Invalid policy threshold");
-        enforce(action != PolicyAction.Screen || questions.length > 0, "A screen rule requires questions");
+        if (!threshold.isFinite || threshold < 0 || threshold > 1)
+            throw new Exception("Invalid policy threshold");
+
+        if (action == PolicyAction.Screen && !questions.length)
+            throw new Exception("A screen rule requires questions");
+
         foreach (field, pattern; match)
         {
-            enforce(field.length && !field.canFind('\0'), "Invalid policy match field");
+            if (!field.length || field.canFind('\0'))
+                throw new Exception("Invalid policy match field");
+
             patterns[field] = regex(pattern);
         }
 
         if (action == PolicyAction.Screen)
         {
-            enforce(models.length > 0, "A screen rule requires models");
+            if (!models.length)
+                throw new Exception("A screen rule requires models");
+
             bool[string] seenModels;
             foreach (model; models)
             {
-                enforce(model.length && !model.canFind('\0'), "Invalid screening model identifier");
-                enforce(model !in seenModels, "Screening models must be unique");
+                if (!model.length || model.canFind('\0'))
+                    throw new Exception("Invalid screening model identifier");
+
+                if (model in seenModels)
+                    throw new Exception("Screening models must be unique");
+
                 seenModels[model] = true;
             }
 
@@ -196,10 +229,13 @@ public:
             foreach (ref question; questions)
             {
                 question.instructions = question.instructions.strip;
-                enforce(question.type == DecisionType.Predicate && question.name.strip.length
-                    && !question.name.canFind('\0') && question.instructions.length,
-                    "Screen questions require predicate types, names, and instructions");
-                enforce(question.name !in names, "Screen question names must be unique");
+                if (question.type != DecisionType.Predicate || !question.name.strip.length ||
+                    question.name.canFind('\0') || !question.instructions.length)
+                    throw new Exception("Screen questions require predicate types, names, and instructions");
+
+                if (question.name in names)
+                    throw new Exception("Screen question names must be unique");
+
                 names[question.name] = true;
             }
         }

@@ -4,7 +4,6 @@ import autonom.agent;
 import autonom.storage;
 
 import std.conv : octal;
-import std.exception : enforce;
 import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : buildPath;
@@ -26,11 +25,15 @@ private:
 
     static string[] listed(JSONValue value)
     {
-        enforce(value.type == JSONType.array, "Invalid room membership");
+        if (value.type != JSONType.array)
+            throw new Exception("Invalid room membership");
+
         string[] ret = new string[0];
         foreach (entry; value.array)
         {
-            enforce(entry.type == JSONType.string && entry.str.length, "Invalid room membership");
+            if (entry.type != JSONType.string || !entry.str.length)
+                throw new Exception("Invalid room membership");
+
             ret ~= entry.str;
         }
 
@@ -87,7 +90,9 @@ public:
 
     static Room create(string name, string directory, string owner)
     {
-        enforce(!exists(directory), "Room directory already exists");
+        if (exists(directory))
+            throw new Exception("Room directory already exists");
+
         mkdir(directory);
         setAttributes(directory, octal!"700");
         Room ret = new Room(name, directory, owner);
@@ -102,8 +107,10 @@ public:
             return null;
 
         JSONValue data = readJSON(path);
-        enforce(data.type == JSONType.object && "owner" in data.object && data["owner"].type == JSONType.string &&
-            "admins" in data.object && "involved" in data.object, "Invalid room membership");
+        if (data.type != JSONType.object || "owner" !in data.object || data["owner"].type != JSONType.string ||
+            "admins" !in data.object || "involved" !in data.object)
+            throw new Exception("Invalid room membership");
+
         Room ret = new Room(name, directory, data["owner"].str);
         ret.admins = listed(data["admins"]);
         ret.restricted = !data["involved"].isNull;

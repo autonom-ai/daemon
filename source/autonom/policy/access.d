@@ -10,7 +10,6 @@ import serverino;
 
 import core.time : MonoTime, seconds;
 import std.algorithm.searching : canFind;
-import std.exception : enforce;
 import std.file;
 import std.json : JSONType, JSONValue;
 
@@ -26,20 +25,24 @@ void checkPolicy(Request request, Output output)
     }
 
     JSONValue data = readBody(request);
-    enforce!InvalidInputException("directory" in data.object && "tool" in data.object,
-        "Expected directory and tool");
-    enforce!InvalidInputException(data["directory"].type == JSONType.string && data["tool"].type == JSONType.string,
-        "Directory and tool must be strings");
+    if ("directory" !in data.object || "tool" !in data.object)
+        throw new InvalidInputException("Expected directory and tool");
+
+    if (data["directory"].type != JSONType.string || data["tool"].type != JSONType.string)
+        throw new InvalidInputException("Directory and tool must be strings");
+
     foreach (name; data.object.keys)
     {
-        enforce!InvalidInputException(name == "directory" || name == "tool" || name == "input",
-            "Unexpected policy request field");
+        if (name != "directory" && name != "tool" && name != "input")
+            throw new InvalidInputException("Unexpected policy request field");
     }
 
     if ("input" !in data.object)
         data["input"] = JSONValue.emptyObject;
 
-    enforce!InvalidInputException(data["input"].type == JSONType.object, "Tool input must be an object");
+    if (data["input"].type != JSONType.object)
+        throw new InvalidInputException("Tool input must be an object");
+
     try
         respond(output, policy.check(data["directory"].str, data["tool"].str, data["input"]).toJSON());
     catch (Exception)
@@ -75,7 +78,9 @@ private:
 
         foreach (i, model; rule.models)
         {
-            enforce!InvalidInputException(MonoTime.currTime < deadline, "Policy request timed out");
+            if (MonoTime.currTime >= deadline)
+                throw new InvalidInputException("Policy request timed out");
+
             IRouter router = config.router;
             router.operationTimeout(deadline - MonoTime.currTime);
             router.context.clear();
@@ -88,8 +93,8 @@ private:
                 Decision decision = decisions(router, state, rule.questions);
                 foreach (answer; decision.answers)
                 {
-                    enforce!InvalidInputException(answer.type == DecisionType.Predicate,
-                        "Policy model returned no predicate decision");
+                    if (answer.type != DecisionType.Predicate)
+                        throw new InvalidInputException("Policy model returned no predicate decision");
                     if (answer.probability >= rule.threshold)
                         return true;
                 }
@@ -109,8 +114,9 @@ private:
 public:
     this(Config configuration)
     {
-        enforce!InvalidInputException(configuration !is null && configuration.router !is null,
-            "A policy configuration and router are required");
+        if (configuration is null || configuration.router is null)
+            throw new InvalidInputException("A policy configuration and router are required");
+
         this.config = configuration;
         configuration.router.connectTimeout(2.seconds);
     }
@@ -121,10 +127,15 @@ public:
         scope(exit)
             config.router.context.clear();
 
-        enforce!InvalidInputException(directory.length && isDir(directory),
-            "An existing working directory is required");
-        enforce!InvalidInputException(tool.length && !tool.canFind('\0'), "A tool name is required");
-        enforce!InvalidInputException(input.type == JSONType.object, "Tool input must be an object");
+        if (!directory.length || !isDir(directory))
+            throw new InvalidInputException("An existing working directory is required");
+
+        if (!tool.length || tool.canFind('\0'))
+            throw new InvalidInputException("A tool name is required");
+
+        if (input.type != JSONType.object)
+            throw new InvalidInputException("Tool input must be an object");
+            
         PolicyFile policyFile = PolicyFile.loadRules(directory);
         foreach (rule; policyFile.rules)
         {
