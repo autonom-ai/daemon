@@ -2,6 +2,7 @@ module autonom.coord.access;
 
 import autonom.agent;
 import autonom.coord;
+import autonom.events.event : EventType;
 import autonom.exception;
 import autonom.server;
 import serverino;
@@ -16,28 +17,6 @@ private:
 enum DEFAULT_LIMIT = 50;
 enum MAX_LIMIT = 500;
 enum MAX_TEXT = 4000;
-
-Profile caller(Request request)
-{
-    string session = request.get.read("session");
-    if (!session.length)
-        throw new InvalidInputException("A session is required");
-
-    Profile ret = profileStore.profileFor(session);
-    if (ret is null)
-        throw new ConflictException("No profile is registered for this session");
-
-    return ret;
-}
-
-void onlyFields(JSONValue data, string[] fields)
-{
-    foreach (name; data.object.keys)
-    {
-        if (!fields.canFind(name))
-            throw new InvalidInputException("Unexpected "~name~" field");
-    }
-}
 
 size_t readLimit(Request request)
 {
@@ -171,6 +150,28 @@ Room lookupOwned(string name, Profile profile, Output output)
 
 public:
 
+Profile caller(Request request)
+{
+    string session = request.get.read("session");
+    if (!session.length)
+        throw new InvalidInputException("A session is required");
+
+    Profile ret = profileStore.profileFor(session);
+    if (ret is null)
+        throw new ConflictException("No profile is registered for this session");
+
+    return ret;
+}
+
+void onlyFields(JSONValue data, string[] fields)
+{
+    foreach (name; data.object.keys)
+    {
+        if (!fields.canFind(name))
+            throw new InvalidInputException("Unexpected "~name~" field");
+    }
+}
+
 @endpoint @route!"/api/rooms"
 void rooms(Request request, Output output)
 {
@@ -235,10 +236,12 @@ void roomMessages(Request request, Output output)
 
     if (request.method == Request.Method.Get)
     {
+        Entry[] entries = bus.readRoom(room, profile, readLimit(request));
+        events.clear(profile, EventType.Room, room.name);
         JSONValue ret = JSONValue.emptyObject;
         ret["source"] = JSONValue("room");
         ret["room"] = JSONValue(room.name);
-        ret["messages"] = entryArray(bus.readRoom(room, profile, readLimit(request)));
+        ret["messages"] = entryArray(entries);
         respond(output, ret);
         return;
     }
@@ -250,6 +253,7 @@ void roomMessages(Request request, Output output)
         return;
 
     Entry entry = bus.post(room, profile, messageText(data), targets);
+    scheduler.posted(room, entry, profile, targets);
     respond(output, posted(entry, targets), 201);
 }
 
@@ -353,9 +357,21 @@ void messages(Request request, Output output)
             throw new InvalidInputException("Source must be dms or pings");
 
         size_t limit = readLimit(request);
+        Entry[] entries;
+        if (source == "dms")
+        {
+            entries = bus.readDirect(profile, limit);
+            events.clear(profile, EventType.DM);
+        }
+        else
+        {
+            entries = bus.readPings(profile, limit);
+            events.clear(profile, EventType.Ping);
+        }
+
         JSONValue ret = JSONValue.emptyObject;
         ret["source"] = JSONValue(source);
-        ret["messages"] = entryArray(source == "dms" ? bus.readDirect(profile, limit) : bus.readPings(profile, limit));
+        ret["messages"] = entryArray(entries);
         respond(output, ret);
         return;
     }
@@ -374,5 +390,6 @@ void messages(Request request, Output output)
         return;
 
     Entry entry = bus.direct(to, profile, messageText(data), targets);
+    scheduler.directed(to, entry, profile, targets);
     respond(output, posted(entry, targets), 201);
 }

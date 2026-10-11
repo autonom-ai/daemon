@@ -3,6 +3,7 @@ module autonom.server;
 import autonom.agent;
 import autonom.config;
 import autonom.coord;
+import autonom.events;
 import autonom.exception;
 import autonom.policy;
 import autonom.interop.devin;
@@ -29,6 +30,9 @@ Devin bridge;
 ProfileStore profileStore;
 Policy policy;
 Bus bus;
+EventStore events;
+ScheduleStore scheduleStore;
+Scheduler scheduler;
 
 void respond(Output output, JSONValue body, ushort status = 200)
 {
@@ -174,9 +178,13 @@ void stop(Request request, Output output)
     configuration = new Config(environment.get("AUTONOM_CONFIG", Config.defaultPath));
     bridge = new Devin(configuration);
     profileStore = new ProfileStore(configuration, bridge);
+    events = new EventStore(configuration, profileStore);
     bus = new Bus(configuration, profileStore);
+    scheduleStore = new ScheduleStore(configuration, profileStore);
+    scheduler = new Scheduler(configuration, bridge, profileStore, events, scheduleStore);
     policy = new Policy(configuration);
     refresh(Request.init);
+    scheduler.start();
 }
 
 @endpoint @priority(100)
@@ -184,10 +192,14 @@ void refresh(Request request)
 {
     foreach (id; bridge.collect())
         profileStore.unlinkSession(id);
+    if (scheduler !is null)
+        scheduler.refresh();
 }
 
 @onWorkerStop void closeWorker()
 {
+    if (scheduler !is null)
+        scheduler.stop();
     if (bridge !is null)
         bridge.close();
 }

@@ -15,8 +15,12 @@
 - `autonom.app` is the executable entrypoint; `autonom.server` assembles the worker-owned runtime and Serverino lifecycle.
 - `autonom.agent` owns profiles and durable profile-to-session assignments. `autonom.interop` owns canonical backend session handles, process executions, and CLI integration.
 - One persistent Serverino worker owns mutable registries and profile state. Execution monitor threads own only their child process and execution record; do not add Serverino workers or worker recycling.
+- `autonom.events` owns pending events, schedules, session wakes, and the clock thread: `events.event` holds the pending-event store, `events.schedule` the schedule store and its endpoints, and `events.scheduler` the wake logic and background thread.
+- Execution records are version 2 with a `finishedAt` timestamp; version 1 records still load. `compact` is an execution kind that resumes a session with the `/compact` prompt, and an execution may declare a `dependency` that must finish before it spawns (used to compact before a wake resume). Execution records are slated for replacement by the CLI session database.
+- The daemon owns one scheduler thread. It only watches due clock times in the coordination files and pokes `POST /api/schedules/refresh` over loopback; the single worker fires due events and launches wakes during its per-request refresh, so all state stays worker-owned.
+- Session model and working directory fall back to the CLI SQLite session database (`arsd-official:sqlite`, opened read-only at `sessions.db` beside `sessionLockDir`) when the daemon has no execution record for the session.
 - `AUTONOM_CONFIG` selects the required YAML configuration and `AUTONOM_PORT` overrides the default loopback port 8080.
-- `templates/config.yml` is the starting configuration. `devinCommand` and `router` are required; `dataDir` defaults to the config directory and `sessionLockDir` to the Devin XDG data path.
+- `templates/config.yml` is the starting configuration. `devinCommand` and `router` are required; `dataDir` defaults to the config directory and `sessionLockDir` to the Devin XDG data path. `compactOnResume` (boolean) forces compaction before every resume, and `offlineStartAfter`/`offlineCompactAfter` accept durations such as `30m` or `1h` or integer seconds.
 - `autonom.router` supports `router.type: openrouter` with required `key`, `url`, and `name`; `referer` and `title` are optional. Missing or unsupported router settings fail startup; environment variables and `.env` files are not consulted for router keys.
 - Devin Desktop exports `ACP_BACKEND=windsurf`; unset it for direct CLI checks. The bridge scrubs host prefixes itself.
 - Sessions own their IDs: Serverino request strings can reference reused buffers and cannot be retained as cache keys.
@@ -41,13 +45,22 @@
 
 # Coordination
 
-- Coordination state lives under `dataDir/coord`: `rooms/<name>/{messages.jsonl,profiles.json}` and `inboxes/<profile>/{dms.jsonl,pings.jsonl,cursors.json}`. Workspaces keep only `.devin/policy.yml` and `.devin/hooks.v1.json`.
+- Coordination state lives under `dataDir/coord`: `rooms/<name>/{messages.jsonl,profiles.json}` and `inboxes/<profile>/{dms.jsonl,pings.jsonl,cursors.json,events.json,schedules.json}` plus `wakes.json`. Workspaces keep only `.devin/policy.yml` and `.devin/hooks.v1.json`.
 - `autonom.coord` owns the bus: append-only jsonl streams with the most recent 1000 entries held in memory, per-profile read cursors, and rooms with an owner, admins, and an optional involved list.
 - Cursors index the in-memory window and are clamped to it on load, so a restart re-delivers at most one window per stream. Trimming shifts cursors with the window.
 - Rooms are global and report themselves as unknown to profiles that cannot see them and to non-administrators; only the original owner changes admins.
 - Coordination endpoints take the caller's `session` as a query parameter and require a registered session: `GET/POST /api/rooms`, `GET/DELETE /api/rooms/<name>`, `GET/POST /api/rooms/<name>/messages`, `GET/POST /api/rooms/<name>/membership`, `POST /api/rooms/<name>/admins`, `DELETE /api/rooms/<name>/admins?profile=`, and `GET/POST /api/messages` (`source=dms|pings`).
 - Reading a stream advances the cursor past the entries returned, and a first read starts with the newest `limit` entries. Own posts are never unread; message text is capped at 4000 characters.
-- `PreToolUse` blocks every tool while the session's profile has unread pings, except `mcp__autonom-coord__read_messages` with `source: "pings"`; it injects `session_id` into `mcp__autonom-coord__*` input and fails closed when profile access cannot be verified.
+- `PreToolUse` blocks every tool while the session's profile has unread events, except `mcp__autonom-coord__read_events`; it injects `session_id` into `mcp__autonom-coord__*` input, adopts a freshly started session to its profile when its first hook arrives from the wake workspace, and fails closed when profile access cannot be verified.
+
+# Events
+
+- Pending events live in `inboxes/<profile>/events.json` with at most 1000 entries, keyed by the stream entry ID so a ping and a matching room schedule surface one event. Pings always surface a `ping` event; scheduled activity surfaces `room`, `dm`, or `clock` events.
+- `GET /api/events?session=` returns every pending event and clears them. Reading pings, dms, or a room clears the matching events, and events carry a nullable `schedule` field naming the schedule that matched.
+- Schedules live in `inboxes/<profile>/schedules.json` and are created per profile: `GET/POST /api/schedules?session=` and `DELETE /api/schedules/<id>?session=`. Ping and dm schedules match every event or one `from` profile; room schedules also name a visible room; clock schedules take `at` (one-shot ISO-8601 timestamp) or `every` (seconds, repeats until cancelled, up to 30 days).
+- `POST /api/schedules/refresh` fires due clock schedules and reconciles wakes; the scheduler thread pokes it, and every request also runs the same refresh before its handler.
+- When an event fires for an offline profile: a scheduled event resumes the session (compacting first when offline longer than `offlineCompactAfter`, or always with `compactOnResume`); an unscheduled ping starts a fresh session in the pinging profile's workspace with the target's last model when offline longer than `offlineStartAfter`, else resumes. A ping whose fresh start has no pinging workspace drops the event.
+- Wakes are recorded in `wakes.json` until their execution finishes: a successful start registers the new session to the profile, a failed wake re-surfaces its events, and a profile with an in-flight wake is never woken twice. Sessions that cannot be resumed only surface events.
 
 # Policy
 

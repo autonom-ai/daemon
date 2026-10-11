@@ -5,47 +5,61 @@
 				"source/tests/**",
 				"source/evals/**"
 			],
-			"sourcePaths": ["source/autonom"],
 			"mainSourceFile": "source/autonom/app.d",
 			"name": "daemon",
+			"sourcePaths": [
+				"source/autonom"
+			],
 			"targetName": "autonom-daemon",
 			"targetType": "executable"
 		},
 		{
+			"dependencies": {
+				"unit-threaded": "2.2.6"
+			},
 			"excludedSourceFiles": [
 				"source/autonom/app.d",
 				"source/evals/**"
 			],
-			"sourcePaths": ["source/autonom", "source/tests"],
-			"dependencies": {"unit-threaded": "2.2.6"},
 			"mainSourceFile": "bin/ut.d",
 			"name": "unit",
 			"preBuildCommands": [
 				"$DUB build --compiler=$DC --config=daemon",
 				"$DUB run unit-threaded@2.2.6 -c gen_ut_main -- -f bin/ut.d source/tests"
 			],
+			"sourcePaths": [
+				"source/autonom",
+				"source/tests"
+			],
 			"targetName": "autonom-unit",
 			"targetType": "executable"
 		},
 		{
-			"sourcePaths": ["source/evals"],
 			"mainSourceFile": "source/evals/app.d",
 			"name": "eval",
-			"preBuildCommands": ["$DUB build --compiler=$DC --config=daemon"],
+			"preBuildCommands": [
+				"$DUB build --compiler=$DC --config=daemon"
+			],
+			"sourcePaths": [
+				"source/evals"
+			],
 			"targetName": "autonom-eval",
 			"targetType": "executable"
 		}
 	],
 	"dependencies": {
+		"arsd-official:sqlite": "~>12.1.2",
 		"intuit": "2.0.0",
 		"mir-ion": "2.3.5",
 		"serverino": "0.8.5"
 	},
 	"description": "Autonom state and session API daemon.",
+	"importPaths": [
+		"source"
+	],
 	"license": "AGPL-3.0-only",
 	"name": "autonom",
 	"sourcePaths": [],
-	"importPaths": ["source"],
 	"targetPath": "bin",
 	"targetType": "executable"
 }

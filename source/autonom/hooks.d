@@ -17,24 +17,18 @@ enum MCP_PREFIX = "mcp__autonom-coord__";
 bool coordinationTool(string tool)
     => tool.startsWith(MCP_PREFIX);
 
-bool readsPings(string tool, JSONValue input)
-    => tool == MCP_PREFIX~"read_messages" && "source" in input.object &&
-        input["source"].type == JSONType.string && input["source"].str == "pings";
+bool readsEvents(string tool)
+    => tool == MCP_PREFIX~"read_events";
 
-bool blockedByPings(
-    string tool,
-    JSONValue input,
-    string session,
-    Output output
-)
+bool blockedByEvents(string tool, string session, Output output)
 {
-    if (!session.length || readsPings(tool, input))
+    if (!session.length || readsEvents(tool))
         return false;
 
     Profile profile;
     try
     {
-        if (bus is null)
+        if (events is null)
             throw new Exception("Coordination is unavailable");
         profile = profileStore.profileFor(session);
     }
@@ -47,12 +41,12 @@ bool blockedByPings(
         return true;
     }
 
-    if (profile is null || !bus.unreadPings(profile).length)
+    if (profile is null || !events.unread(profile).length)
         return false;
 
     respond(output, JSONValue([
         "decision": JSONValue("block"),
-        "reason": JSONValue("You have unread pings - read them first: call read_messages with source \"pings\"")
+        "reason": JSONValue("You have unread events - read them first: call read_events")
     ]));
     return true;
 }
@@ -110,7 +104,7 @@ void preToolUse(Request request, Output output)
 
     string session = "session_id" in data.object && data["session_id"].type == JSONType.string ?
         data["session_id"].str : null;
-    if (blockedByPings(tool, input, session, output))
+    if (blockedByEvents(tool, session, output))
         return;
 
     string directory;
@@ -159,6 +153,9 @@ void preToolUse(Request request, Output output)
             return;
         }
     }
+
+    if (session.length && directory.length)
+        scheduler.adopt(session, directory);
 
     if (coordinationTool(tool) && session.length)
     {
