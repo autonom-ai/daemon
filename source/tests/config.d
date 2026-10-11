@@ -51,6 +51,8 @@ unittest
     fixture.config.toJSON()["policyUrl"].str.should == "https://openrouter.ai";
     fixture.config.toJSON()["policyModel"].str.should == "inception/mercury-decide:free";
     fixture.config.toJSON().object.length.should == 5;
+    (fixture.config.router !is null).should == true;
+    fixture.config.router.name.should == "OpenRouter";
 }
 
 @Name("Config accepts a policy router URL and model")
@@ -64,6 +66,8 @@ unittest
     Config config = new Config(fixture.path);
     config.toJSON()["policyUrl"].str.should == "http://127.0.0.1:1234";
     config.toJSON()["policyModel"].str.should == "test-model";
+    (config.router !is null).should == true;
+    config.router.name.should == "OpenRouter";
 }
 
 @Name("Config rejects malformed YAML and unsupported settings")

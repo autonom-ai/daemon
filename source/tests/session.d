@@ -2,7 +2,7 @@ module tests.session;
 
 import autonom.agent : ProfileConflict;
 import autonom.interop : Devin, Execution, ExecutionStatus, Session, SessionStatus;
-import autonom.interop.cleanup : removeSessions;
+import autonom.interop.session : removeSessions;
 import tests.common : Fixture, waitUntil;
 import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should, shouldThrow;
@@ -51,7 +51,6 @@ esac
     setAttributes(fixture.config.devinCommand, octal!"700");
 }
 
-public:
 
 @Name("Session cleanup declares its module-level HTTP endpoint")
 unittest

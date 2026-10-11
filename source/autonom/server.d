@@ -167,7 +167,7 @@ void stop(Request request, Output output)
     bridge = new Devin(configuration);
     profileStore = new ProfileStore(configuration, bridge);
     bus = new Bus(configuration, profileStore);
-    policy = new Policy(new OpenRouter(environment.get("OPENROUTER_API_KEY"), configuration.policyUrl),
+    policy = new Policy(configuration.router,
         configuration.policyModel);
     refresh(Request.init);
 }
