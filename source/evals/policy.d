@@ -46,6 +46,21 @@ void policyChecks(Eval eval, string directory)
         eval.check(test.name, decision["denied"].boolean == test.denied, decision.toString());
     }
 
+    JSONValue hookInput = JSONValue([
+        "hook_event_name": JSONValue("PreToolUse"),
+        "cwd": JSONValue(directory),
+        "tool_name": JSONValue("exec"),
+        "tool_input": JSONValue(["command": JSONValue("git status")])
+    ]);
+    JSONValue hookDecision = post("/api/hooks/pre-tool-use", hookInput);
+    eval.check("hook allows repository status", "decision" !in hookDecision.object, hookDecision.toString());
+
+    hookInput["tool_input"] = JSONValue(["command": JSONValue(`rm -rf "$HOME/Documents"`)]);
+    hookDecision = post("/api/hooks/pre-tool-use", hookInput);
+    eval.check("hook denies deleting user files",
+        "decision" in hookDecision.object && hookDecision["decision"].str == "block",
+        hookDecision.toString());
+
     JSONValue input = JSONValue.emptyObject;
     input["directory"] = JSONValue(directory);
     input["tool"] = JSONValue("exec");
