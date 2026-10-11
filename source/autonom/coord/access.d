@@ -1,11 +1,10 @@
 module autonom.coord.access;
 
-import autonom.agent.profile : Profile;
-import autonom.coord.room : Room;
-import autonom.coord.stream : Entry;
-import autonom.exception : Conflict, InvalidInput;
-import autonom.server : acceptMethod, bus, matchesPath, profileStore, readBody, respond, routeParameter;
-import serverino : Output, Request, endpoint, route;
+import autonom.agent;
+import autonom.coord;
+import autonom.exception;
+import autonom.server;
+import serverino;
 
 import std.algorithm.searching : canFind;
 import std.conv : to;
@@ -19,24 +18,21 @@ enum DEFAULT_LIMIT = 50;
 enum MAX_LIMIT = 500;
 enum MAX_TEXT = 4000;
 
-/// Resolves the profile registered to the session query parameter.
 Profile caller(Request request)
 {
     string session = request.get.read("session");
-    enforce!InvalidInput(session.length, "A session is required");
+    enforce!InvalidInputException(session.length, "A session is required");
     Profile ret = profileStore.profileFor(session);
-    enforce!Conflict(ret !is null, "No profile is registered for this session");
+    enforce!ConflictException(ret !is null, "No profile is registered for this session");
     return ret;
 }
 
-/// Enforces that the body contains only the expected fields.
 void onlyFields(JSONValue data, string[] fields)
 {
     foreach (name; data.object.keys)
-        enforce!InvalidInput(fields.canFind(name), "Unexpected "~name~" field");
+        enforce!InvalidInputException(fields.canFind(name), "Unexpected "~name~" field");
 }
 
-/// Reads a bounded read limit from the query, defaulting when absent.
 size_t readLimit(Request request)
 {
     string value = request.get.read("limit");
@@ -47,7 +43,7 @@ size_t readLimit(Request request)
     try
         ret = value.to!size_t;
     catch (Exception)
-        throw new InvalidInput("Invalid limit");
+        throw new InvalidInputException("Invalid limit");
 
     if (ret < 1)
         return 1;
@@ -55,31 +51,31 @@ size_t readLimit(Request request)
     return ret > MAX_LIMIT ? MAX_LIMIT : ret;
 }
 
-/// Reads and validates message text.
 string messageText(JSONValue data)
 {
-    enforce!InvalidInput("text" in data.object && data["text"].type == JSONType.string, "A message needs text");
+    enforce!InvalidInputException(
+        "text" in data.object && data["text"].type == JSONType.string,
+        "A message needs text"
+    );
     string ret = data["text"].str;
-    enforce!InvalidInput(ret.strip.length, "A message needs text");
-    enforce!InvalidInput(ret.length <= MAX_TEXT, "Message text is too long");
+    enforce!InvalidInputException(ret.strip.length, "A message needs text");
+    enforce!InvalidInputException(ret.length <= MAX_TEXT, "Message text is too long");
     return ret;
 }
 
-/// Reads a list of profile names from a JSON array.
 string[] names(JSONValue value, string message)
 {
-    enforce!InvalidInput(value.type == JSONType.array, message);
+    enforce!InvalidInputException(value.type == JSONType.array, message);
     string[] ret = new string[0];
     foreach (entry; value.array)
     {
-        enforce!InvalidInput(entry.type == JSONType.string, message);
+        enforce!InvalidInputException(entry.type == JSONType.string, message);
         ret ~= entry.str;
     }
 
     return ret;
 }
 
-/// Reads the optional list of profiles to ping.
 string[] pingNames(JSONValue data)
 {
     if ("ping" !in data.object || data["ping"].isNull)
@@ -88,7 +84,6 @@ string[] pingNames(JSONValue data)
     return names(data["ping"], "Ping must be a list of profile names");
 }
 
-/// Serializes entries.
 JSONValue entryArray(Entry[] entries)
 {
     JSONValue ret = JSONValue.emptyArray;
@@ -98,7 +93,6 @@ JSONValue entryArray(Entry[] entries)
     return ret;
 }
 
-/// Serializes a posted entry with the profiles it pinged.
 JSONValue posted(Entry entry, Profile[] targets)
 {
     JSONValue ret = entry.toJSON();
@@ -109,7 +103,6 @@ JSONValue posted(Entry entry, Profile[] targets)
     return ret;
 }
 
-/// Resolves a profile name, writing the not-found response and returning null when unknown.
 Profile profileByName(string name, Output output)
 {
     Profile ret = profileStore.get(name);
@@ -119,7 +112,6 @@ Profile profileByName(string name, Output output)
     return ret;
 }
 
-/// Resolves profile names, writing the not-found response and returning false when one is unknown.
 bool profileList(string[] profileNames, Output output, out Profile[] targets)
 {
     targets = new Profile[0];
@@ -135,7 +127,6 @@ bool profileList(string[] profileNames, Output output, out Profile[] targets)
     return true;
 }
 
-/// Looks up a visible room, writing the unknown-room response and returning null otherwise.
 Room lookupRoom(string name, Profile profile, Output output)
 {
     Room ret = bus.getRoom(name);
@@ -146,7 +137,6 @@ Room lookupRoom(string name, Profile profile, Output output)
     return null;
 }
 
-/// Looks up a room the profile administers, writing the unknown-room response and returning null otherwise.
 Room lookupAdministered(string name, Profile profile, Output output)
 {
     Room ret = bus.getRoom(name);
@@ -157,7 +147,6 @@ Room lookupAdministered(string name, Profile profile, Output output)
     return null;
 }
 
-/// Looks up a room the profile owns, writing the unknown-room response and returning null otherwise.
 Room lookupOwned(string name, Profile profile, Output output)
 {
     Room ret = bus.getRoom(name);
@@ -189,7 +178,10 @@ void rooms(Request request, Output output)
 
     JSONValue data = readBody(request);
     onlyFields(data, ["name"]);
-    enforce!InvalidInput("name" in data.object && data["name"].type == JSONType.string, "A room name is required");
+    enforce!InvalidInputException(
+        "name" in data.object && data["name"].type == JSONType.string,
+        "A room name is required"
+    );
     respond(output, bus.roomEntry(bus.createRoom(data["name"].str, profile.name), profile), 201);
 }
 
@@ -274,7 +266,7 @@ void roomMembership(Request request, Output output)
 
     JSONValue data = readBody(request);
     onlyFields(data, ["involved"]);
-    enforce!InvalidInput("involved" in data.object, "Expected the involved field");
+    enforce!InvalidInputException("involved" in data.object, "Expected the involved field");
     if (data["involved"].isNull)
         room.involveEveryone();
     else
@@ -309,14 +301,14 @@ void roomAdmins(Request request, Output output)
     {
         JSONValue data = readBody(request);
         onlyFields(data, ["profile"]);
-        enforce!InvalidInput("profile" in data.object && data["profile"].type == JSONType.string,
+        enforce!InvalidInputException("profile" in data.object && data["profile"].type == JSONType.string,
             "A profile is required");
         target = profileByName(data["profile"].str, output);
     }
     else
     {
         string name = request.get.read("profile");
-        enforce!InvalidInput(name.length, "A profile is required");
+        enforce!InvalidInputException(name.length, "A profile is required");
         target = profileByName(name, output);
     }
 
@@ -341,7 +333,7 @@ void messages(Request request, Output output)
     if (request.method == Request.Method.Get)
     {
         string source = request.get.read("source");
-        enforce!InvalidInput(source == "dms" || source == "pings", "Source must be dms or pings");
+        enforce!InvalidInputException(source == "dms" || source == "pings", "Source must be dms or pings");
         size_t limit = readLimit(request);
         JSONValue ret = JSONValue.emptyObject;
         ret["source"] = JSONValue(source);
@@ -352,7 +344,7 @@ void messages(Request request, Output output)
 
     JSONValue data = readBody(request);
     onlyFields(data, ["to", "text", "ping"]);
-    enforce!InvalidInput("to" in data.object && data["to"].type == JSONType.string, "A recipient is required");
+    enforce!InvalidInputException("to" in data.object && data["to"].type == JSONType.string, "A recipient is required");
     Profile to = profileByName(data["to"].str, output);
     if (to is null)
         return;

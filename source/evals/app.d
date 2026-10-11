@@ -1,9 +1,9 @@
 module evals.app;
 
-import evals : Eval;
-import evals.daemon : Daemon;
-import evals.policy : policyChecks;
-import evals.session : Sessions;
+import evals;
+import evals.daemon;
+import evals.policy;
+import evals.session;
 
 import std.exception : enforce;
 import std.process : environment;
@@ -35,7 +35,7 @@ void finish(Eval eval, Daemon daemon, Sessions sessions)
 
 void run(Eval eval, bool policy, bool sessions)
 {
-    Daemon daemon = new Daemon();
+    Daemon daemon = new Daemon(policy ? environment.get("OPENROUTER_API_KEY") : "unused-session-eval-key");
     Sessions lifecycle;
     scope(exit)
         finish(eval, daemon, lifecycle);

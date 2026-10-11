@@ -1,16 +1,17 @@
 module tests.profile;
 
-import autonom.agent.profile : Profile, getProfile;
-import autonom.agent.store : ProfileConflict, ProfileStore, profileSession, profiles;
-import autonom.interop : Session;
-import tests.common : Fixture;
+import autonom.agent;
+import autonom.agent.profile;
+import autonom.agent.store;
+import autonom.interop;
+import tests.common;
 import serverino : endpoint, route;
 import unit_threaded : Name, should, shouldThrow;
 
-import core.sys.linux.sys.file : flock, LOCK_EX;
+import core.sys.linux.sys.file : flock, LOCK_EX, LOCK_UN;
 import std.array : replicate;
 import std.conv : octal;
-import std.file : exists, getAttributes, mkdirRecurse, readText, remove, setAttributes, symlink, write;
+import std.file;
 import std.json : parseJSON;
 import std.path : buildPath;
 import std.stdio : File;
@@ -40,7 +41,7 @@ unittest
     fixture.store.list().length.should == 1;
     exists(buildPath(fixture.store.directory, "marlow")).should == true;
     exists(buildPath(fixture.store.directory, "marlow", "identity.md")).should == false;
-    fixture.store.create("MARLOW").shouldThrow!ProfileConflict();
+    fixture.store.create("MARLOW").shouldThrow!ProfileConflictException();
 }
 
 @Name("Profile imports legacy mappings once without modifying their files")
@@ -155,11 +156,11 @@ unittest
     fixture.store.register("marlow", "session-2");
     fixture.store.get("marlow").session.id.should == "session-2";
     (fixture.store.profileFor("session-1") is null).should == true;
-    fixture.store.register("wren", "session-1").shouldThrow!ProfileConflict();
+    fixture.store.register("wren", "session-1").shouldThrow!ProfileConflictException();
     ProfileStore store = new ProfileStore(fixture.config, fixture.bridge);
     store.get("marlow").session.id.should == "session-2";
     (store.profileFor("session-1") is null).should == true;
-    store.register("wren", "session-1").shouldThrow!ProfileConflict();
+    store.register("wren", "session-1").shouldThrow!ProfileConflictException();
 }
 
 @Name("Profile prevents duplicate session ownership")
@@ -170,7 +171,7 @@ unittest
         fixture.close();
 
     fixture.store.register("marlow", "session-1");
-    fixture.store.register("wren", "session-1").shouldThrow!ProfileConflict();
+    fixture.store.register("wren", "session-1").shouldThrow!ProfileConflictException();
     (fixture.store.get("wren") is null).should == true;
 }
 
@@ -191,8 +192,9 @@ unittest
     }
 
     flock(lock.fileno, LOCK_EX).should == 0;
-    fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflict();
-    fixture.store.register("wren", "session-1").shouldThrow!ProfileConflict();
+    fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflictException();
+    fixture.store.register("wren", "session-1").shouldThrow!ProfileConflictException();
+    flock(lock.fileno, LOCK_UN).should == 0;
     lock.close();
     fixture.store.register("marlow", "session-2").session.id.should == "session-2";
 }

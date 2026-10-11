@@ -1,12 +1,11 @@
 module autonom.agent.profile;
 
-import autonom.interop.session : Session;
-import autonom.server : acceptMethod, profileStore, respond, matchesPath, routeParameter;
-import serverino : Output, Request, endpoint, route;
+import autonom.interop.session;
+import autonom.server;
+import serverino;
 
 import std.json : JSONValue;
 
-/// Reserved for the human operator: no session may register it, and it administers every room.
 enum HUMAN_NAME = "human";
 
 @endpoint @route!(matchesPath!"/api/profiles/<name>")
@@ -22,7 +21,6 @@ void getProfile(Request request, Output output)
         respond(output, profile.toJSON());
 }
 
-/// A named agent identity linked to at most one session.
 class Profile
 {
 private:

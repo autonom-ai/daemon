@@ -1,37 +1,28 @@
 module autonom.config;
 
-import autonom.server : acceptMethod, configuration, respond;
-import autonom.storage : openFile;
-import dyaml : Loader, Node, NodeType;
-import intuit.router : IRouter, OpenRouter;
-import serverino : Output, Request, endpoint, route;
+import autonom.router;
+import autonom.storage;
+import intuit.router : IRouter;
+import mir.algebraic_alias.yaml;
+import mir.deser.yaml;
 
-import core.sys.posix.fcntl : O_RDONLY;
-import std.algorithm : canFind;
+import std.algorithm.searching : canFind;
 import std.exception : enforce;
-import std.file : exists;
-import std.json : JSONValue;
-import std.path : absolutePath, buildNormalizedPath, buildPath, dirName, expandTilde;
+import std.path;
 import std.process : environment;
-import std.stdio : File;
 
-@endpoint @route!"/api/config"
-void getConfig(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get]))
-        return;
+private:
 
-    respond(output, configuration.toJSON());
-}
+string resolvePath(string path, string base)
+    => buildNormalizedPath(absolutePath(expandTilde(path), base));
+
+public:
 
 class Config
 {
-    const string path;
-    const string dataDir;
-    const string sessionLockDir;
-    const string devinCommand;
-    const string policyUrl;
-    const string policyModel;
+    string dataDir;
+    string sessionLockDir;
+    string devinCommand;
     IRouter router;
 
     static string defaultPath()
@@ -47,66 +38,52 @@ class Config
 
     this(string path = defaultPath)
     {
-        this.path = buildNormalizedPath(absolutePath(expandTilde(path)));
-        string data = dirName(this.path);
-        string locks = defaultSessionLockDir;
-        string command = "devin";
-        string url = "https://openrouter.ai";
-        string model = "inception/mercury-decide:free";
-        if (exists(this.path))
+        string configPath = buildNormalizedPath(absolutePath(expandTilde(path)));
+        string base = dirName(configPath);
+        dataDir = base;
+        sessionLockDir = defaultSessionLockDir;
+        YamlAlgebraic settings = readText(configPath).deserializeYaml!YamlAlgebraic(configPath);
+        enforce(settings.kind == YamlAlgebraic.Kind.object, "Configuration must be a YAML mapping");
+        bool[string] seen;
+        foreach (pair; settings.object.pairs)
         {
-            File file = openFile(this.path, O_RDONLY);
-            scope(exit)
-                file.close();
-
-            Node settings = Loader.fromFile(file).load();
-            enforce(settings.type == NodeType.mapping, "Configuration must be a YAML mapping");
-            foreach (Node key, Node value; settings)
+            enforce(pair.key.kind == YamlAlgebraic.Kind.string, "Configuration setting names must be strings");
+            string key = pair.key.get!string.idup;
+            enforce(key !in seen, "Duplicate configuration setting: "~key);
+            seen[key] = true;
+            if (key == "router")
             {
-                enforce(key.type == NodeType.string && value.type == NodeType.string,
-                    "Configuration settings must be strings");
-                string setting = value.get!string;
-                enforce(setting.length && !setting.canFind('\0'), "Configuration settings must not be empty");
-                switch (key.get!string)
-                {
-                    case "dataDir":
-                        data = setting;
-                        break;
-                    case "sessionLockDir":
-                        locks = setting;
-                        break;
-                    case "devinCommand":
-                        command = setting;
-                        break;
-                    case "policyUrl":
-                        url = setting;
-                        break;
-                    case "policyModel":
-                        model = setting;
-                        break;
-                    default:
-                        throw new Exception("Unknown configuration setting");
-                }
+                router = createRouter(pair.value);
+                continue;
+            }
+
+            enforce(pair.value.kind == YamlAlgebraic.Kind.string, "Configuration settings must be strings");
+            string value = pair.value.get!string.idup;
+            enforce(value.length && !value.canFind('\0'), "Configuration settings must not be empty");
+            switch (key)
+            {
+            case "dataDir":
+                dataDir = value;
+                break;
+
+            case "sessionLockDir":
+                sessionLockDir = value;
+                break;
+
+            case "devinCommand":
+                devinCommand = value;
+                break;
+
+            default:
+                throw new Exception("Unknown configuration setting: "~key);
             }
         }
 
-        dataDir = buildNormalizedPath(absolutePath(expandTilde(data), dirName(this.path)));
-        sessionLockDir = buildNormalizedPath(absolutePath(expandTilde(locks), dirName(this.path)));
-        devinCommand = command.canFind('/') ?
-            buildNormalizedPath(absolutePath(expandTilde(command), dirName(this.path))) : command;
-        policyUrl = url;
-        policyModel = model;
-        router = new OpenRouter(environment.get("OPENROUTER_API_KEY"), url);
-    }
-
-    JSONValue toJSON() const
-    {
-        return JSONValue([
-            "dataDir": JSONValue(dataDir),
-            "sessionLockDir": JSONValue(sessionLockDir),
-            "devinCommand": JSONValue(devinCommand),
-            "policyUrl": JSONValue(policyUrl),
-            "policyModel": JSONValue(policyModel)
-        ]);
+        enforce(devinCommand.length, "Configuration requires devinCommand");
+        enforce(router !is null, "Configuration requires router");
+        dataDir = resolvePath(dataDir, base);
+        sessionLockDir = resolvePath(sessionLockDir, base);
+        if (devinCommand.canFind('/'))
+            devinCommand = resolvePath(devinCommand, base);
     }
 }

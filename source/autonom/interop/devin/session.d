@@ -1,13 +1,12 @@
 module autonom.interop.devin.session;
 
-import autonom.exception : Conflict;
-import autonom.interop.devin.bridge : Devin;
-import autonom.interop.execution : ExecutionStatus;
-import autonom.interop.session : Session, SessionStatus;
+import autonom.exception;
+import autonom.interop.devin.bridge;
+import autonom.interop.execution;
+import autonom.interop.session;
 
 import std.exception : enforce;
 
-/// A Devin CLI session managed through a Devin bridge.
 class DevinSession : Session
 {
 private:
@@ -40,7 +39,7 @@ public:
 
     override void resume(string prompt, string directory, string model = null)
     {
-        enforce!Conflict(!isRunning() && !bridge.online(id), "Session is already active");
+        enforce!ConflictException(!isRunning() && !bridge.online(id), "Session is already active");
         bindExecution(bridge.resume(id, prompt, directory, model));
     }
 
@@ -49,7 +48,7 @@ public:
         if (isRunning())
             execution.requestStop();
         else
-            enforce!Conflict(!bridge.online(id), "Cannot stop a session owned by another process");
+            enforce!ConflictException(!bridge.online(id), "Cannot stop a session owned by another process");
     }
 
     override void remove()

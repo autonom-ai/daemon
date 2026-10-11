@@ -1,14 +1,12 @@
 module autonom.server;
 
-import autonom.agent.store : ProfileStore;
-import autonom.config : Config;
-import autonom.coord.bus : Bus;
-import autonom.exception : BackendFailure, Conflict, InvalidInput;
-import autonom.policy : Policy;
-import autonom.interop.devin : Devin;
-import intuit.router.openrouter : OpenRouter;
-import serverino : Output, Request, ServerinoConfig, ServerinoProcess,
-    endpoint, onServerInit, onWorkerException, onWorkerStart, onWorkerStop, priority, route;
+import autonom.agent;
+import autonom.config;
+import autonom.coord;
+import autonom.exception;
+import autonom.policy;
+import autonom.interop.devin;
+import serverino;
 
 import core.sys.posix.signal : kill, SIGTERM;
 import core.thread : Thread;
@@ -77,26 +75,28 @@ JSONValue readBody(Request request)
 {
     enum MIME = "application/json";
     enum MAX_BODY = 64 * 1024;
-    enforce!InvalidInput(request.body.contentType == MIME || request.body.contentType.startsWith(MIME~";"),
+    enforce!InvalidInputException(request.body.contentType == MIME || request.body.contentType.startsWith(MIME~";"),
         "Expected application/json");
-    enforce!InvalidInput(request.body.data.length <= MAX_BODY, "Request body is too large");
+    enforce!InvalidInputException(request.body.data.length <= MAX_BODY, "Request body is too large");
     JSONValue ret;
     try
         ret = parseJSON(request.body.data);
     catch (Exception)
-        throw new InvalidInput("Invalid JSON body");
+        throw new InvalidInputException("Invalid JSON body");
 
-    enforce!InvalidInput(ret.type == JSONType.object, "Expected a JSON object");
+    enforce!InvalidInputException(ret.type == JSONType.object, "Expected a JSON object");
     return ret;
 }
 
 JSONValue readLaunch(Request request)
 {
     JSONValue ret = readBody(request);
-    enforce!InvalidInput("prompt" in ret.object && "directory" in ret.object, "Expected prompt and directory");
+    enforce!InvalidInputException("prompt" in ret.object && "directory" in ret.object, "Expected prompt and directory");
     foreach (name, value; ret.object)
-        enforce!InvalidInput((name == "prompt" || name == "directory" || name == "model") && value.type == JSONType.string,
-            "Expected only string prompt, directory, and optional model fields");
+        enforce!InvalidInputException(
+            (name == "prompt" || name == "directory" || name == "model") && value.type == JSONType.string,
+            "Expected only string prompt, directory, and optional model fields"
+        );
 
     if ("model" !in ret.object)
         ret["model"] = JSONValue("");
@@ -107,8 +107,8 @@ JSONValue readLaunch(Request request)
 string readField(string FIELD)(Request request)
 {
     JSONValue data = readBody(request);
-    enforce!InvalidInput(data.object.length == 1 && FIELD in data.object, "Expected only the "~FIELD~" field");
-    enforce!InvalidInput(data[FIELD].type == JSONType.string, FIELD~" must be a string");
+    enforce!InvalidInputException(data.object.length == 1 && FIELD in data.object, "Expected only the "~FIELD~" field");
+    enforce!InvalidInputException(data[FIELD].type == JSONType.string, FIELD~" must be a string");
     return data[FIELD].str;
 }
 
@@ -136,7 +136,7 @@ void stop(Request request, Output output)
         return;
     }
 
-    enforce!InvalidInput(readBody(request).object.length == 0, "Expected an empty JSON object");
+    enforce!InvalidInputException(readBody(request).object.length == 0, "Expected an empty JSON object");
     if (!stopping)
         bridge.stopSessions();
 
@@ -167,8 +167,7 @@ void stop(Request request, Output output)
     bridge = new Devin(configuration);
     profileStore = new ProfileStore(configuration, bridge);
     bus = new Bus(configuration, profileStore);
-    policy = new Policy(configuration.router,
-        configuration.policyModel);
+    policy = new Policy(configuration);
     refresh(Request.init);
 }
 
@@ -187,8 +186,8 @@ void refresh(Request request)
 
 @onWorkerException bool handleException(Request request, Output output, Exception error)
 {
-    ushort status = cast(InvalidInput)error ? 400 : cast(Conflict)error ? 409 :
-        cast(BackendFailure)error ? 503 : 500;
+    ushort status = cast(InvalidInputException)error ? 400 : cast(ConflictException)error ? 409 :
+        cast(BackendException)error ? 503 : 500;
     respond(output, JSONValue([
         "error": JSONValue(status == 500 ? "Internal server error" : error.msg)
     ]), status);

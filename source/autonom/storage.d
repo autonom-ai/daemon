@@ -1,16 +1,16 @@
 module autonom.storage;
 
-import core.sys.posix.fcntl : open, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_EXCL, O_NOFOLLOW, O_NONBLOCK, O_RDONLY, O_RDWR;
+import core.sys.posix.fcntl;
 import core.sys.posix.sys.stat : fstat, stat_t, S_IFMT, S_IFREG;
 import core.sys.posix.unistd : close, fsync;
 import std.conv : octal;
 import std.exception : enforce, errnoEnforce;
-import std.file : exists, FileException, isSymlink, remove, rename;
+import std.file;
 import std.json : JSONValue, parseJSON;
 import std.path : dirName;
 import std.stdio : File;
 import std.string : toStringz;
-import std.uuid : randomUUID;
+import std.uuid;
 
 package(autonom):
 

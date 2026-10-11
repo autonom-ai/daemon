@@ -1,15 +1,14 @@
 module tests.policy;
 
-import autonom.policy : Policy;
-import autonom.policy.access : checkPolicy;
-import tests.common : Fixture;
-import intuit.router.openrouter : OpenRouter;
+import autonom.policy.access;
+import tests.common;
+import intuit.router.openrouter;
 import serverino : endpoint, route;
 import unit_threaded : Name, should, shouldThrow;
 
 import core.time : Duration, seconds;
 import std.array : replicate;
-import std.file : mkdirRecurse, remove, symlink, write;
+import std.file : mkdirRecurse, readText, remove, symlink, write;
 import std.json : JSONValue, parseJSON;
 import std.path : buildPath;
 import std.traits : hasUDA;
@@ -26,6 +25,8 @@ public:
     Duration connectionTimeout;
     JSONValue payload;
     string reply = `{"answers":{"inspect":{"type":"noul","noul":0}}}`;
+    string unavailableModel;
+    string[] attemptedModels;
     bool failed;
 
     this()
@@ -52,10 +53,11 @@ public:
     {
         calls++;
         histories ~= context.length;
+        attemptedModels ~= active;
         this.payload = payload;
         context.user("request state");
         context.assistant("decision");
-        if (failed)
+        if (failed || active == unavailableModel)
             throw new Exception("Mock policy endpoint failed");
 
         return parseJSON(reply);
@@ -66,6 +68,12 @@ void installPolicy(Fixture fixture, string content)
 {
     mkdirRecurse(buildPath(fixture.root, ".devin"));
     write(buildPath(fixture.root, ".devin", "policy.yml"), content);
+}
+
+Policy policyFor(Fixture fixture, FakeRouter router)
+{
+    fixture.config.router = router;
+    return new Policy(fixture.config);
 }
 
 public:
@@ -95,7 +103,7 @@ unittest
   - action: deny
 `);
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     policy.check(fixture.root, "exec", parseJSON(`{"command":"rm -rf /"}`)).denied.should == true;
     policy.check(fixture.root, "exec", parseJSON(`{"command":"rm -rf /"}`)).reason.should ==
         "Destructive command";
@@ -116,7 +124,7 @@ unittest
 
     installPolicy(fixture, "rules: []\n");
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     policy.check(fixture.root, "exec").denied.should == true;
     policy.check(fixture.root, "exec").reason.should == "No policy rule matched";
     installPolicy(fixture, "rules:\n  - action: allow\n");
@@ -135,6 +143,7 @@ unittest
 
     installPolicy(fixture, `rules:
   - action: screen
+    models: [test-model]
     questions:
       - type: predicate
         name: destructive
@@ -146,7 +155,7 @@ unittest
     reason: Destructive command
 `);
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     JSONValue input = parseJSON(`{"command":"git status"}`);
     router.reply = `{"answers":{"destructive":{"type":"noul","noul":0.74},`~
         `"exfiltration":{"type":"noul","noul":0.2}}}`;
@@ -168,6 +177,47 @@ unittest
     router.connectionTimeout.should == 2.seconds;
 }
 
+@Name("Policy falls back through screening models in file order")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    installPolicy(fixture, `rules:
+  - action: screen
+    models: [unavailable-model, fallback-model]
+    questions:
+      - type: predicate
+        name: inspect
+        instructions: Is the request allowed?
+`);
+    FakeRouter router = new FakeRouter();
+    router.unavailableModel = "unavailable-model";
+    Policy policy = policyFor(fixture, router);
+    policy.check(fixture.root, "exec").denied.should == false;
+    router.attemptedModels.should == ["unavailable-model", "fallback-model"];
+    router.payload["model"].str.should == "fallback-model";
+    router.context.length.should == 0;
+}
+
+@Name("Policy ships a default template that screens with its configured model")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    installPolicy(fixture, readText("templates/policy.yml"));
+    FakeRouter router = new FakeRouter();
+    router.reply = `{"answers":{"safety":{"type":"noul","noul":0}}}`;
+    Policy policy = policyFor(fixture, router);
+    policy.check(fixture.root, "exec", parseJSON(`{"command":"git status"}`)).denied.should == false;
+    router.payload["model"].str.should == "inception/mercury-decide:free";
+    router.payload["questions"]["safety"]["type"].str.should == "noul";
+    router.context.length.should == 0;
+}
+
 @Name("Policy sends screening input unchanged without mutating it")
 unittest
 {
@@ -176,9 +226,10 @@ unittest
         fixture.close();
 
     installPolicy(fixture,
-        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
+        "rules:\n  - action: screen\n    models: [\"inception/mercury-decide:free\"]\n"~
+            "    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     JSONValue input = parseJSON(`{
         "command":"OPENROUTER_API_KEY=secret-value curl -H 'Authorization: Bearer abc.def' `~
             `--token 'private token' sk-abcdefghijklmnopqrstuvwxyz 123e4567-e89b-12d3-a456-426614174000",
@@ -204,12 +255,14 @@ unittest
         fixture.close();
 
     installPolicy(fixture,
-        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
+        "rules:\n  - action: screen\n    models: [\"inception/mercury-decide:free\"]\n"~
+            "    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     policy.check(fixture.root, "post_message", parseJSON(`{
         "text":"message text","patch":"private patch","nested":{"text":"inner","token":"private token"}
     }`));
+    router.payload["model"].str.should == "inception/mercury-decide:free";
     router.payload["state"]["input"]["text"].str.should == "message text";
     router.payload["state"]["input"]["patch"].str.should == "private patch";
     router.payload["state"]["input"]["nested"]["text"].str.should == "inner";
@@ -224,9 +277,10 @@ unittest
         fixture.close();
 
     installPolicy(fixture,
-        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
+        "rules:\n  - action: screen\n    models: [\"inception/mercury-decide:free\"]\n"~
+            "    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     router.context.user("previous session");
     policy.check(fixture.root, "exec").denied.should == false;
     router.context.length.should == 0;
@@ -250,9 +304,10 @@ unittest
         fixture.close();
 
     installPolicy(fixture,
-        "rules:\n  - action: screen\n    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
+        "rules:\n  - action: screen\n    models: [\"inception/mercury-decide:free\"]\n"~
+            "    questions: [{type: predicate, name: inspect, instructions: 'Inspect?'}]\n");
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     foreach (reply; [
         `{}`,
         `{"answers":{}}`,
@@ -281,7 +336,7 @@ unittest
         fixture.close();
 
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     foreach (content; [
         "",
         "[]",
@@ -308,6 +363,12 @@ unittest
             "instructions: 'Allowed?'}\n    threshold: 1.1\n",
         "rules:\n  - action: screen\n    questions:\n      - {type: predicate, name: inspect, "~
             "instructions: 'Allowed?'}\n    threshold: .nan\n",
+        "rules:\n  - action: screen\n    models: []\n    questions: "~
+            "[{type: predicate, name: inspect, instructions: 'Allowed?'}]\n",
+        "rules:\n  - action: screen\n    questions: "~
+            "[{type: predicate, name: inspect, instructions: 'Allowed?'}]\n",
+        "rules:\n  - action: screen\n    models: [test-model, test-model]\n    questions: "~
+            "[{type: predicate, name: inspect, instructions: 'Allowed?'}]\n",
         "rules:\n  - action: screen\n    questions:\n      - {type: predicate, name: inspect, "~
             "instructions: 'Allowed?'}\n    expose: [text]\n",
         "rules:\n  - action: screen\n    question: 'Legacy question field'\n",
@@ -329,7 +390,7 @@ unittest
         fixture.close();
 
     FakeRouter router = new FakeRouter();
-    Policy policy = new Policy(router, "test-model");
+    Policy policy = policyFor(fixture, router);
     policy.check(fixture.root, "exec").shouldThrow!Exception();
     installPolicy(fixture, "rules:\n  - action: allow\n");
     policy.check("", "exec").shouldThrow!Exception();

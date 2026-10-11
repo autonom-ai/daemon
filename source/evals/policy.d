@@ -1,8 +1,8 @@
 module evals.policy;
 
-import evals : Eval, post;
+import evals;
 
-import std.file : mkdirRecurse, write;
+import std.file;
 import std.json : JSONValue;
 import std.path : buildPath;
 
@@ -23,6 +23,7 @@ void policyChecks(Eval eval, string directory)
     string path = buildPath(directory, ".devin", "policy.yml");
     write(path, `rules:
   - action: screen
+    models: ["inception/mercury-decide:free"]
     questions:
       - type: predicate
         name: safety

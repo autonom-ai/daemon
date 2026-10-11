@@ -1,7 +1,6 @@
 {
 	"fileVersion": 1,
 	"versions": {
-		"dyaml": "0.10.0",
 		"intuit": "2.0.0",
 		"mir-algorithm": "3.22.4",
 		"mir-core": "1.7.4",
