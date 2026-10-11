@@ -3,6 +3,7 @@ module autonom.interop.devin.bridge;
 import autonom.config;
 import autonom.exception;
 import autonom.interop.bridge;
+import autonom.interop.devin.db : SessionMetadata, readSessionMetadata;
 import autonom.interop.devin.session;
 import autonom.interop.execution;
 import autonom.interop.session;
@@ -21,6 +22,8 @@ import std.path : buildPath;
 import std.stdio : File;
 
 private:
+
+enum COMPACT_PROMPT = "/compact";
 
 enum string[] SCRUB_PREFIXES = [
     "ACP_",
@@ -68,7 +71,8 @@ private:
         string prompt,
         string directory,
         string model,
-        string id = null
+        string id = null,
+        Execution dependency = null
     )
     {
         if (!directory.length || !exists(directory) || !isDir(directory))
@@ -79,7 +83,7 @@ private:
         if (id.length)
             args = ["--resume", id]~args;
 
-        return launch(ret, args);
+        return launch(ret, args, null, dependency);
     }
 
 protected:
@@ -88,11 +92,13 @@ protected:
 
 public:
     const string sessionLockDir;
+    const string sessionDatabase;
 
     this(Config configuration)
     {
         super(configuration.devinCommand, buildPath(configuration.dataDir, "sessions"), SCRUB_PREFIXES);
         sessionLockDir = configuration.sessionLockDir;
+        sessionDatabase = configuration.sessionDatabase;
         collect();
     }
 
@@ -129,6 +135,15 @@ public:
         return result != 0;
     }
 
+    SessionMetadata sessionMetadata(string id)
+    {
+        Session.validateId(id);
+        try
+            return readSessionMetadata(sessionDatabase, id);
+        catch (Exception)
+            return SessionMetadata.init;
+    }
+
     override Execution remove(string id)
     {
         Session session = this.session(id);
@@ -148,9 +163,13 @@ public:
         string id,
         string prompt,
         string directory,
-        string model
+        string model,
+        Execution dependency = null
     )
-        => submit(ExecutionKind.Resume, prompt, directory, model, id);
+        => submit(ExecutionKind.Resume, prompt, directory, model, id, dependency);
+
+    Execution compact(string id, string directory, string model = null)
+        => submit(ExecutionKind.Compact, COMPACT_PROMPT, directory, model, id);
 
     Execution start(string prompt, string directory, string model = null)
         => submit(ExecutionKind.Start, prompt, directory, model);
