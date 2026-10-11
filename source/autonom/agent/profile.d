@@ -6,6 +6,9 @@ import serverino : Output, Request, endpoint, route;
 
 import std.json : JSONValue;
 
+/// Reserved for the human operator: no session may register it, and it administers every room.
+enum HUMAN_NAME = "human";
+
 @endpoint @route!(matchesPath!"/api/profiles/<name>")
 void getProfile(Request request, Output output)
 {

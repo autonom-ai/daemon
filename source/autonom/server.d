@@ -2,6 +2,7 @@ module autonom.server;
 
 import autonom.agent.store : ProfileStore;
 import autonom.config : Config;
+import autonom.coord.bus : Bus;
 import autonom.exception : BackendFailure, Conflict, InvalidInput;
 import autonom.policy : Policy;
 import autonom.interop.devin : Devin;
@@ -30,6 +31,7 @@ Config configuration;
 Devin bridge;
 ProfileStore profileStore;
 Policy policy;
+Bus bus;
 
 void respond(Output output, JSONValue body, ushort status = 200)
 {
@@ -164,6 +166,7 @@ void stop(Request request, Output output)
     configuration = new Config(environment.get("AUTONOM_CONFIG", Config.defaultPath));
     bridge = new Devin(configuration);
     profileStore = new ProfileStore(configuration, bridge);
+    bus = new Bus(configuration, profileStore);
     policy = new Policy(new OpenRouter(environment.get("OPENROUTER_API_KEY"), configuration.policyUrl),
         configuration.policyModel);
     refresh(Request.init);

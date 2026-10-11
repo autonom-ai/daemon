@@ -1,7 +1,7 @@
 module tests.daemon;
 
 import autonom.server : health, stop;
-import tests.common : Fixture, waitUntil;
+import tests.common : Fixture, request, waitUntil;
 import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should;
 
@@ -20,32 +20,52 @@ import std.traits : hasUDA;
 
 private:
 
-JSONValue request(
-    string path,
-    uint status = 200,
-    string data = null,
-    string contentType = "application/json",
-    HTTP.Method method = HTTP.Method.undefined
-)
+/// A daemon started for an HTTP test, killed and reaped on close.
+struct RunningDaemon
 {
-    HTTP client = HTTP("http://127.0.0.1:18080"~path);
-    client.proxy = "";
-    client.connectTimeout = 1.seconds;
-    client.operationTimeout = 2.seconds;
-    client.method = method;
-    if (data !is null)
-        client.setPostData(data, contentType);
+    Pid process;
+    File log;
 
-    string body;
-    client.onReceive = (ubyte[] chunk)
+    void close()
     {
-        body ~= cast(char[])chunk;
-        return chunk.length;
-    };
-    client.perform();
-    enforce(client.statusLine.code == status,
-        "HTTP "~client.statusLine.code.to!string~" for "~path~": "~body);
-    return parseJSON(body);
+        if (process !is null)
+        {
+            if (!tryWait(process).terminated)
+            {
+                kill(process);
+                wait(process);
+            }
+
+            process = null;
+        }
+
+        if (log.isOpen)
+            log.close();
+    }
+}
+
+RunningDaemon startDaemon(Fixture fixture)
+{
+    RunningDaemon ret;
+    string path = buildPath(fixture.root, "daemon.log");
+    ret.log = File(path, "w");
+    ret.process = spawnProcess(
+        ["bin/autonom-daemon"],
+        stdin,
+        ret.log,
+        ret.log,
+        ["AUTONOM_CONFIG": fixture.path, "AUTONOM_PORT": "18080"],
+        Config.retainStdin | Config.retainStdout | Config.retainStderr
+    );
+    waitUntil(delegate bool()
+    {
+        enforce(!tryWait(ret.process).terminated, readText(path));
+        try
+            return request("/api/health")["pid"].integer == ret.process.processID;
+        catch (CurlException)
+            return false;
+    });
+    return ret;
 }
 
 string invokeHook(string command, JSONValue payload, int expected = 0)
@@ -153,40 +173,14 @@ while :; do sleep 0.05; done
 `);
     setAttributes(fixture.config.devinCommand, octal!"700");
     write(fixture.path, readText(fixture.path)~"policyUrl: http://127.0.0.1:1\npolicyModel: test-model\n");
-    string log = buildPath(fixture.root, "daemon.log");
-    File output = File(log, "w");
+    RunningDaemon daemon = startDaemon(fixture);
     scope(exit)
-        output.close();
+        daemon.close();
 
-    Pid process = spawnProcess(
-        ["bin/autonom-daemon"],
-        stdin,
-        output,
-        output,
-        ["AUTONOM_CONFIG": fixture.path, "AUTONOM_PORT": "18080"],
-        Config.retainStdin | Config.retainStdout | Config.retainStderr
-    );
-    scope(exit)
-    {
-        if (!tryWait(process).terminated)
-        {
-            kill(process);
-            wait(process);
-        }
-    }
-
-    waitUntil(delegate bool()
-    {
-        enforce(!tryWait(process).terminated, readText(log));
-        try
-            return request("/api/health")["status"].str == "ok";
-        catch (CurlException)
-            return false;
-    });
-    request("/api/health")["pid"].integer.should == process.processID;
+    request("/api/health")["pid"].integer.should == daemon.process.processID;
     request("/api/health", 405, "{}")["error"].str.should == "Method not allowed";
 
-    JSONValue hooks = parseJSON(readText(".devin/hooks.v1.json"));
+    JSONValue hooks = parseJSON(readText("templates/hooks.v1.json"));
     hooks.object.length.should == 8;
     foreach (event, path; [
         "PreToolUse": "pre-tool-use",
@@ -429,29 +423,13 @@ while :; do sleep 0.05; done
     request("/api/stop", 202, "{}")["status"].str.should == "stopping";
     waitUntil(delegate bool()
     {
-        return tryWait(process).terminated;
+        return tryWait(daemon.process).terminated;
     });
-    wait(process).should == 0;
+    wait(daemon.process).should == 0;
 
     write(fixture.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: ./devin\n");
-    process = spawnProcess(
-        ["bin/autonom-daemon"],
-        stdin,
-        output,
-        output,
-        ["AUTONOM_CONFIG": fixture.path, "AUTONOM_PORT": "18080"],
-        Config.retainStdin | Config.retainStdout | Config.retainStderr
-    );
-    waitUntil(delegate bool()
-    {
-        enforce(!tryWait(process).terminated, readText(log));
-        try
-            return request("/api/health")["status"].str == "ok";
-        catch (CurlException)
-            return false;
-        catch (Exception error)
-            throw new Exception(readText(log)~"\n"~error.msg);
-    });
+    daemon.close();
+    daemon = startDaemon(fixture);
     request("/api/profiles").array.length.should == 12;
     request("/api/profiles/agent-0")["session"].should == JSONValue(null);
     request("/api/profiles/agent-1/session")["id"].str.should == "session-1";
@@ -459,10 +437,118 @@ while :; do sleep 0.05; done
     request("/api/stop", 202, "{}");
     waitUntil(delegate bool()
     {
-        return tryWait(process).terminated;
+        return tryWait(daemon.process).terminated;
     });
-    wait(process).should == 0;
+    wait(daemon.process).should == 0;
     foreach (event, groups; hooks.object)
         invokeHook(groups[0]["hooks"][0]["command"].str,
             JSONValue(["hook_event_name": JSONValue(event)]), 7).should == "";
+}
+
+@Name("Daemon coordinates rooms, messages, and the ping gate") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    static foreach (name; ["marlow", "wren"])
+        request("/api/profiles", 201, JSONValue(["name": JSONValue(name)]).toString());
+    request("/api/profiles", 409, `{"name":"human"}`);
+    request("/api/profiles/marlow/session", 200, `{"id":"session-1"}`);
+    request("/api/profiles/wren/session", 200, `{"id":"session-2"}`);
+
+    request("/api/rooms", 400);
+    request("/api/rooms?session=missing", 409)["error"].str.should == "No profile is registered for this session";
+    request("/api/rooms?session=session-1", 400, `{"name":"general","extra":true}`);
+    JSONValue created = request("/api/rooms?session=session-1", 201, `{"name":"#General"}`);
+    created["name"].str.should == "general";
+    created["count"].integer.should == 0;
+    created["lastTs"].should == JSONValue(null);
+    request("/api/rooms?session=session-2").array.length.should == 1;
+    request("/api/rooms/general?session=session-2")["unread"].integer.should == 0;
+
+    JSONValue posted = request(
+        "/api/rooms/general/messages?session=session-1",
+        201,
+        `{"text":"hello","ping":["wren"]}`
+    );
+    posted["from"].str.should == "marlow";
+    posted["room"].str.should == "general";
+    posted["pinged"].array[0].str.should == "wren";
+    JSONValue read = request("/api/rooms/general/messages?session=session-2");
+    read["source"].str.should == "room";
+    read["room"].str.should == "general";
+    read["messages"].array.length.should == 1;
+    read["messages"].array[0]["text"].str.should == "hello";
+    request("/api/rooms/general/messages?session=session-2")["messages"].array.length.should == 0;
+    request("/api/messages?session=session-2&source=pings")["messages"].array.length.should == 1;
+    request("/api/messages?session=session-2&source=pings")["messages"].array.length.should == 0;
+    request("/api/messages?session=session-2&source=dms")["messages"].array.length.should == 0;
+    request("/api/messages?session=session-2&source=bad", 400);
+    request("/api/messages?session=session-2", 404, `{"to":"missing","text":"hi"}`);
+
+    JSONValue gate = JSONValue([
+        "hook_event_name": JSONValue("PreToolUse"),
+        "session_id": JSONValue("session-2"),
+        "tool_name": JSONValue("mcp__autonom-coord__read_messages"),
+        "tool_input": JSONValue(["source": JSONValue("dms")])
+    ]);
+    request("/api/hooks/pre-tool-use", 200, gate.toString())["hookSpecificOutput"]["updatedInput"]["session_id"].str
+        .should == "session-2";
+    gate["tool_name"] = JSONValue("exec");
+    request("/api/hooks/pre-tool-use", 200, gate.toString()).object.length.should == 0;
+    gate["tool_name"] = JSONValue("mcp__autonom-coord__post_message");
+    request("/api/hooks/pre-tool-use", 200, gate.toString())["hookSpecificOutput"]["updatedInput"]["session_id"].str
+        .should == "session-2";
+
+    request("/api/messages?session=session-1", 201, `{"to":"wren","text":"ping","ping":["wren"]}`);
+    request("/api/hooks/pre-tool-use", 200, gate.toString())["decision"].str.should == "block";
+    gate["tool_name"] = JSONValue("mcp__autonom-coord__read_messages");
+    gate["tool_input"] = JSONValue(["source": JSONValue("pings")]);
+    request("/api/hooks/pre-tool-use", 200, gate.toString())["hookSpecificOutput"]["updatedInput"]["session_id"].str
+        .should == "session-2";
+    request("/api/messages?session=session-2&source=pings")["messages"].array.length.should == 1;
+    gate["tool_name"] = JSONValue("mcp__autonom-coord__post_message");
+    request("/api/hooks/pre-tool-use", 200, gate.toString())["hookSpecificOutput"]["updatedInput"]["session_id"].str
+        .should == "session-2";
+    request("/api/rooms/general/messages?session=session-1", 201, `{"text":"no pings"}`)["pinged"].array.length
+        .should == 0;
+
+    request("/api/rooms/general/membership?session=session-2")["owner"].str.should == "marlow";
+    request("/api/rooms/general/membership?session=session-2")["involved"].should == JSONValue(null);
+    request("/api/rooms/general/membership?session=session-2", 404, `{"involved":["marlow"]}`);
+    request("/api/rooms/general/membership?session=session-1", 200, `{"involved":["marlow"]}`)["involved"].array.length
+        .should == 1;
+    request("/api/rooms?session=session-2").array.length.should == 0;
+    request("/api/rooms/general?session=session-2", 404);
+    request("/api/rooms/general/messages?session=session-2", 404);
+    request("/api/rooms/general/membership?session=session-1", 200, `{"involved":[]}`)["involved"].array.length
+        .should == 0;
+    request("/api/rooms/general/membership?session=session-1", 200, `{"involved":null}`)["involved"]
+        .should == JSONValue(null);
+
+    request("/api/rooms/general/admins?session=session-2", 404, `{"profile":"wren"}`);
+    request(
+        "/api/rooms/general/admins?session=session-1",
+        200,
+        `{"profile":"wren"}`
+    )["admins"].array.length.should == 1;
+    request(
+        "/api/rooms/general/admins?session=session-1&profile=wren",
+        200,
+        null,
+        "application/json",
+        HTTP.Method.del
+    )["admins"].array.length.should == 0;
+    request("/api/rooms/general/admins?session=session-1", 404, `{"profile":"missing"}`);
+
+    request("/api/rooms/general?session=session-2", 404, null, "application/json", HTTP.Method.del);
+    request("/api/rooms/general?session=session-1", 200, null, "application/json", HTTP.Method.del)["name"].str
+        .should == "general";
+    request("/api/rooms?session=session-1").array.length.should == 0;
 }

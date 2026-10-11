@@ -1,6 +1,6 @@
 module autonom.agent.store;
 
-import autonom.agent.profile : Profile;
+import autonom.agent.profile : HUMAN_NAME, Profile;
 import autonom.config : Config;
 import autonom.exception : Conflict, InvalidInput;
 import autonom.interop.bridge : Bridge;
@@ -60,14 +60,26 @@ private:
 
 string canonicalName(string name)
 {
-    enforce!InvalidInput(name.length && name.length <= 64 && isAlphaNum(name[0]), "Invalid profile name");
-    foreach (character; name)
-        enforce!InvalidInput(isAlphaNum(character) || character == '-' || character == '_', "Invalid profile name");
-
+    enforce!InvalidInput(validName(name), "Invalid profile name");
     return name.toLower.idup;
 }
 
 public:
+
+/// Reports whether a name is valid for a profile or room.
+bool validName(string name)
+{
+    if (!name.length || name.length > 64 || !isAlphaNum(name[0]))
+        return false;
+
+    foreach (character; name)
+    {
+        if (!isAlphaNum(character) && character != '-' && character != '_')
+            return false;
+    }
+
+    return true;
+}
 
 class ProfileConflict : Conflict
 {
@@ -240,6 +252,7 @@ public:
     Profile create(string name)
     {
         name = canonicalName(name);
+        enforce!ProfileConflict(name != HUMAN_NAME, "The human profile is reserved");
         enforce!ProfileConflict(name !in profiles, "Profile already exists");
         string path = buildPath(directory, name);
         enforce(!exists(path), "Profile directory already exists");
@@ -275,6 +288,7 @@ public:
     Profile register(string name, string id)
     {
         name = canonicalName(name);
+        enforce!ProfileConflict(name != HUMAN_NAME, "The human profile is reserved");
         Session.validateId(id);
         enforce!ProfileConflict(!bridge.isRemoved(id), "Session was removed");
         if (string* owner = id in assignments)
