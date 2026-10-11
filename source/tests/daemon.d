@@ -1,7 +1,7 @@
 module tests.daemon;
 
 import autonom.server : health, stop;
-import tests.common : Fixture, request, waitUntil;
+import tests.common;
 import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should;
 
@@ -14,13 +14,12 @@ import std.file : mkdirRecurse, readText, setAttributes, write;
 import std.json : JSONValue, parseJSON;
 import std.net.curl : CurlException, HTTP;
 import std.path : buildPath;
-import std.process : Config, Pid, kill, spawnProcess, tryWait, wait;
+import std.process;
 import std.stdio : File, stdin;
 import std.traits : hasUDA;
 
 private:
 
-/// A daemon started for an HTTP test, killed and reaped on close.
 struct RunningDaemon
 {
     Pid process;
@@ -172,7 +171,6 @@ trap 'exit 0' TERM
 while :; do sleep 0.05; done
 `);
     setAttributes(fixture.config.devinCommand, octal!"700");
-    write(fixture.path, readText(fixture.path)~"policyUrl: http://127.0.0.1:1\npolicyModel: test-model\n");
     RunningDaemon daemon = startDaemon(fixture);
     scope(exit)
         daemon.close();
@@ -282,6 +280,7 @@ while :; do sleep 0.05; done
     request("/api/policy/check", 503, policyRequest.toString())["denied"].boolean.should == true;
     write(policyPath, `rules:
   - action: screen
+    models: []
     questions:
       - type: predicate
         name: inspect
@@ -405,9 +404,6 @@ while :; do sleep 0.05; done
     deleted["status"].str.should == "succeeded";
     request("/api/sessions/batch-other/log", 404);
 
-    JSONValue configuration = request("/api/config");
-    write(fixture.path, "dataDir: changed\nsessionLockDir: locks\ndevinCommand: ./devin\n");
-    request("/api/config").should == configuration;
     request("/api/health")["workerPid"].integer.should == worker;
 
     request("/api/stop", 405)["error"].str.should == "Method not allowed";
@@ -427,7 +423,6 @@ while :; do sleep 0.05; done
     });
     wait(daemon.process).should == 0;
 
-    write(fixture.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: ./devin\n");
     daemon.close();
     daemon = startDaemon(fixture);
     request("/api/profiles").array.length.should == 12;

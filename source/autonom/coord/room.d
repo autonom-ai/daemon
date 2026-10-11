@@ -1,17 +1,15 @@
 module autonom.coord.room;
 
-import autonom.agent.profile : HUMAN_NAME;
-import autonom.storage : atomicWrite, readJSON;
+import autonom.agent;
+import autonom.storage;
 
 import std.conv : octal;
 import std.exception : enforce;
-import std.file : exists, mkdir, setAttributes;
+import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : buildPath;
 import std.uni : sicmp;
 
-// TODO: Room policy based on profile last message and locked room support for PRs/conflicts to
-// mandate a resolution between involved parties.
 
 private:
 
@@ -19,7 +17,6 @@ enum MEMBERSHIP_FILE = "profiles.json";
 
 public:
 
-/// A room: a message stream and the profiles that may use it.
 class Room
 {
 private:
@@ -51,7 +48,6 @@ private:
         return false;
     }
 
-    /// Serializes the involved list, representing an unrestricted room as JSON null.
     JSONValue involvedJSON()
     {
         if (!restricted)
@@ -77,11 +73,8 @@ private:
     }
 
 public:
-    /// Canonical room name.
     const string name;
-    /// Directory holding the room's stream and membership.
     const string directory;
-    /// Profile that created the room.
     string owner;
 
     this(string name, string directory, string owner)
@@ -92,7 +85,6 @@ public:
         admins = new string[0];
     }
 
-    /// Creates a room directory and its membership file.
     static Room create(string name, string directory, string owner)
     {
         enforce(!exists(directory), "Room directory already exists");
@@ -103,7 +95,6 @@ public:
         return ret;
     }
 
-    /// Loads a room, or returns null when its membership file is absent.
     static Room load(string name, string directory)
     {
         string path = buildPath(directory, MEMBERSHIP_FILE);
@@ -122,27 +113,21 @@ public:
         return ret;
     }
 
-    /// Reports whether the profile created the room; the human profile owns every room.
     bool originalOwner(string profileName)
         => sicmp(owner, profileName) == 0 || sicmp(HUMAN_NAME, profileName) == 0;
 
-    /// Reports whether the profile was granted administration.
     bool admin(string profileName)
         => named(admins, profileName);
 
-    /// Reports whether the profile administers the room.
     bool administrator(string profileName)
         => originalOwner(profileName) || admin(profileName);
 
-    /// Reports whether the profile may use the room; an unrestricted room admits every profile.
     bool member(string profileName)
         => !restricted || named(involved, profileName);
 
-    /// Reports whether the profile knows that the room exists.
     bool visible(string profileName)
         => administrator(profileName) || member(profileName);
 
-    /// Grants administration to a profile.
     void addAdmin(string profileName)
     {
         if (!admin(profileName))
@@ -151,7 +136,6 @@ public:
         save();
     }
 
-    /// Removes administration from a profile.
     void removeAdmin(string profileName)
     {
         string[] ret = new string[0];
@@ -165,7 +149,6 @@ public:
         save();
     }
 
-    /// Admits every profile to the room.
     void involveEveryone()
     {
         restricted = false;
@@ -173,7 +156,6 @@ public:
         save();
     }
 
-    /// Restricts the room to the supplied profiles; an empty list admits administrators only.
     void setInvolved(string[] profileNames)
     {
         restricted = true;
@@ -181,7 +163,6 @@ public:
         save();
     }
 
-    /// Serializes the room's membership.
     JSONValue toJSON()
     {
         JSONValue ret = JSONValue.emptyObject;

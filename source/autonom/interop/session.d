@@ -1,14 +1,14 @@
 module autonom.interop.session;
 
-import autonom.exception : InvalidInput;
-import autonom.interop.execution : Execution;
-import autonom.server : acceptMethod, bridge, matchesPath, readBody, readLaunch, respond, routeParameter;
-import autonom.storage : readText;
-import serverino : Output, Request, endpoint, priority, route;
+import autonom.exception;
+import autonom.interop.execution;
+import autonom.server;
+import autonom.storage;
+import serverino;
 
-import std.ascii : isAlphaNum;
+import std.ascii;
 import std.exception : enforce;
-import std.file : exists;
+import std.file;
 import std.json : JSONType, JSONValue;
 import std.typecons : Nullable;
 
@@ -28,13 +28,13 @@ void removeSessions(Request request, Output output)
         return;
 
     JSONValue data = readBody(request);
-    enforce!InvalidInput(data.object.length == 1 && "ids" in data.object, "Expected only the ids field");
-    enforce!InvalidInput(data["ids"].type == JSONType.array, "Session IDs must be an array");
+    enforce!InvalidInputException(data.object.length == 1 && "ids" in data.object, "Expected only the ids field");
+    enforce!InvalidInputException(data["ids"].type == JSONType.array, "Session IDs must be an array");
     bool[string] seen;
     foreach (id; data["ids"].array)
     {
-        enforce!InvalidInput(id.type == JSONType.string, "Session IDs must be strings");
-        enforce!InvalidInput(id.str !in seen, "Session IDs must be unique");
+        enforce!InvalidInputException(id.type == JSONType.string, "Session IDs must be strings");
+        enforce!InvalidInputException(id.str !in seen, "Session IDs must be unique");
         Session.validateId(id.str);
         seen[id.str.idup] = true;
     }
@@ -93,7 +93,7 @@ void stopSession(Request request, Output output)
     if (!acceptMethod(request, output, [Request.Method.Post]))
         return;
 
-    enforce!InvalidInput(readBody(request).object.length == 0, "Expected an empty JSON object");
+    enforce!InvalidInputException(readBody(request).object.length == 0, "Expected an empty JSON object");
     Session session = lookupSession!"/api/sessions/<id>/stop"(request, output);
     if (session is null)
         return;
@@ -127,7 +127,6 @@ enum SessionStatus : string
     Failed = "failed"
 }
 
-/// Contract for a managed agent session.
 abstract class Session
 {
 private:
@@ -144,9 +143,12 @@ public:
 
     static void validateId(string id)
     {
-        enforce!InvalidInput(id.length && id.length <= 128 && isAlphaNum(id[0]), "Invalid session ID");
+        enforce!InvalidInputException(id.length && id.length <= 128 && isAlphaNum(id[0]), "Invalid session ID");
         foreach (character; id)
-            enforce!InvalidInput(isAlphaNum(character) || character == '-' || character == '_', "Invalid session ID");
+            enforce!InvalidInputException(
+                isAlphaNum(character) || character == '-' || character == '_',
+                "Invalid session ID"
+            );
     }
 
     this(string id)
@@ -158,19 +160,15 @@ public:
     Execution execution()
         => _execution;
 
-    /// Gets the current session status.
     abstract SessionStatus status();
 
-    /// Reports whether the execution owned by this handle is running, without polling its process.
     bool isRunning()
         => _execution !is null && _execution.running;
 
-    /// Continues the session with a prompt, starting its process.
     abstract void resume(string prompt, string directory, string model = null);
 
     abstract void requestStop();
 
-    /// Stops the session process owned by this handle.
     void stop()
     {
         requestStop();
@@ -178,10 +176,8 @@ public:
             _execution.wait();
     }
 
-    /// Removes the session and its artifacts.
     abstract void remove();
 
-    /// Gets the exit status of the last session process, or null while unknown.
     Nullable!int exitStatus()
     {
         if (_execution is null || _execution.exitStatus.isNull)
@@ -190,7 +186,6 @@ public:
         return Nullable!int(cast(int)_execution.exitStatus.integer);
     }
 
-    /// Gets the path of the session log, or null when the session has no log.
     abstract string logPath();
 
     JSONValue toJSON()
