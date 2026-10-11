@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "autonom-coord-mcp": {
+      "command": "ruby",
+      "args": ["/home/cet/Repos/autonom/source/coord/server.rb"],
+      "disabled": true
+    },
+    "autonom-policy-mcp": {
+      "command": "ruby",
+      "args": ["/home/cet/Repos/autonom/source/policy/server.rb"],
+      "disabled": true
+    }
+  }
+}

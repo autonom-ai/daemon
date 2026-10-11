@@ -6,8 +6,8 @@
         {
           "type": "command",
           "command":
-            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/pre-tool-use\"",
-          "timeout": 6
+            "curl -qfsS -m 10 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/pre-tool-use\"",
+          "timeout": 12
         }
       ]
     }

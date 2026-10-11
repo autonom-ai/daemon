@@ -251,7 +251,7 @@ while :; do sleep 0.05; done
         hooks[event][0]["hooks"].array.length.should == 1;
         JSONValue hook = hooks[event][0]["hooks"][0];
         hook["type"].str.should == "command";
-        hook["timeout"].integer.should == 6;
+        hook["timeout"].integer.should == (event == "PreToolUse" ? 12 : 6);
         hook["command"].str.canFind(endpoint).should == true;
         parseJSON(invokeHook(hook["command"].str, payload)).should == parseJSON("{}");
         invokeHook(hook["command"].str, parseJSON("{}"), 22).should == "";
@@ -294,6 +294,24 @@ while :; do sleep 0.05; done
         instructions: Is the request allowed?
 `);
     request("/api/policy/check", 503, policyRequest.toString())["denied"].boolean.should == true;
+
+    JSONValue hookRequest = JSONValue([
+        "hook_event_name": JSONValue("PreToolUse"),
+        "cwd": JSONValue(fixture.root),
+        "tool_name": JSONValue("exec"),
+        "tool_input": JSONValue(["command": JSONValue("git status")])
+    ]);
+    write(policyPath, "rules:\n  - action: allow\n");
+    request("/api/hooks/pre-tool-use", 200, hookRequest.toString()).should == parseJSON("{}");
+    write(policyPath, "rules:\n  - action: deny\n    reason: Blocked\n");
+    request("/api/hooks/pre-tool-use", 200, hookRequest.toString())["decision"].str.should == "block";
+    request("/api/hooks/pre-tool-use", 200, hookRequest.toString())["reason"].str.should == "Blocked";
+    write(policyPath, "rules: []\n");
+    request("/api/hooks/pre-tool-use", 200, hookRequest.toString())["decision"].str.should == "block";
+    request("/api/hooks/pre-tool-use", 200, hookRequest.toString())["reason"].str.should == "No policy rule matched";
+    parseJSON(invokeHook(hooks["PreToolUse"][0]["hooks"][0]["command"].str, hookRequest))["decision"].str
+        .should == "block";
+
     request("/api/health")["status"].str.should == "ok";
 
     long worker = request("/api/health")["workerPid"].integer;

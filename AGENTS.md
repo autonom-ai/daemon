@@ -23,8 +23,8 @@
 - `POST /api/sessions/<id>/resume` continues a session with a prompt and returns its execution ID; the execution exposes a failed status if the backend rejects the session.
 - `DELETE /api/sessions/<id>` returns one removal-execution record. `POST /api/sessions/remove` validates the whole batch and returns `{"ids":[...],"executions":[{"id":"...","sessionId":"..."}],"failed":[...]}`. Removal executes asynchronously; poll each execution and trust only `status: succeeded`.
 - `.devin/hooks.v1.json` forwards all eight Devin hook events to `POST /api/hooks/<kebab-case-event>` using curl.
-- Hook endpoints validate `hook_event_name` and return `{}` without granting permissions or blocking actions.
-- Hook forwarding uses loopback and `AUTONOM_PORT` (default 8080), disables proxies, and times out after five seconds.
+- `PreToolUse` evaluates workspace policy and returns `{"decision":"block","reason":"..."}` on denial or failure, or `{}` when allowed; remaining hook endpoints return `{}`.
+- Hook forwarding uses loopback and `AUTONOM_PORT` (default 8080), disables proxies, and times out after five seconds (ten seconds for pre-tool policy screening).
 - Start, print, resume, and removal commands run as bounded, persisted executions outside the Serverino request worker; hooks can be served while those processes run.
 - Backend session listing remains synchronous and is limited to two seconds; model-screening policy checks remain synchronous and are limited to eight seconds.
 
