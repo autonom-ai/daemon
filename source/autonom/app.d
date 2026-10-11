@@ -7,7 +7,6 @@ import autonom.coord.access;
 import autonom.hooks;
 import autonom.policy.access;
 import autonom.server;
-import autonom.interop.cleanup;
 import autonom.interop.devin.bridge;
 import autonom.interop.execution;
 import autonom.interop.session;
@@ -21,7 +20,6 @@ mixin ServerinoMain!(
     autonom.hooks,
     autonom.policy.access,
     autonom.server,
-    autonom.interop.cleanup,
     autonom.interop.devin.bridge,
     autonom.interop.execution,
     autonom.interop.session
