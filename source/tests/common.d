@@ -6,13 +6,44 @@ import autonom.interop.devin : Devin;
 
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
+import std.conv : to;
 import std.exception : enforce;
 import std.file : mkdirRecurse, rmdirRecurse, tempDir, write;
-import std.json : JSONValue;
+import std.json : JSONValue, parseJSON;
+import std.net.curl : HTTP;
 import std.path : buildPath;
 import std.uuid : randomUUID;
 
 public:
+
+/// Performs an HTTP request against the daemon under test.
+JSONValue request(
+    string path,
+    uint status = 200,
+    string data = null,
+    string contentType = "application/json",
+    HTTP.Method method = HTTP.Method.undefined
+)
+{
+    HTTP client = HTTP("http://127.0.0.1:18080"~path);
+    client.proxy = "";
+    client.connectTimeout = 1.seconds;
+    client.operationTimeout = 2.seconds;
+    client.method = method;
+    if (data !is null)
+        client.setPostData(data, contentType);
+
+    string body;
+    client.onReceive = (ubyte[] chunk)
+    {
+        body ~= cast(char[])chunk;
+        return chunk.length;
+    };
+    client.perform();
+    enforce(client.statusLine.code == status,
+        "HTTP "~client.statusLine.code.to!string~" for "~path~": "~body);
+    return parseJSON(body);
+}
 
 struct Fixture
 {

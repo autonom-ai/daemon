@@ -22,7 +22,7 @@
 - `POST /api/executions/<id>/stop` requests cancellation without waiting for the CLI process.
 - `POST /api/sessions/<id>/resume` continues a session with a prompt and returns its execution ID; the execution exposes a failed status if the backend rejects the session.
 - `DELETE /api/sessions/<id>` returns one removal-execution record. `POST /api/sessions/remove` validates the whole batch and returns `{"ids":[...],"executions":[{"id":"...","sessionId":"..."}],"failed":[...]}`. Removal executes asynchronously; poll each execution and trust only `status: succeeded`.
-- `.devin/hooks.v1.json` forwards all eight Devin hook events to `POST /api/hooks/<kebab-case-event>` using curl.
+- `templates/hooks.v1.json`, installed at `.devin/hooks.v1.json`, forwards all eight Devin hook events to `POST /api/hooks/<kebab-case-event>` using curl.
 - `PreToolUse` evaluates workspace policy and returns `{"decision":"block","reason":"..."}` on denial or failure, or `{}` when allowed; remaining hook endpoints return `{}`.
 - Hook forwarding uses loopback and `AUTONOM_PORT` (default 8080), disables proxies, and times out after five seconds (ten seconds for pre-tool policy screening).
 - Start, print, resume, and removal commands run as bounded, persisted executions outside the Serverino request worker; hooks can be served while those processes run.
@@ -35,6 +35,17 @@
 - Store state is held in memory and flushed atomically on change; there are no lock files because the single worker owns every mutation.
 - A profile is locked while its bound session is running or online; rebinding it to another session requires that session to be stopped.
 - Sessions keep their profile permanently, and removing a session clears the profile binding; lookups work by name or by session.
+- `human` is reserved: no session may register it, and it administers every room.
+
+# Coordination
+
+- Coordination state lives under `dataDir/coord`: `rooms/<name>/{messages.jsonl,profiles.json}` and `inboxes/<profile>/{dms.jsonl,pings.jsonl,cursors.json}`. Workspaces keep only `.devin/policy.yml` and `.devin/hooks.v1.json`.
+- `autonom.coord` owns the bus: append-only jsonl streams with the most recent 1000 entries held in memory, per-profile read cursors, and rooms with an owner, admins, and an optional involved list.
+- Cursors index the in-memory window and are clamped to it on load, so a restart re-delivers at most one window per stream. Trimming shifts cursors with the window.
+- Rooms are global and report themselves as unknown to profiles that cannot see them and to non-administrators; only the original owner changes admins.
+- Coordination endpoints take the caller's `session` as a query parameter and require a registered session: `GET/POST /api/rooms`, `GET/DELETE /api/rooms/<name>`, `GET/POST /api/rooms/<name>/messages`, `GET/POST /api/rooms/<name>/membership`, `POST /api/rooms/<name>/admins`, `DELETE /api/rooms/<name>/admins?profile=`, and `GET/POST /api/messages` (`source=dms|pings`).
+- Reading a stream advances the cursor past the entries returned, and a first read starts with the newest `limit` entries. Own posts are never unread; message text is capped at 4000 characters.
+- `PreToolUse` blocks every tool while the session's profile has unread pings, except `mcp__autonom-coord__read_messages` with `source: "pings"`; it injects `session_id` into `mcp__autonom-coord__*` input and fails closed when profile access cannot be verified.
 
 # Policy
 
