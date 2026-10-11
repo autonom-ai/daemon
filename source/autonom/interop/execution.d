@@ -15,7 +15,7 @@ import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
 import std.conv : octal, to;
 import std.datetime : Clock;
-import std.exception : enforce, errnoEnforce;
+import std.exception : ErrnoException;
 import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : buildPath;
@@ -174,8 +174,9 @@ private:
                 (kind == ExecutionKind.Start || kind == ExecutionKind.Print))
             {
                 JSONValue data = readJSON(exportPath, 16 * 1024 * 1024);
-                enforce(data.type == JSONType.object && "session_id" in data.object &&
-                    data["session_id"].type == JSONType.string, "CLI did not export a session ID");
+                if (data.type != JSONType.object || "session_id" !in data.object ||
+                    data["session_id"].type != JSONType.string)
+                    throw new Exception("CLI did not export a session ID");
                 Session.validateId(data["session_id"].str);
                 _state.sessionId = data["session_id"].str.idup;
             }
@@ -344,18 +345,23 @@ public:
         => buildPath(directory, id~".err");
 
     package(autonom.interop) static bool createProcessGroup() nothrow @nogc @trusted
-        => setpgid(0, 0) == 0 && prctl(
+    {
+        return setpgid(0, 0) == 0 && prctl(
             PR_SET_PDEATHSIG,
             SIGTERM,
             0,
             0,
             0
         ) == 0;
+    }
 
     package(autonom.interop) static void signal(Pid process, int signal)
     {
         if (process !is null && process.processID > 0)
-            errnoEnforce(kill(-process.processID, signal) == 0 || errno == ESRCH, "Could not signal execution");
+        {
+            if (kill(-process.processID, signal) != 0 && errno != ESRCH)
+                throw new ErrnoException("Could not signal execution");
+        }
     }
 
     void start(
@@ -424,16 +430,25 @@ public:
     static Execution load(string directory, string logDirectory, string id)
     {
         JSONValue data = readJSON(buildPath(directory, id~".json"));
-        enforce(data.type == JSONType.object && "version" in data.object && data["version"] == JSONValue(1),
-            "Invalid execution record");
-        foreach (field; ["id", "kind", "workspace", "model", "createdAt", "status"])
-            enforce(field in data.object && data[field].type == JSONType.string, "Invalid execution record");
+        if (data.type != JSONType.object || "version" !in data.object || data["version"] != JSONValue(1))
+            throw new Exception("Invalid execution record");
 
-        enforce(data["id"].str == id && "sessionId" in data.object && "exitStatus" in data.object &&
-            "error" in data.object, "Invalid execution record");
-        enforce(data["sessionId"].isNull || data["sessionId"].type == JSONType.string, "Invalid execution session");
-        enforce(data["exitStatus"].isNull || data["exitStatus"].type == JSONType.integer, "Invalid execution exit");
-        enforce(data["error"].isNull || data["error"].type == JSONType.string, "Invalid execution error");
+        foreach (field; ["id", "kind", "workspace", "model", "createdAt", "status"])
+        {
+            if (field !in data.object || data[field].type != JSONType.string)
+                throw new Exception("Invalid execution record");
+        }
+
+        if (data["id"].str != id || "sessionId" !in data.object || "exitStatus" !in data.object ||
+            "error" !in data.object)
+            throw new Exception("Invalid execution record");
+        if (!data["sessionId"].isNull && data["sessionId"].type != JSONType.string)
+            throw new Exception("Invalid execution session");
+        if (!data["exitStatus"].isNull && data["exitStatus"].type != JSONType.integer)
+            throw new Exception("Invalid execution exit");
+        if (!data["error"].isNull && data["error"].type != JSONType.string)
+            throw new Exception("Invalid execution error");
+
         Execution ret = new Execution(
             directory,
             logDirectory,

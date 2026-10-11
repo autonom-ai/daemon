@@ -14,7 +14,7 @@ import core.stdc.errno : errno, EWOULDBLOCK;
 import core.sys.linux.sys.file : flock, LOCK_EX, LOCK_NB;
 import core.sys.posix.fcntl : O_RDONLY;
 import std.algorithm : canFind;
-import std.exception : enforce, errnoEnforce;
+import std.exception : ErrnoException;
 import std.file;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.path : buildPath;
@@ -71,8 +71,8 @@ private:
         string id = null
     )
     {
-        enforce!InvalidInputException(directory.length && exists(directory) && isDir(directory),
-            "An existing working directory is required");
+        if (!directory.length || !exists(directory) || !isDir(directory))
+            throw new InvalidInputException("An existing working directory is required");
         string[] args = arguments(prompt, model);
         Execution ret = newExecution(kind, directory, model, id);
         args = args[0..$-2]~["--export", ret.exportPath]~args[$-2..$];
@@ -98,8 +98,12 @@ public:
 
     static string[] arguments(string prompt, string model = null)
     {
-        enforce!InvalidInputException(prompt.length && !prompt.canFind('\0'), "A prompt is required");
-        enforce!InvalidInputException(!model.canFind('\0'), "Invalid model name");
+        if (!prompt.length || prompt.canFind('\0'))
+            throw new InvalidInputException("A prompt is required");
+
+        if (model.canFind('\0'))
+            throw new InvalidInputException("Invalid model name");
+
         string[] ret = ["--print"];
         if (model.length)
             ret ~= ["--model", model.idup];
@@ -119,7 +123,9 @@ public:
             file.close();
 
         int result = flock(file.fileno, LOCK_EX | LOCK_NB);
-        errnoEnforce(result == 0 || errno == EWOULDBLOCK, "Could not inspect session lock");
+        if (result != 0 && errno != EWOULDBLOCK)
+            throw new ErrnoException("Could not inspect session lock");
+
         return result != 0;
     }
 
@@ -129,10 +135,9 @@ public:
         if (session.isRunning() && session.execution.kind == ExecutionKind.Remove)
             return session.execution;
 
-        enforce!ConflictException(
-            session.isRunning() || !online(id),
-            "Cannot remove a session owned by another process"
-        );
+        if (!session.isRunning() && online(id))
+            throw new ConflictException("Cannot remove a session owned by another process");
+
         Execution ret = newExecution(ExecutionKind.Remove, null, null, session.id);
         launch(ret, ["rm", "--force", "--", session.id], session.execution);
         session.bindExecution(ret);
@@ -161,12 +166,16 @@ public:
         catch (Exception)
             throw new BackendException("Could not list backend sessions");
 
-        enforce!BackendException(data.type == JSONType.array, "Invalid backend session list");
+        if (data.type != JSONType.array)
+            throw new BackendException("Invalid backend session list");
+
         string[] ret;
         foreach (entry; data.array)
         {
-            enforce!BackendException(entry.type == JSONType.object && "id" in entry.object &&
-                entry["id"].type == JSONType.string, "Invalid backend session list");
+            if (entry.type != JSONType.object || "id" !in entry.object ||
+                entry["id"].type != JSONType.string)
+                throw new BackendException("Invalid backend session list");
+
             Session.validateId(entry["id"].str);
             ret ~= session(entry["id"].str).id;
         }

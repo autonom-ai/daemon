@@ -4,22 +4,30 @@ import intuit.router : IRouter, OpenRouter;
 import mir.algebraic_alias.yaml;
 
 import std.algorithm.searching : canFind, startsWith;
-import std.exception : enforce;
 
 package(autonom):
 
 IRouter createRouter(YamlAlgebraic settings)
 {
-    enforce(settings.kind == YamlAlgebraic.Kind.object, "Router configuration must be a mapping");
+    if (settings.kind != YamlAlgebraic.Kind.object)
+        throw new Exception("Router configuration must be a mapping");
+
     string[string] values;
     foreach (pair; settings.object.pairs)
     {
-        enforce(pair.key.kind == YamlAlgebraic.Kind.string, "Router setting names must be strings");
+        if (pair.key.kind != YamlAlgebraic.Kind.string)
+            throw new Exception("Router setting names must be strings");
+
         string field = pair.key.get!string.idup;
-        enforce(field !in values, "Duplicate router setting: "~field);
-        enforce(pair.value.kind == YamlAlgebraic.Kind.string, "Router settings must be strings");
+        if (field in values)
+            throw new Exception("Duplicate router setting: "~field);
+        if (pair.value.kind != YamlAlgebraic.Kind.string)
+            throw new Exception("Router settings must be strings");
+
         string value = pair.value.get!string.idup;
-        enforce(!value.canFind('\0'), "Invalid router setting");
+        if (value.canFind('\0'))
+            throw new Exception("Invalid router setting");
+
         switch (field)
         {
         case "type", "key", "url", "name", "referer", "title":
@@ -37,11 +45,15 @@ IRouter createRouter(YamlAlgebraic settings)
         "url",
         "name"
     ])
-        enforce(field in values && values[field].length, "Router requires "~field);
+    {
+        if (field !in values || !values[field].length)
+            throw new Exception("Router requires "~field);
+    }
 
     string url = values["url"];
-    enforce((url.startsWith("https://") && url.length > 8) || (url.startsWith("http://") && url.length > 7),
-        "Router URL must use HTTP or HTTPS");
+    if (!((url.startsWith("https://") && url.length > 8) ||
+        (url.startsWith("http://") && url.length > 7)))
+        throw new Exception("Router URL must use HTTP or HTTPS");
     switch (values["type"])
     {
     case "openrouter":

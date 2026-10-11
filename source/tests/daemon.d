@@ -9,7 +9,6 @@ import core.time : Duration, seconds;
 import std.algorithm : canFind;
 import std.array : join, replicate;
 import std.conv : octal, to;
-import std.exception : enforce;
 import std.file : mkdirRecurse, readText, setAttributes, write;
 import std.json : JSONValue, parseJSON;
 import std.net.curl : CurlException, HTTP;
@@ -58,7 +57,9 @@ RunningDaemon startDaemon(Fixture fixture)
     );
     waitUntil(delegate bool()
     {
-        enforce(!tryWait(ret.process).terminated, readText(path));
+        if (tryWait(ret.process).terminated)
+            throw new Exception(readText(path));
+
         try
             return request("/api/health")["pid"].integer == ret.process.processID;
         catch (CurlException)
@@ -90,7 +91,9 @@ string invokeHook(string command, JSONValue payload, int expected = 0)
         Config.retainStdin | Config.retainStdout | Config.retainStderr
     ));
     errors.rewind();
-    enforce(status == expected, cast(string)errors.byChunk(4096).join);
+    if (status != expected)
+        throw new Exception(cast(string)errors.byChunk(4096).join);
+
     output.rewind();
     return cast(string)output.byChunk(4096).join;
 }

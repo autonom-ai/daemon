@@ -7,7 +7,6 @@ import autonom.storage;
 import serverino;
 
 import std.ascii;
-import std.exception : enforce;
 import std.file;
 import std.json : JSONType, JSONValue;
 import std.typecons : Nullable;
@@ -28,13 +27,19 @@ void removeSessions(Request request, Output output)
         return;
 
     JSONValue data = readBody(request);
-    enforce!InvalidInputException(data.object.length == 1 && "ids" in data.object, "Expected only the ids field");
-    enforce!InvalidInputException(data["ids"].type == JSONType.array, "Session IDs must be an array");
+    if (data.object.length != 1 || "ids" !in data.object)
+        throw new InvalidInputException("Expected only the ids field");
+    if (data["ids"].type != JSONType.array)
+        throw new InvalidInputException("Session IDs must be an array");
+
     bool[string] seen;
     foreach (id; data["ids"].array)
     {
-        enforce!InvalidInputException(id.type == JSONType.string, "Session IDs must be strings");
-        enforce!InvalidInputException(id.str !in seen, "Session IDs must be unique");
+        if (id.type != JSONType.string)
+            throw new InvalidInputException("Session IDs must be strings");
+        if (id.str in seen)
+            throw new InvalidInputException("Session IDs must be unique");
+
         Session.validateId(id.str);
         seen[id.str.idup] = true;
     }
@@ -93,7 +98,8 @@ void stopSession(Request request, Output output)
     if (!acceptMethod(request, output, [Request.Method.Post]))
         return;
 
-    enforce!InvalidInputException(readBody(request).object.length == 0, "Expected an empty JSON object");
+    if (readBody(request).object.length != 0)
+        throw new InvalidInputException("Expected an empty JSON object");
     Session session = lookupSession!"/api/sessions/<id>/stop"(request, output);
     if (session is null)
         return;
@@ -143,12 +149,14 @@ public:
 
     static void validateId(string id)
     {
-        enforce!InvalidInputException(id.length && id.length <= 128 && isAlphaNum(id[0]), "Invalid session ID");
+        if (!id.length || id.length > 128 || !isAlphaNum(id[0]))
+            throw new InvalidInputException("Invalid session ID");
+
         foreach (character; id)
-            enforce!InvalidInputException(
-                isAlphaNum(character) || character == '-' || character == '_',
-                "Invalid session ID"
-            );
+        {
+            if (!isAlphaNum(character) && character != '-' && character != '_')
+                throw new InvalidInputException("Invalid session ID");
+        }
     }
 
     this(string id)
