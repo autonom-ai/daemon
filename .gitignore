@@ -4,3 +4,4 @@ bin/
 .devin/*
 !.devin/hooks.v1.json
 docs/*
+test-workspace
