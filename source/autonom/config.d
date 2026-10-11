@@ -1,8 +1,9 @@
 module autonom.config;
 
-import autonom.server : configuration, respond;
+import autonom.server : acceptMethod, configuration, respond;
 import autonom.storage : openFile;
 import dyaml : Loader, Node, NodeType;
+import intuit.router : IRouter, OpenRouter;
 import serverino : Output, Request, endpoint, route;
 
 import core.sys.posix.fcntl : O_RDONLY;
@@ -17,21 +18,21 @@ import std.stdio : File;
 @endpoint @route!"/api/config"
 void getConfig(Request request, Output output)
 {
-    if (request.method == Request.Method.Get)
-        respond(output, configuration.toJSON());
-    else
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    if (!acceptMethod(request, output, [Request.Method.Get]))
+        return;
+
+    respond(output, configuration.toJSON());
 }
 
 class Config
 {
-public:
     const string path;
     const string dataDir;
     const string sessionLockDir;
     const string devinCommand;
     const string policyUrl;
     const string policyModel;
+    IRouter router;
 
     static string defaultPath()
         => buildPath(environment.get("XDG_CONFIG_HOME", expandTilde("~/.config")), "autonom", "config.yml");
@@ -95,6 +96,7 @@ public:
             buildNormalizedPath(absolutePath(expandTilde(command), dirName(this.path))) : command;
         policyUrl = url;
         policyModel = model;
+        router = new OpenRouter(environment.get("OPENROUTER_API_KEY"), url);
     }
 
     JSONValue toJSON() const
