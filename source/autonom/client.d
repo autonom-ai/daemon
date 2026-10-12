@@ -224,7 +224,8 @@ Entry[] conversation(string profile)
             ret ~= entry;
     }
 
-    ret.sort!((left, right) => left.timestamp < right.timestamp);
+    ret.sort!((left, right) => left.timestamp != right.timestamp ? left.timestamp < right.timestamp :
+        left.from == HUMAN_NAME && right.from != HUMAN_NAME);
     return ret;
 }
 

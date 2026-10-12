@@ -92,7 +92,7 @@ public:
             return null;
         if (!ret.sessionId.length)
         {
-            if (!bind || !started)
+            if (!bind || !started || managed(session))
                 return null;
 
             ret.identify(session);

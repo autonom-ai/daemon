@@ -50,6 +50,8 @@ void permission(Request request, Output output)
     }
 
     respond(output, found.toJSON());
+    if (!human && found.decision.length)
+        permissions.remove(found.id);
 }
 
 class PermissionStore
@@ -59,7 +61,7 @@ public:
     {
         foreach (id; requests.keys)
         {
-            if (requests[id].expired || requests[id].decision.length)
+            if (requests[id].expired)
                 requests.remove(id);
         }
 
@@ -75,6 +77,11 @@ public:
     {
         Permission* found = id in requests;
         return found is null ? null : *found;
+    }
+
+    void remove(string id)
+    {
+        requests.remove(id);
     }
 
     JSONValue pending()

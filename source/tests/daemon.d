@@ -771,3 +771,115 @@ unittest
     ("hookSpecificOutput" in response.object).should == null;
     request("/api/profiles").array.length.should == 0;
 }
+
+@Name("Managed capabilities are bound to one live run and cannot be forged or reused") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    JSONValue first = hookSession(fixture, "managed-one");
+    hookSession(fixture, "managed-two");
+    string token = hookTokens["managed-one"];
+    request(
+        "/api/profiles",
+        403,
+        null,
+        "application/json",
+        HTTP.Method.get,
+        null,
+        "managed-one",
+        false
+    );
+    request(
+        "/api/profiles",
+        200,
+        null,
+        "application/json",
+        HTTP.Method.get,
+        token,
+        "managed-one",
+        false
+    );
+    request(
+        "/api/profiles",
+        403,
+        null,
+        "application/json",
+        HTTP.Method.get,
+        token,
+        "managed-two",
+        false
+    );
+    request("/api/profiles", 201, `{"name":"alpha"}`);
+    request(
+        "/api/profiles/alpha/session",
+        409,
+        `{"id":"managed-two"}`,
+        "application/json",
+        HTTP.Method.post,
+        token,
+        "managed-one",
+        false
+    );
+    request(
+        "/api/profiles/alpha/session",
+        200,
+        `{"id":"managed-one"}`,
+        "application/json",
+        HTTP.Method.post,
+        token,
+        "managed-one",
+        false
+    );
+    request("/api/client/state")["profiles"].array[0]["managed"].boolean.should == true;
+    finishHookSession(first);
+    request(
+        "/api/profiles",
+        403,
+        null,
+        "application/json",
+        HTTP.Method.get,
+        token,
+        "managed-one",
+        false
+    );
+    request("/api/sessions/desktop-session/resume", 409,
+        JSONValue(["prompt": JSONValue("hello"), "directory": JSONValue(fixture.root)]).toString());
+}
+
+@Name("Human chat uses its own cursors and can DM, ping, and participate in rooms") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    hookSession(fixture, "managed-one");
+    request("/api/profiles", 201, `{"name":"alpha"}`);
+    request("/api/profiles/alpha/session", 200, `{"id":"managed-one"}`);
+    request("/api/rooms", 201, `{"name":"team"}`);
+    request("/api/rooms/team/messages", 201, `{"text":"human check-in","ping":["alpha"]}`)["from"].str
+        .should == "human";
+    request("/api/client/messages?source=room&target=team").array.length.should == 1;
+    request("/api/rooms/team/messages?session=managed-one")["messages"].array.length.should == 1;
+    request("/api/messages", 201, `{"to":"alpha","text":"direct from human"}`);
+    request("/api/messages?session=managed-one", 201, `{"to":"human","text":"direct from alpha","ping":["human"]}`);
+    JSONValue direct = request("/api/client/messages?source=dm&target=alpha");
+    direct.array.length.should == 2;
+    direct[0]["from"].str.should == "human";
+    direct[1]["from"].str.should == "alpha";
+    request("/api/client/messages?source=pings").array.length.should == 1;
+    request("/api/client/state")["humanEvents"].integer.should == 0;
+    request("/api/client/events?profile=alpha").array.length.should == 1;
+    request("/api/messages?session=managed-one&source=dms")["messages"].array.length.should == 1;
+}

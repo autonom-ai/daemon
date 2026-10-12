@@ -25,7 +25,10 @@ JSONValue request(
     uint status = 200,
     string data = null,
     string contentType = "application/json",
-    HTTP.Method method = HTTP.Method.undefined
+    HTTP.Method method = HTTP.Method.undefined,
+    string runToken = null,
+    string session = null,
+    bool control = true
 )
 {
     HTTP client = HTTP("http://127.0.0.1:18080"~path);
@@ -33,9 +36,13 @@ JSONValue request(
     client.connectTimeout = 1.seconds;
     client.operationTimeout = 2.seconds;
     client.method = method;
-    if (requestToken.length)
+    if (control && requestToken.length)
         client.addRequestHeader("x-autonom-client", requestToken);
-    if (path.startsWith("/api/hooks/") && data.length)
+    if (runToken.length)
+        client.addRequestHeader("x-autonom-run", runToken);
+    if (session.length)
+        client.addRequestHeader("x-autonom-session", session);
+    if (!runToken.length && control && path.startsWith("/api/hooks/") && data.length)
     {
         try
         {

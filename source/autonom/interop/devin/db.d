@@ -44,13 +44,18 @@ SessionMetadata readSessionMetadata(string database, string id)
     if (!available(database))
         return ret;
 
-    Database connection = new Sqlite(database, SQLITE_OPEN_READONLY);
+    Sqlite connection = new Sqlite(database, SQLITE_OPEN_READONLY);
+    scope(exit)
+        destroy(connection);
+
     ResultSet result = connection.query(
         "select id, model, working_directory, coalesce(title, '') as title, agent_mode, backend_type, "~
         "created_at, last_activity_at, hidden, coalesce(workspace_dirs, '[]') as workspace_dirs "~
         "from sessions where id = ?",
         id
     );
+    scope(exit)
+        destroy(result);
     if (result.empty)
         return ret;
 
@@ -77,7 +82,10 @@ JSONValue readSessionMessages(string database, string id, size_t limit = 300)
     if (!available(database))
         return ret;
 
-    Database connection = new Sqlite(database, SQLITE_OPEN_READONLY);
+    Sqlite connection = new Sqlite(database, SQLITE_OPEN_READONLY);
+    scope(exit)
+        destroy(connection);
+
     ResultSet result = connection.query(
         "with recursive chain(node_id, parent_node_id, chat_message, created_at, depth) as ("~
         "select node_id, parent_node_id, chat_message, created_at, 0 from message_nodes "~
@@ -92,6 +100,9 @@ JSONValue readSessionMessages(string database, string id, size_t limit = 300)
         id,
         limit > 500 ? 500 : limit
     );
+    scope(exit)
+        destroy(result);
+
     size_t bytes;
     foreach (Row row; result)
     {
