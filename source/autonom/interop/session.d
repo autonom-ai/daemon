@@ -1,6 +1,7 @@
 module autonom.interop.session;
 
 import autonom.exception;
+import autonom.interop.devin.db : SessionMetadata;
 import autonom.interop.execution;
 import autonom.server;
 import autonom.storage;
@@ -87,8 +88,22 @@ void resumeSession(Request request, Output output)
         return;
 
     JSONValue data = readLaunch(request);
-    Session session = bridge.session(routeParameter!"/api/sessions/<id>/resume"(request));
-    session.resume(data["prompt"].str, data["directory"].str, data["model"].str);
+    string id = routeParameter!"/api/sessions/<id>/resume"(request);
+    if (!bridge.access.managed(id))
+        throw new ConflictException("Only sessions started by Autonom may be resumed by Autonom");
+
+    Session session = bridge.session(id);
+    if (session.isRunning() || bridge.online(id))
+        throw new ConflictException("Session is already active");
+
+    bridge.resume(
+        id,
+        data["prompt"].str,
+        data["directory"].str,
+        data["model"].str,
+        null,
+        data["mode"].str
+    );
     respond(output, session.toJSON());
 }
 
@@ -170,6 +185,20 @@ public:
 
     abstract SessionStatus status();
 
+    abstract SessionMetadata metadata();
+
+    string model()
+        => metadata.model;
+
+    string title()
+        => metadata.title;
+
+    string mode()
+        => metadata.mode;
+
+    string workspace()
+        => metadata.directory;
+
     bool isRunning()
         => _execution !is null && _execution.running;
 
@@ -198,11 +227,11 @@ public:
 
     JSONValue toJSON()
     {
-        return JSONValue([
-            "id": JSONValue(id),
-            "status": JSONValue(cast(string)status),
-            "exitStatus": exitStatus.isNull ? JSONValue(null) : JSONValue(exitStatus.get),
-            "executionId": _execution is null ? JSONValue(null) : JSONValue(_execution.id)
-        ]);
+        JSONValue ret = metadata.toJSON();
+        ret["id"] = JSONValue(id);
+        ret["status"] = JSONValue(cast(string)status);
+        ret["exitStatus"] = exitStatus.isNull ? JSONValue(null) : JSONValue(exitStatus.get);
+        ret["executionId"] = _execution is null ? JSONValue(null) : JSONValue(_execution.id);
+        return ret;
     }
 }

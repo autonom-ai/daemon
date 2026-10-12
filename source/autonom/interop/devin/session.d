@@ -2,6 +2,7 @@ module autonom.interop.devin.session;
 
 import autonom.exception;
 import autonom.interop.devin.bridge;
+import autonom.interop.devin.db : SessionMetadata;
 import autonom.interop.execution;
 import autonom.interop.session;
 
@@ -17,6 +18,9 @@ public:
         super(id);
         this.bridge = bridge;
     }
+
+    override SessionMetadata metadata()
+        => bridge.sessionMetadata(id);
 
     override SessionStatus status()
     {

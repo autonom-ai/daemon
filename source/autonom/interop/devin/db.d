@@ -21,7 +21,7 @@ struct SessionMetadata
     bool hidden;
     JSONValue workspaces = JSONValue.emptyArray;
 
-    JSONValue toJSON() const
+    JSONValue toJSON()
     {
         return JSONValue([
             "id": JSONValue(id),
