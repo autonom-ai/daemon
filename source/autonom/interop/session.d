@@ -96,12 +96,10 @@ void resumeSession(Request request, Output output)
     if (session.isRunning() || bridge.online(id))
         throw new ConflictException("Session is already active");
 
-    bridge.resume(
-        id,
+    session.resume(
         data["prompt"].str,
         data["directory"].str,
         data["model"].str,
-        null,
         data["mode"].str
     );
     respond(output, session.toJSON());
@@ -202,7 +200,12 @@ public:
     bool isRunning()
         => _execution !is null && _execution.running;
 
-    abstract void resume(string prompt, string directory, string model = null);
+    abstract void resume(
+        string prompt,
+        string directory,
+        string model = null,
+        string mode = null
+    );
 
     abstract void requestStop();
 
