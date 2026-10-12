@@ -28,16 +28,7 @@ private:
     bool[string] removed;
 
     string[string] childEnvironment() const
-    {
-        string[string] ret = environment.toAA();
-        foreach (name; ret.keys)
-        {
-            if (scrubPrefixes.any!(prefix => name.startsWith(prefix)))
-                ret.remove(name);
-        }
-
-        return ret;
-    }
+        => Execution.childEnvironment();
 
 protected:
     abstract Session createSession(string id);

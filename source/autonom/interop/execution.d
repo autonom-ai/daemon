@@ -23,6 +23,7 @@ import std.json : JSONType, JSONValue;
 import std.path : buildPath;
 import std.process;
 import std.stdio : File;
+import std.string : startsWith;
 import std.uuid;
 
 public:
@@ -56,6 +57,26 @@ void stopExecution(Request request, Output output)
     execution.requestStop();
     respond(output, execution.toJSON(), 202);
 }
+
+public:
+
+string[string] childEnvironment()
+    => Execution.childEnvironment();
+
+void signalExecution(Pid process, int signal)
+{
+    Execution.signal(process, signal);
+}
+
+enum SCRUB_PREFIXES = [
+    "ACP_",
+    "ELECTRON_",
+    "OPENROUTER_API_KEY",
+    "VSCODE_",
+    "WINDSURF_",
+    "AUTONOM_RUN_",
+    "AUTONOM_CLIENT_"
+];
 
 enum ExecutionKind : string
 {
@@ -381,6 +402,31 @@ public:
 
     string errorPath() const
         => buildPath(directory, id~".err");
+
+    package(autonom.interop) static string[string] childEnvironment() nothrow
+    {
+        string[string] ret;
+        try
+        {
+            ret = environment.toAA();
+            foreach (name; ret.keys)
+            {
+                foreach (prefix; SCRUB_PREFIXES)
+                {
+                    if (name.startsWith(prefix))
+                    {
+                        ret.remove(name);
+                        break;
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return ret;
+    }
 
     package(autonom.interop) static bool createProcessGroup() nothrow @nogc @trusted
     {
