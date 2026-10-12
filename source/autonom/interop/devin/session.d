@@ -40,12 +40,17 @@ public:
         return SessionStatus.Offline;
     }
 
-    override void resume(string prompt, string directory, string model = null)
+    override void resume(
+        string prompt,
+        string directory,
+        string model = null,
+        string mode = null
+    )
     {
         if (isRunning() || bridge.online(id))
             throw new ConflictException("Session is already active");
 
-        bindExecution(bridge.resume(id, prompt, directory, model));
+        bindExecution(bridge.resume(id, prompt, directory, model, null, mode));
     }
 
     override void requestStop()
