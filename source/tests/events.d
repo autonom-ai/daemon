@@ -86,7 +86,9 @@ void writeSessionDatabase(
 )
 {
     Database database = new Sqlite(path, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
-    database.query("create table if not exists sessions (id text primary key, model text, working_directory text)");
+    database.query("create table if not exists sessions (id text primary key, model text, working_directory text, "~
+        "title text, agent_mode text default 'bypass', backend_type text default 'cli', created_at integer default 0, "~
+        "last_activity_at integer default 0, hidden integer default 0, workspace_dirs text default '[]')");
     database.query(
         "insert or replace into sessions (id, model, working_directory) values (?, ?, ?)",
         id,
