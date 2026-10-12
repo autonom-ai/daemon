@@ -3,6 +3,7 @@ devinCommand: devin
 compactOnResume: false
 offlineStartAfter: 1h
 offlineCompactAfter: 1h
+compactionThresholds: 1,2,3
 router:
   type: openrouter
   key: ""

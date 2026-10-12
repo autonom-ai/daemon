@@ -23,7 +23,8 @@ import std.stdio : File;
 
 private:
 
-enum COMPACT_PROMPT = "/compact";
+enum COMPACT_PROMPT = "Reply with exactly: OK";
+enum COMPACTION_THRESHOLDS_ENV = "DEVIN_COMPACTION_THRESHOLDS";
 
 enum string[] SCRUB_PREFIXES = [
     "ACP_",
@@ -72,7 +73,8 @@ private:
         string directory,
         string model,
         string id = null,
-        Execution dependency = null
+        Execution dependency = null,
+        string[string] environment = null
     )
     {
         if (!directory.length || !exists(directory) || !isDir(directory))
@@ -83,7 +85,7 @@ private:
         if (id.length)
             args = ["--resume", id]~args;
 
-        return launch(ret, args, null, dependency);
+        return launch(ret, args, null, dependency, environment);
     }
 
 protected:
@@ -93,12 +95,14 @@ protected:
 public:
     const string sessionLockDir;
     const string sessionDatabase;
+    const string compactionThresholds;
 
     this(Config configuration)
     {
         super(configuration.devinCommand, buildPath(configuration.dataDir, "sessions"), SCRUB_PREFIXES);
         sessionLockDir = configuration.sessionLockDir;
         sessionDatabase = configuration.sessionDatabase;
+        compactionThresholds = configuration.compactionThresholds;
         collect();
     }
 
@@ -169,7 +173,15 @@ public:
         => submit(ExecutionKind.Resume, prompt, directory, model, id, dependency);
 
     Execution compact(string id, string directory, string model = null)
-        => submit(ExecutionKind.Compact, COMPACT_PROMPT, directory, model, id);
+        => submit(
+            ExecutionKind.Compact,
+            COMPACT_PROMPT,
+            directory,
+            model,
+            id,
+            null,
+            [COMPACTION_THRESHOLDS_ENV: compactionThresholds]
+        );
 
     Execution start(string prompt, string directory, string model = null)
         => submit(ExecutionKind.Start, prompt, directory, model);
