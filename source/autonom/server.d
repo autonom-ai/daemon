@@ -102,12 +102,21 @@ JSONValue readLaunch(Request request)
         throw new InvalidInputException("Expected prompt and directory");
     foreach (name, value; ret.object)
     {
-        if ((name != "prompt" && name != "directory" && name != "model") || value.type != JSONType.string)
-            throw new InvalidInputException("Expected only string prompt, directory, and optional model fields");
+        if (name == "trusted" && value.type == JSONType.boolean)
+            continue;
+        if ((name != "prompt" && name != "directory" && name != "model" && name != "profile" && name != "mode") ||
+            value.type != JSONType.string)
+            throw new InvalidInputException("Invalid session launch field");
     }
 
-    if ("model" !in ret.object)
-        ret["model"] = JSONValue("");
+    foreach (field; ["model", "profile", "mode"])
+    {
+        if (field !in ret.object)
+            ret[field] = JSONValue("");
+    }
+
+    if ("trusted" !in ret.object)
+        ret["trusted"] = JSONValue(false);
 
     return ret;
 }
@@ -132,7 +141,9 @@ void health(Request request, Output output)
         respond(output, JSONValue([
             "status": JSONValue(stopping ? "stopping" : "ok"),
             "pid": JSONValue(ServerinoProcess.daemonPID),
-            "workerPid": JSONValue(thisProcessID)
+            "workerPid": JSONValue(thisProcessID),
+            "controlFile": JSONValue(bridge.access.tokenPath),
+            "configFile": JSONValue(configuration.path)
         ]), stopping ? 503 : 200);
     else
         respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
@@ -187,11 +198,43 @@ void stop(Request request, Output output)
     scheduler.start();
 }
 
+@endpoint @priority(200)
+void authorize(Request request, Output output)
+{
+    if (request.path == "/api/health" || request.path.startsWith("/api/hooks/"))
+        return;
+    if (bridge.access.client(request.header.read("x-autonom-client")))
+        return;
+
+    string session = request.header.read("x-autonom-session");
+    if (!session.length)
+        session = request.get.read("session");
+
+    bool coordination = request.path == "/api/profiles" || request.path.startsWith("/api/profiles/") ||
+        request.path == "/api/rooms" || request.path.startsWith("/api/rooms/") ||
+        request.path == "/api/messages" || request.path == "/api/events" ||
+        request.path == "/api/schedules" || request.path.startsWith("/api/schedules/") ||
+        request.path.startsWith("/api/permissions/");
+    if (!coordination || request.path == "/api/schedules/refresh" ||
+        bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
+        respond(output, JSONValue(["error": JSONValue("Autonom access requires a managed session capability")]), 403);
+}
+
 @endpoint @priority(100)
 void refresh(Request request)
 {
     foreach (id; bridge.collect())
         profileStore.unlinkSession(id);
+    foreach (execution; bridge.listExecutions())
+    {
+        if (!execution.profileName.length || !execution.sessionId.length || !bridge.access.managed(execution.sessionId))
+            continue;
+        if (profileStore.profileFor(execution.sessionId) !is null)
+            continue;
+
+        profileStore.register(execution.profileName, execution.sessionId);
+    }
+
     if (scheduler !is null)
         scheduler.refresh();
 }
