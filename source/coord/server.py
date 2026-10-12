@@ -6,6 +6,7 @@ every tool input, and the daemon resolves the calling profile from it. A tool
 call starts the daemon when it is not already listening.
 """
 
+import contextvars
 import fcntl
 import json
 import os
@@ -23,6 +24,8 @@ DEFAULT_PORT = "8080"
 TIMEOUT_SECONDS = 15
 START_TIMEOUT_SECONDS = 20
 START_POLL_SECONDS = 0.25
+SESSION_CONTEXT = contextvars.ContextVar("autonom_session", default="")
+HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 SESSION = {"type": "string", "description": "Injected by the Devin session hook."}
 
@@ -295,11 +298,18 @@ def call(method, path, body=None, query=None):
 
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(
-        target, data=data, method=method, headers={"content-type": "application/json"}
+        target,
+        data=data,
+        method=method,
+        headers={
+            "content-type": "application/json",
+            "x-autonom-run": os.environ.get("AUTONOM_RUN_TOKEN", ""),
+            "x-autonom-session": SESSION_CONTEXT.get(),
+        },
     )
     for attempt in range(2):
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+            with HTTP.open(request, timeout=TIMEOUT_SECONDS) as response:
                 return json.loads(response.read() or b"null")
         except urllib.error.HTTPError as failure:
             try:
@@ -318,6 +328,9 @@ def call(method, path, body=None, query=None):
 
 
 def session(arguments):
+    if not os.environ.get("AUTONOM_RUN_TOKEN"):
+        raise ToolError("Only sessions started by Autonom may use Autonom tools")
+
     value = arguments.get("session_id")
     if not isinstance(value, str) or not value:
         raise ToolError("No session ID; the autonom hooks are not installed for this session")
@@ -427,12 +440,17 @@ def dispatch(name, arguments):
 
 
 def call_tool(name, arguments):
+    if not isinstance(arguments, dict):
+        return {"content": [{"type": "text", "text": "Tool arguments must be an object"}], "isError": True}
+
+    token = SESSION_CONTEXT.set(arguments.get("session_id", ""))
     try:
         result = dispatch(name, arguments)
+        return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
     except ToolError as failure:
         return {"content": [{"type": "text", "text": str(failure)}], "isError": True}
-
-    return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
+    finally:
+        SESSION_CONTEXT.reset(token)
 
 
 def error(request_id, code, message):
@@ -471,7 +489,7 @@ def handle(request):
     if method == "ping":
         return success(request_id, {})
     if method == "tools/list":
-        return success(request_id, {"tools": TOOLS})
+        return success(request_id, {"tools": TOOLS if os.environ.get("AUTONOM_RUN_TOKEN") else []})
     if method == "tools/call":
         return success(
             request_id,
@@ -506,4 +524,12 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    if sys.argv[1:] == ["--ensure"]:
+        if not ensure():
+            sys.stderr.write("Autonom did not become ready; check " + log_path() + "\n")
+            sys.exit(1)
+
+        with HTTP.open(url("/api/health"), timeout=TIMEOUT_SECONDS) as response:
+            sys.stdout.write(response.read().decode() + "\n")
+    else:
+        run()
