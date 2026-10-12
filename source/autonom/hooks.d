@@ -3,6 +3,7 @@ module autonom.hooks;
 import autonom.agent;
 import autonom.events.event : Event, EventType;
 import autonom.exception;
+import autonom.interop.execution;
 import autonom.interop.session;
 import autonom.policy;
 import autonom.server;
@@ -44,6 +45,20 @@ bool acceptHook(Request request, Output output, string event, out JSONValue data
     if (data["hook_event_name"].str != event)
         throw new InvalidInputException("Expected the "~event~" hook event");
 
+    string session = hookSession(data);
+    Execution execution = bridge.authenticate(request.header.read("x-autonom-run"), session, true);
+    if (execution is null)
+    {
+        bool blocked = event == "PreToolUse" &&
+            (coordinationTool(hookTool(data)) || request.header.read("x-autonom-run").length);
+        respond(output, blocked ? block("Only sessions started by Autonom may use Autonom tools") : hookResponse());
+        return false;
+    }
+
+    if (execution.profileName.length && profileStore.profileFor(session) is null)
+        profileStore.register(execution.profileName, session);
+
+    scheduler.adopt(session, execution.workspace, execution.id);
     return true;
 }
 
@@ -65,12 +80,6 @@ JSONValue hookInput(JSONValue data)
 
 string hookDirectory(JSONValue data, string session, Request request)
 {
-    if ("directory" in data.object && data["directory"].type == JSONType.string && data["directory"].str.length)
-        return data["directory"].str;
-    if ("cwd" in data.object && data["cwd"].type == JSONType.string && data["cwd"].str.length)
-        return data["cwd"].str;
-    if (request.get.has("directory") && request.get.read("directory").length)
-        return request.get.read("directory");
     if (!session.length)
         return null;
 
