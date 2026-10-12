@@ -51,7 +51,7 @@
 - Rooms are global and report themselves as unknown to profiles that cannot see them and to non-administrators; only the original owner changes admins.
 - Coordination endpoints take the caller's `session` as a query parameter and require a registered session: `GET/POST /api/rooms`, `GET/DELETE /api/rooms/<name>`, `GET/POST /api/rooms/<name>/messages`, `GET/POST /api/rooms/<name>/membership`, `POST /api/rooms/<name>/admins`, `DELETE /api/rooms/<name>/admins?profile=`, and `GET/POST /api/messages` (`source=dms|pings`).
 - Reading a stream advances the cursor past the entries returned, and a first read starts with the newest `limit` entries. Own posts are never unread; message text is capped at 4000 characters.
-- `PreToolUse` blocks every tool while the session's profile has unread events, except `mcp__autonom-coord__read_events`; it injects `session_id` into `mcp__autonom-coord__*` input, adopts a freshly started session to its profile when its first hook arrives from the wake workspace, and fails closed when profile access cannot be verified.
+- `PreToolUse` screens every tool call through the workspace policy, then blocks every tool while the session's profile has unread events, except `mcp__autonom-coord__read_events`; it injects `session_id` into `mcp__autonom-coord__*` input, adopts a freshly started session to its profile when its first hook arrives from the wake workspace, and fails closed when profile access cannot be verified.
 - `UserPromptSubmit` and `PostToolUse` inject an `additionalContext` reminder naming up to five unread events when the session's profile has any; unregistered sessions and sessions with no unread events get `{}`.
 
 # Events
@@ -65,7 +65,7 @@
 
 # Policy
 
-- Policy is enforced by the `PermissionRequest` hook, which fires only when a tool call needs a permission decision: denials return `{"decision":"block","reason":"..."}` and everything else returns `{}`, so policy can auto-reject but never auto-approve. `PreToolUse` never screens.
+- Policy is enforced by the `PreToolUse` hook, which fires for every tool call regardless of permission mode: denials return `{"decision":"block","reason":"..."}` and everything else returns `{}`, so policy can auto-reject but never auto-approve. Screening cannot live on `PermissionRequest` because auto-approved and bypassed calls never reach it.
 - The policy directory comes from the hook payload's `directory`/`cwd`, then a `directory` query parameter, then the session's execution workspace, then the CLI session database's working directory.
 - `POST /api/policy/check` accepts string `directory` and `tool`, with optional object `input`.
 - Workspace policy is `<directory>/.devin/policy.yml`, containing a required `rules` list; files reload on each check.
