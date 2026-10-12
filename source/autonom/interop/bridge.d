@@ -1,6 +1,7 @@
 module autonom.interop.bridge;
 
 import autonom.exception;
+import autonom.interop.access;
 import autonom.interop.execution;
 import autonom.interop.session;
 import autonom.storage;
@@ -74,13 +75,15 @@ protected:
         if (active >= 8)
             throw new ConflictException("Execution capacity reached");
         string[string] child = childEnvironment();
+        child.remove("AUTONOM_CLIENT_TOKEN");
+        child["AUTONOM_RUN_TOKEN"] = access.begin(execution);
         foreach (name, value; environment)
             child[name] = value;
 
         execution.start(
             [command]~arguments,
             child,
-            execution.kind == ExecutionKind.Remove ? 10.seconds : 120.seconds,
+            execution.kind == ExecutionKind.Remove ? 10.seconds : executionTimeout,
             prerequisite,
             dependency
         );
@@ -89,6 +92,8 @@ protected:
     }
 
 public:
+    Access access;
+    Duration executionTimeout = 30 * 60.seconds;
     const string command;
     const string logDir;
     const string executionDir;
@@ -99,6 +104,7 @@ public:
         this.command = command;
         this.logDir = logDir;
         this.scrubPrefixes = scrubPrefixes;
+        access = new Access(dirName(logDir));
         executionDir = buildPath(dirName(logDir), "executions");
         if ((exists(logDir) && isSymlink(logDir)) ||
             (exists(executionDir) && isSymlink(executionDir)))
@@ -151,6 +157,28 @@ public:
     bool isRemoved(string id)
         => (id in removed) !is null;
 
+    Execution[] listExecutions(string directory = null)
+    {
+        Execution[] ret;
+        foreach (execution; executions)
+        {
+            if (!directory.length || execution.workspace == directory)
+                ret ~= execution;
+        }
+
+        ret.sort!((left, right) => left.createdAt < right.createdAt);
+        return ret;
+    }
+
+    Execution authenticate(string token, string id, bool bind = false)
+    {
+        Execution ret = access.authenticate(token, id, bind);
+        if (ret !is null)
+            session(id).bindExecution(ret);
+
+        return ret;
+    }
+
     string[] collect()
     {
         Execution[] ready;
@@ -174,10 +202,14 @@ public:
                 {
                     removeLog(id);
                     sessions.remove(id);
+                    access.forget(id);
                     removed[id] = true;
                 }
                 else if (id !in removed)
                 {
+                    if (execution.kind == ExecutionKind.Start || execution.kind == ExecutionKind.Print)
+                        access.remember(id, execution.trusted);
+
                     Session session = this.session(id);
                     if (session.execution is null || session.execution.createdAt <= execution.createdAt)
                         session.bindExecution(execution);
@@ -187,6 +219,7 @@ public:
             collected[execution.id] = true;
         }
 
+        access.collect();
         return removed.keys;
     }
 
