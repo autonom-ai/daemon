@@ -264,7 +264,20 @@ void preToolUse(Request request, Output output)
 @endpoint @route!"/api/hooks/permission-request"
 void permissionRequest(Request request, Output output)
 {
-    respondHook!"PermissionRequest"(request, output);
+    JSONValue data;
+    if (!acceptHook(request, output, "PermissionRequest", data))
+        return;
+
+    string tool = hookTool(data);
+    if (!tool.length)
+    {
+        respond(output, hookResponse());
+        return;
+    }
+
+    respond(output, JSONValue(["permission": JSONValue(
+        permissions.add(hookSession(data), tool, hookInput(data)).id
+    )]));
 }
 
 @endpoint @route!"/api/hooks/post-tool-use"

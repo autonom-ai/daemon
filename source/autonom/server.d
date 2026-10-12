@@ -7,6 +7,7 @@ import autonom.events;
 import autonom.exception;
 import autonom.policy;
 import autonom.interop.devin;
+import autonom.interop.permission : PermissionStore;
 import serverino;
 
 import core.sys.posix.signal : kill, SIGTERM;
@@ -33,6 +34,7 @@ Bus bus;
 EventStore events;
 ScheduleStore scheduleStore;
 Scheduler scheduler;
+PermissionStore permissions;
 
 void respond(Output output, JSONValue body, ushort status = 200)
 {
@@ -102,7 +104,7 @@ JSONValue readLaunch(Request request)
         throw new InvalidInputException("Expected prompt and directory");
     foreach (name, value; ret.object)
     {
-        if (name == "trusted" && value.type == JSONType.boolean)
+        if (name == "trusted" && (value.type == JSONType.true_ || value.type == JSONType.false_))
             continue;
         if ((name != "prompt" && name != "directory" && name != "model" && name != "profile" && name != "mode") ||
             value.type != JSONType.string)
@@ -194,6 +196,7 @@ void stop(Request request, Output output)
     scheduleStore = new ScheduleStore(configuration, profileStore);
     scheduler = new Scheduler(configuration, bridge, profileStore, events, scheduleStore);
     policy = new Policy(configuration);
+    permissions = new PermissionStore();
     refresh(Request.init);
     scheduler.start();
 }
