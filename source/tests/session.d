@@ -76,7 +76,7 @@ unittest
         fixture.bridge.session(id).shouldThrow!Exception();
 }
 
-@Name("Session online status follows the lock rather than file contents")
+@Name("Foreign session locks mean loaded elsewhere, not actively running")
 unittest
 {
     Fixture fixture = Fixture.create();
@@ -94,7 +94,7 @@ unittest
 
     session.status.should == SessionStatus.Offline;
     flock(lock.fileno, LOCK_EX).should == 0;
-    session.status.should == SessionStatus.Online;
+    session.status.should == SessionStatus.Loaded;
     session.stop().shouldThrow!Exception();
     fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflictException();
     lock.close();

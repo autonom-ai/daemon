@@ -142,6 +142,7 @@ enum SessionStatus : string
     Offline = "offline",
     Starting = "starting",
     Online = "online",
+    Loaded = "loaded",
     Stopping = "stopping",
     Failed = "failed"
 }

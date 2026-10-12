@@ -360,22 +360,17 @@ private:
 
     SessionMetadata sessionInfo(Session session)
     {
+        SessionMetadata ret = bridge.sessionMetadata(session.id);
+        if (ret.id.length)
+            return ret;
+
         Execution execution = session.execution;
-        SessionMetadata ret;
         if (execution !is null)
         {
             ret.model = execution.model;
             ret.directory = execution.workspace;
         }
 
-        if (ret.model.length && ret.directory.length)
-            return ret;
-
-        SessionMetadata stored = bridge.sessionMetadata(session.id);
-        if (!ret.model.length)
-            ret.model = stored.model;
-        if (!ret.directory.length)
-            ret.directory = stored.directory;
         return ret;
     }
 
@@ -489,6 +484,14 @@ private:
         }
 
         Session session = profile.session;
+        if (session !is null && !bridge.access.managed(session.id))
+        {
+            foreach (event; batch)
+                events.surface(profile, event);
+
+            return;
+        }
+
         bool profileOnline = session !is null && (session.isRunning() || bridge.online(session.id));
         bool hasWakeInFlight = wakeInFlight(profile.name);
         bool active = hasWakeInFlight || profileOnline;
@@ -525,7 +528,7 @@ private:
             );
         }
 
-        bool scheduled;
+        bool scheduled = from !is null && from.name == HUMAN_NAME;
         foreach (event; batch)
             scheduled = scheduled || event.schedule.length;
 
