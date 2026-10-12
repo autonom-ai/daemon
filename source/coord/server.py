@@ -2,12 +2,16 @@
 
 Speaks the Model Context Protocol over stdio and proxies tool calls to the
 autonom daemon's HTTP API. The Devin session hook injects ``session_id`` into
-every tool input, and the daemon resolves the calling profile from it.
+every tool input, and the daemon resolves the calling profile from it. A tool
+call starts the daemon when it is not already listening.
 """
 
+import fcntl
 import json
 import os
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,6 +21,8 @@ PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 DEFAULT_PROTOCOL = "2025-03-26"
 DEFAULT_PORT = "8080"
 TIMEOUT_SECONDS = 15
+START_TIMEOUT_SECONDS = 20
+START_POLL_SECONDS = 0.25
 
 SESSION = {"type": "string", "description": "Injected by the Devin session hook."}
 
@@ -208,27 +214,107 @@ class ToolError(Exception):
     """A tool call the daemon refused, reported to the agent as a tool error."""
 
 
+def port():
+    return os.environ.get("AUTONOM_PORT", DEFAULT_PORT)
+
+
+def url(path):
+    return "http://127.0.0.1:" + port() + path
+
+
+def root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def state_directory():
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "autonom")
+
+
+def log_path():
+    return os.path.join(state_directory(), "daemon-" + port() + ".log")
+
+
+def running():
+    try:
+        with urllib.request.urlopen(url("/api/health"), timeout=1) as response:
+            return json.loads(response.read() or b"null").get("status") == "ok"
+    except Exception:
+        return False
+
+
+def spawn():
+    binary = os.path.join(root(), "bin", "autonom-daemon")
+    if not os.path.exists(binary):
+        raise ToolError("The autonom daemon is not built: %s is missing" % binary)
+
+    os.makedirs(state_directory(), exist_ok=True)
+    environment = dict(os.environ)
+    environment["AUTONOM_PORT"] = port()
+    with open(log_path(), "ab") as log:
+        return subprocess.Popen(
+            [binary],
+            cwd=root(),
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+
+
+def ensure():
+    if running():
+        return True
+
+    os.makedirs(state_directory(), exist_ok=True)
+    with open(os.path.join(state_directory(), "daemon-" + port() + ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if running():
+            return True
+
+        process = spawn()
+        deadline = time.time() + START_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            if running():
+                return True
+            if process.poll() is not None:
+                return running()
+
+            time.sleep(START_POLL_SECONDS)
+
+    return False
+
+
 def call(method, path, body=None, query=None):
-    url = "http://127.0.0.1:" + os.environ.get("AUTONOM_PORT", DEFAULT_PORT) + path
+    target = url(path)
     if query:
-        url += "?" + urllib.parse.urlencode({name: value for name, value in query.items() if value is not None})
+        target += "?" + urllib.parse.urlencode(
+            {name: value for name, value in query.items() if value is not None}
+        )
 
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(
-        url, data=data, method=method, headers={"content-type": "application/json"}
+        target, data=data, method=method, headers={"content-type": "application/json"}
     )
-    try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-            return json.loads(response.read() or b"null")
-    except urllib.error.HTTPError as failure:
+    for attempt in range(2):
         try:
-            message = json.loads(failure.read()).get("error")
-        except ValueError:
-            message = None
+            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+                return json.loads(response.read() or b"null")
+        except urllib.error.HTTPError as failure:
+            try:
+                message = json.loads(failure.read()).get("error")
+            except ValueError:
+                message = None
 
-        raise ToolError(message or "The daemon returned HTTP %d" % failure.code) from failure
-    except OSError as failure:
-        raise ToolError("The autonom daemon is unreachable: %s" % failure) from failure
+            raise ToolError(message or "The daemon returned HTTP %d" % failure.code) from failure
+        except OSError as failure:
+            if attempt == 0 and ensure():
+                continue
+
+            raise ToolError(
+                "The autonom daemon is unreachable: %s (log: %s)" % (failure, log_path())
+            ) from failure
 
 
 def session(arguments):
