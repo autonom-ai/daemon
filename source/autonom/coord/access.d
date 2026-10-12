@@ -153,8 +153,26 @@ public:
 Profile caller(Request request)
 {
     string session = request.get.read("session");
+    bool human = bridge.access.client(request.header.read("x-autonom-client"));
+    if (human && request.get.has("profile"))
+    {
+        Profile ret = profileStore.get(request.get.read("profile"));
+        if (ret is null)
+            throw new InvalidInputException("Unknown profile");
+
+        return ret;
+    }
+
     if (!session.length)
+    {
+        if (human)
+            return profileStore.get(HUMAN_NAME);
+
         throw new InvalidInputException("A session is required");
+    }
+
+    if (!human && bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
+        throw new InvalidInputException("Invalid managed session capability");
 
     Profile ret = profileStore.profileFor(session);
     if (ret is null)

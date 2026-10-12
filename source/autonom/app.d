@@ -3,6 +3,7 @@ module autonom.app;
 import autonom.agent.profile;
 import autonom.agent.store;
 import autonom.coord.access;
+import autonom.client;
 import autonom.events.event;
 import autonom.events.schedule;
 import autonom.hooks;
@@ -18,6 +19,7 @@ mixin ServerinoMain!(
     autonom.agent.profile,
     autonom.agent.store,
     autonom.coord.access,
+    autonom.client,
     autonom.events.event,
     autonom.events.schedule,
     autonom.hooks,
