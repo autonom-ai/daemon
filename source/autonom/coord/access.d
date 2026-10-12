@@ -36,20 +36,6 @@ size_t readLimit(Request request)
     return ret > MAX_LIMIT ? MAX_LIMIT : ret;
 }
 
-string messageText(JSONValue data)
-{
-    if ("text" !in data.object || data["text"].type != JSONType.string)
-        throw new InvalidInputException("A message needs text");
-
-    string ret = data["text"].str;
-    if (!ret.strip.length)
-        throw new InvalidInputException("A message needs text");
-    if (ret.length > MAX_TEXT)
-        throw new InvalidInputException("Message text is too long");
-
-    return ret;
-}
-
 string[] names(JSONValue value, string message)
 {
     if (value.type != JSONType.array)
@@ -63,6 +49,20 @@ string[] names(JSONValue value, string message)
 
         ret ~= entry.str;
     }
+
+    return ret;
+}
+
+string messageText(JSONValue data)
+{
+    if ("text" !in data.object || data["text"].type != JSONType.string)
+        throw new InvalidInputException("A message needs text");
+
+    string ret = data["text"].str;
+    if (!ret.strip.length)
+        throw new InvalidInputException("A message needs text");
+    if (ret.length > MAX_TEXT)
+        throw new InvalidInputException("Message text is too long");
 
     return ret;
 }
@@ -172,7 +172,6 @@ Profile caller(Request request)
 
         throw new InvalidInputException("A session is required");
     }
-
     if (!human && bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
         throw new InvalidInputException("Invalid managed session capability");
 
@@ -275,6 +274,20 @@ void roomMessages(Request request, Output output)
     Entry entry = bus.post(room, profile, messageText(data), targets);
     scheduler.posted(room, entry, profile, targets);
     respond(output, posted(entry, targets), 201);
+}
+
+bool postRoomMessage(Request request, Output output, Room room, Profile profile)
+{
+    JSONValue data = readBody(request);
+    onlyFields(data, ["text", "ping"]);
+    Profile[] targets;
+    if (!profileList(pingNames(data), output, targets))
+        return false;
+
+    Entry entry = bus.post(room, profile, messageText(data), targets);
+    scheduler.posted(room, entry, profile, targets);
+    respond(output, posted(entry, targets), 201);
+    return true;
 }
 
 @endpoint @route!(matchesPath!"/api/rooms/<name>/membership")

@@ -13,6 +13,7 @@ import autonom.interop.devin.bridge;
 import autonom.interop.execution;
 import autonom.interop.permission;
 import autonom.interop.session;
+import autonom.worktree;
 import serverino;
 
 mixin ServerinoMain!(
@@ -28,5 +29,6 @@ mixin ServerinoMain!(
     autonom.interop.devin.bridge,
     autonom.interop.execution,
     autonom.interop.permission,
-    autonom.interop.session
+    autonom.interop.session,
+    autonom.worktree
 );

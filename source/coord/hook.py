@@ -17,8 +17,15 @@ PATHS = {
 }
 
 
+COORDINATION_PREFIXES = ("mcp__autonom-coord__", "mcp__autonom-orchestrate__")
+
+
 def block(reason):
     return {"decision": "block", "reason": reason}
+
+
+def coordination_tool(tool):
+    return str(tool).startswith(COORDINATION_PREFIXES)
 
 
 def forward(data):
@@ -26,7 +33,7 @@ def forward(data):
     if event not in PATHS:
         raise ToolError("Unknown Autonom hook")
 
-    coordination = str(data.get("tool_name", "")).startswith("mcp__autonom-coord__")
+    coordination = coordination_tool(data.get("tool_name", ""))
     if not os.environ.get("AUTONOM_RUN_TOKEN"):
         return block("Only sessions started by Autonom may use Autonom tools") if coordination else {}
 

@@ -1,5 +1,6 @@
 dataDir: ~/.local/share/autonom
 devinCommand: devin
+executionTimeout: 30m
 compactOnResume: false
 offlineStartAfter: 1h
 offlineCompactAfter: 1h

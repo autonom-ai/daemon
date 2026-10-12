@@ -8,6 +8,7 @@ import autonom.exception;
 import autonom.policy;
 import autonom.interop.devin;
 import autonom.interop.permission : PermissionStore;
+import autonom.worktree;
 import serverino;
 
 import core.sys.posix.signal : kill, SIGTERM;
@@ -35,6 +36,7 @@ EventStore events;
 ScheduleStore scheduleStore;
 Scheduler scheduler;
 PermissionStore permissions;
+WorktreeManager worktreeManager;
 
 void respond(Output output, JSONValue body, ushort status = 200)
 {
@@ -197,6 +199,7 @@ void stop(Request request, Output output)
     scheduler = new Scheduler(configuration, bridge, profileStore, events, scheduleStore);
     policy = new Policy(configuration);
     permissions = new PermissionStore();
+    worktreeManager = new WorktreeManager(configuration);
     refresh(Request.init);
     scheduler.start();
 }
@@ -232,7 +235,7 @@ void refresh(Request request)
     {
         if (!execution.profileName.length || !execution.sessionId.length || !bridge.access.managed(execution.sessionId))
             continue;
-        if (profileStore.profileFor(execution.sessionId) !is null)
+        if (profileStore.assigned(execution.sessionId))
             continue;
 
         profileStore.register(execution.profileName, execution.sessionId);

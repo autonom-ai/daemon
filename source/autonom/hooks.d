@@ -17,13 +17,14 @@ import std.json : JSONValue, JSONType;
 private:
 
 enum MCP_PREFIX = "mcp__autonom-coord__";
+enum ORCHESTRATE_PREFIX = "mcp__autonom-orchestrate__";
 enum MAX_INJECTED_EVENTS = 5;
 
 bool coordinationTool(string tool)
-    => tool.startsWith(MCP_PREFIX);
+    => tool.startsWith(MCP_PREFIX) || tool.startsWith(ORCHESTRATE_PREFIX);
 
 bool readsEvents(string tool)
-    => tool == MCP_PREFIX~"read_events";
+    => tool == MCP_PREFIX~"read_events" || tool == ORCHESTRATE_PREFIX~"read_events";
 
 JSONValue hookResponse()
     => JSONValue(cast(JSONValue[string])null);
@@ -50,7 +51,8 @@ bool acceptHook(Request request, Output output, string event, out JSONValue data
     if (execution is null)
     {
         bool blocked = event == "PreToolUse" &&
-            (coordinationTool(hookTool(data)) || request.header.read("x-autonom-run").length);
+            (coordinationTool(hookTool(data)) || request.header.read("x-autonom-run").length ||
+            bridge.access.managed(session));
         respond(output, blocked ? block("Only sessions started by Autonom may use Autonom tools") : hookResponse());
         return false;
     }
@@ -257,7 +259,6 @@ void preToolUse(Request request, Output output)
         ]));
         return;
     }
-
     respond(output, hookResponse());
 }
 

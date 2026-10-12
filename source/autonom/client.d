@@ -2,6 +2,7 @@ module autonom.client;
 
 import autonom.agent;
 import autonom.coord;
+import autonom.coord.access : caller, postRoomMessage;
 import autonom.events.event : EventType;
 import autonom.exception;
 import autonom.interop.devin.db : readSessionMessages;
@@ -193,6 +194,43 @@ void clientTranscript(Request request, Output output)
     }
 
     respond(output, ret);
+}
+
+@endpoint @route!(matchesPath!"/api/client/profiles/<name>")
+void clientProfile(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Delete]))
+        return;
+
+    string name = routeParameter!"/api/client/profiles/<name>"(request);
+    Profile profile = profileStore.get(name);
+    if (profile is null)
+    {
+        respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
+        return;
+    }
+
+    profileStore.remove(profile);
+    bus.removeInbox(profile.name);
+    events.remove(profile.name);
+    respond(output, JSONValue(["name": JSONValue(profile.name), "removed": JSONValue(true)]));
+}
+
+@endpoint @route!(matchesPath!"/api/client/rooms/<name>/messages")
+void clientRoomMessage(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Post]))
+        return;
+
+    Profile profile = caller(request);
+    Room room = bus.getRoom(routeParameter!"/api/client/rooms/<name>/messages"(request));
+    if (room is null || !room.visible(profile.name))
+    {
+        respond(output, JSONValue(["error": JSONValue("Unknown room")]), 404);
+        return;
+    }
+
+    postRoomMessage(request, output, room, profile);
 }
 
 @endpoint @route!"/api/client/models"

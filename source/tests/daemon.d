@@ -102,7 +102,12 @@ string invokeHook(string command, JSONValue payload, int expected = 0)
     return cast(string)output.byChunk(4096).join;
 }
 
-JSONValue hookSession(Fixture fixture, string id)
+JSONValue hookSession(
+    Fixture fixture,
+    string id,
+    string profile = null,
+    bool identify = true
+)
 {
     string original = fixture.config.devinCommand~".original";
     if (!exists(original))
@@ -133,7 +138,8 @@ exec "$0.original" "$@"
     setAttributes(fixture.config.devinCommand, octal!"700");
     JSONValue ret = request("/api/sessions", 202, JSONValue([
         "prompt": JSONValue("auth:"~id),
-        "directory": JSONValue(fixture.root)
+        "directory": JSONValue(fixture.root),
+        "profile": JSONValue(profile.length ? profile : "")
     ]).toString());
     string tokenPath = buildPath(fixture.root, id~".token");
     waitUntil(delegate bool()
@@ -141,10 +147,14 @@ exec "$0.original" "$@"
         return exists(tokenPath);
     });
     hookTokens[id] = readText(tokenPath);
-    request("/api/hooks/session-start", 200, JSONValue([
-        "hook_event_name": JSONValue("SessionStart"),
-        "session_id": JSONValue(id)
-    ]).toString());
+    if (identify)
+    {
+        request("/api/hooks/session-start", 200, JSONValue([
+            "hook_event_name": JSONValue("SessionStart"),
+            "session_id": JSONValue(id)
+        ]).toString());
+    }
+
     return ret;
 }
 
@@ -882,4 +892,49 @@ unittest
     request("/api/client/state")["humanEvents"].integer.should == 0;
     request("/api/client/events?profile=alpha").array.length.should == 1;
     request("/api/messages?session=managed-one&source=dms")["messages"].array.length.should == 1;
+}
+
+@Name("Refresh does not rebind a profile to an earlier daemon-launched session") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    JSONValue first = hookSession(fixture, "managed-first", "alpha");
+    request("/api/profiles/alpha")["session"]["id"].str.should == "managed-first";
+    finishHookSession(first);
+    JSONValue second = hookSession(fixture, "managed-second", "alpha");
+    foreach (i; 0..3)
+        request("/api/client/state")["profiles"][0]["session"]["id"].str.should == "managed-second";
+
+    finishHookSession(second);
+    request("/api/profiles/alpha")["session"]["id"].str.should == "managed-second";
+}
+
+@Name("A starting profile is reserved before the first hook identifies its session") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    JSONValue first = hookSession(fixture, "reserved-first", "reserved", false);
+    JSONValue launch = JSONValue([
+        "prompt": JSONValue("auth:reserved-second"),
+        "directory": JSONValue(fixture.root),
+        "profile": JSONValue("RESERVED")
+    ]);
+    request("/api/sessions", 409, launch.toString());
+    launch["profile"] = JSONValue("HUMAN");
+    request("/api/sessions", 400, launch.toString());
+    finishHookSession(first);
 }
