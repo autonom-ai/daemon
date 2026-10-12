@@ -156,7 +156,10 @@ private:
             "status": JSONValue(cast(string)state.status),
             "sessionId": state.sessionId.length ? JSONValue(state.sessionId) : JSONValue(null),
             "exitStatus": state.exitStatus,
-            "error": state.error.length ? JSONValue(state.error) : JSONValue(null)
+            "error": state.error.length ? JSONValue(state.error) : JSONValue(null),
+            "profile": JSONValue(profileName),
+            "mode": JSONValue(mode),
+            "trusted": JSONValue(trusted)
         ]);
     }
 
@@ -186,6 +189,9 @@ private:
                     data["session_id"].type != JSONType.string)
                     throw new Exception("CLI did not export a session ID");
                 Session.validateId(data["session_id"].str);
+                if (_state.sessionId.length && _state.sessionId != data["session_id"].str)
+                    throw new Exception("CLI exported a different session ID");
+
                 _state.sessionId = data["session_id"].str.idup;
             }
 
@@ -311,6 +317,9 @@ public:
     const string workspace;
     const string model;
     const string createdAt;
+    string profileName;
+    string mode;
+    bool trusted;
 
     this(
         string directory,
@@ -334,6 +343,19 @@ public:
         mutex = new Mutex();
         joinMutex = new Mutex();
         _state.sessionId = sessionId.idup;
+    }
+
+    package(autonom.interop) void identify(string session)
+    {
+        Session.validateId(session);
+        synchronized (mutex)
+        {
+            if (_state.sessionId.length && _state.sessionId != session)
+                throw new Exception("Execution is already bound to another session");
+
+            _state.sessionId = session.idup;
+            save();
+        }
     }
 
     ExecutionStatus status()
@@ -482,6 +504,13 @@ public:
         );
         if (ret.sessionId.length)
             Session.validateId(ret.sessionId);
+
+        if ("profile" in data.object && data["profile"].type == JSONType.string)
+            ret.profileName = data["profile"].str.idup;
+        if ("mode" in data.object && data["mode"].type == JSONType.string)
+            ret.mode = data["mode"].str.idup;
+        if ("trusted" in data.object && data["trusted"].type == JSONType.boolean)
+            ret.trusted = data["trusted"].boolean;
 
         ret._state.status = parseStatus(data["status"].str);
         ret._state.exitStatus = data["exitStatus"];
