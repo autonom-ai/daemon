@@ -7,7 +7,7 @@ import autonom.exception;
 import autonom.server;
 import serverino;
 
-import std.algorithm.searching : canFind;
+import std.algorithm.searching : canFind, startsWith;
 import std.conv : to;
 import std.json : JSONType, JSONValue;
 import std.string : strip;
@@ -154,7 +154,9 @@ Profile caller(Request request)
 {
     string session = request.get.read("session");
     bool human = bridge.access.client(request.header.read("x-autonom-client"));
-    if (human && request.get.has("profile"))
+    if (human && request.get.has("profile") &&
+        (request.path == "/api/events" || request.path == "/api/schedules" ||
+        request.path.startsWith("/api/schedules/")))
     {
         Profile ret = profileStore.get(request.get.read("profile"));
         if (ret is null)

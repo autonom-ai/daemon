@@ -27,11 +27,10 @@ public:
         if (execution !is null && execution.status == ExecutionStatus.Stopping)
             return SessionStatus.Stopping;
 
-        if (bridge.online(id))
-            return SessionStatus.Online;
-
         if (isRunning())
-            return SessionStatus.Starting;
+            return bridge.online(id) ? SessionStatus.Online : SessionStatus.Starting;
+        if (bridge.online(id))
+            return SessionStatus.Loaded;
 
         if (execution !is null && (execution.status == ExecutionStatus.Failed ||
             execution.status == ExecutionStatus.Interrupted))
