@@ -45,7 +45,7 @@ public:
         foreach (id, trusted; data["sessions"].object)
         {
             Session.validateId(id);
-            if (trusted.type != JSONType.boolean)
+            if (trusted.type != JSONType.true_ && trusted.type != JSONType.false_)
                 throw new Exception("Invalid managed session trust");
 
             sessions[id.idup] = trusted.boolean;

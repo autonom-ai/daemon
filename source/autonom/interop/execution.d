@@ -509,7 +509,8 @@ public:
             ret.profileName = data["profile"].str.idup;
         if ("mode" in data.object && data["mode"].type == JSONType.string)
             ret.mode = data["mode"].str.idup;
-        if ("trusted" in data.object && data["trusted"].type == JSONType.boolean)
+        if ("trusted" in data.object &&
+            (data["trusted"].type == JSONType.true_ || data["trusted"].type == JSONType.false_))
             ret.trusted = data["trusted"].boolean;
 
         ret._state.status = parseStatus(data["status"].str);
