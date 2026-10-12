@@ -1,5 +1,6 @@
 module autonom.interop.devin.bridge;
 
+import autonom.agent : Profile, validName;
 import autonom.config;
 import autonom.exception;
 import autonom.interop.bridge;
@@ -7,7 +8,7 @@ import autonom.interop.devin.db : SessionMetadata, readSessionMetadata;
 import autonom.interop.devin.session;
 import autonom.interop.execution;
 import autonom.interop.session;
-import autonom.server : acceptMethod, bridge, readLaunch, respond;
+import autonom.server : acceptMethod, bridge, profileStore, readLaunch, respond;
 import autonom.storage;
 import serverino;
 
@@ -21,19 +22,6 @@ import std.json : JSONType, JSONValue, parseJSON;
 import std.path : buildPath;
 import std.stdio : File;
 
-private:
-
-enum COMPACT_PROMPT = "Reply with exactly: OK";
-enum COMPACTION_THRESHOLDS_ENV = "DEVIN_COMPACTION_THRESHOLDS";
-
-enum string[] SCRUB_PREFIXES = [
-    "ACP_",
-    "ELECTRON_",
-    "OPENROUTER_API_KEY",
-    "VSCODE_",
-    "WINDSURF_"
-];
-
 public:
 
 @endpoint @route!"/api/sessions"
@@ -43,11 +31,30 @@ void sessions(Request request, Output output)
         return;
 
     if (request.method == Request.Method.Get)
-        respond(output, JSONValue(bridge.list(request.get.read("directory"))));
+        respond(output, JSONValue(bridge.access.ids));
     else
     {
         JSONValue data = readLaunch(request);
-        respond(output, bridge.start(data["prompt"].str, data["directory"].str, data["model"].str).toJSON(), 202);
+        string profileName = data["profile"].str;
+        if (profileName.length)
+        {
+            if (!validName(profileName) || profileName == "human")
+                throw new InvalidInputException("Invalid profile name");
+
+            Profile profile = profileStore.get(profileName);
+            if (profile !is null && profile.session !is null &&
+                (profile.session.isRunning() || bridge.online(profile.session.id)))
+                throw new ConflictException("Profile is already active");
+        }
+
+        respond(output, bridge.start(
+            data["prompt"].str,
+            data["directory"].str,
+            data["model"].str,
+            data["mode"].str,
+            data["trusted"].boolean,
+            profileName
+        ).toJSON(), 202);
     }
 }
 
@@ -63,35 +70,6 @@ void printSession(Request request, Output output)
 
 class Devin : Bridge
 {
-private:
-    string lockPath(string id) const
-        => buildPath(sessionLockDir, id~".lock");
-
-    Execution submit(
-        ExecutionKind kind,
-        string prompt,
-        string directory,
-        string model,
-        string id = null,
-        Execution dependency = null,
-        string[string] environment = null
-    )
-    {
-        if (!directory.length || !exists(directory) || !isDir(directory))
-            throw new InvalidInputException("An existing working directory is required");
-        string[] args = arguments(prompt, model);
-        Execution ret = newExecution(kind, directory, model, id);
-        args = args[0..$-2]~["--export", ret.exportPath]~args[$-2..$];
-        if (id.length)
-            args = ["--resume", id]~args;
-
-        return launch(ret, args, null, dependency, environment);
-    }
-
-protected:
-    override Session createSession(string id)
-        => new DevinSession(id, this);
-
 public:
     const string sessionLockDir;
     const string sessionDatabase;
@@ -103,6 +81,7 @@ public:
         sessionLockDir = configuration.sessionLockDir;
         sessionDatabase = configuration.sessionDatabase;
         compactionThresholds = configuration.compactionThresholds;
+        executionTimeout = configuration.executionTimeout;
         collect();
     }
 
@@ -110,7 +89,6 @@ public:
     {
         if (!prompt.length || prompt.canFind('\0'))
             throw new InvalidInputException("A prompt is required");
-
         if (model.canFind('\0'))
             throw new InvalidInputException("Invalid model name");
 
@@ -153,7 +131,6 @@ public:
         Session session = this.session(id);
         if (session.isRunning() && session.execution.kind == ExecutionKind.Remove)
             return session.execution;
-
         if (!session.isRunning() && online(id))
             throw new ConflictException("Cannot remove a session owned by another process");
 
@@ -168,9 +145,10 @@ public:
         string prompt,
         string directory,
         string model,
-        Execution dependency = null
+        Execution dependency = null,
+        string mode = null
     )
-        => submit(ExecutionKind.Resume, prompt, directory, model, id, dependency);
+        => submit(ExecutionKind.Resume, prompt, directory, model, id, dependency, null, mode);
 
     Execution compact(string id, string directory, string model = null)
         => submit(
@@ -183,8 +161,15 @@ public:
             [COMPACTION_THRESHOLDS_ENV: compactionThresholds]
         );
 
-    Execution start(string prompt, string directory, string model = null)
-        => submit(ExecutionKind.Start, prompt, directory, model);
+    Execution start(
+        string prompt,
+        string directory,
+        string model = null,
+        string mode = null,
+        bool trusted = false,
+        string profileName = null
+    )
+        => submit(ExecutionKind.Start, prompt, directory, model, null, null, null, mode, trusted, profileName);
 
     Execution print(string prompt, string directory, string model = null)
         => submit(ExecutionKind.Print, prompt, directory, model);
@@ -203,8 +188,7 @@ public:
         string[] ret;
         foreach (entry; data.array)
         {
-            if (entry.type != JSONType.object || "id" !in entry.object ||
-                entry["id"].type != JSONType.string)
+            if (entry.type != JSONType.object || "id" !in entry.object || entry["id"].type != JSONType.string)
                 throw new BackendException("Invalid backend session list");
 
             Session.validateId(entry["id"].str);
@@ -212,5 +196,75 @@ public:
         }
 
         return ret;
+    }
+
+protected:
+    override Session createSession(string id)
+        => new DevinSession(id, this);
+
+private:
+    enum COMPACT_PROMPT = "Reply with exactly: OK";
+    enum COMPACTION_THRESHOLDS_ENV = "DEVIN_COMPACTION_THRESHOLDS";
+    enum string[] SCRUB_PREFIXES = [
+        "ACP_",
+        "ELECTRON_",
+        "OPENROUTER_API_KEY",
+        "VSCODE_",
+        "WINDSURF_",
+        "AUTONOM_RUN_",
+        "AUTONOM_CLIENT_"
+    ];
+
+    string lockPath(string id) const
+        => buildPath(sessionLockDir, id~".lock");
+
+    Execution submit(
+        ExecutionKind kind,
+        string prompt,
+        string directory,
+        string model,
+        string id = null,
+        Execution dependency = null,
+        string[string] environment = null,
+        string mode = null,
+        bool trusted = false,
+        string profileName = null
+    )
+    {
+        if (!directory.length || !exists(directory) || !isDir(directory))
+            throw new InvalidInputException("An existing working directory is required");
+
+        if (id.length)
+        {
+            SessionMetadata metadata = sessionMetadata(id);
+            if (!model.length)
+                model = metadata.model;
+            if (!mode.length)
+                mode = metadata.mode;
+
+            trusted = access.trusted(id);
+        }
+
+        string permission = mode == "bypass" ? "dangerous" : mode == "ask" ? "auto" : mode;
+        if (permission.length && !["auto", "normal", "accept-edits", "smart", "dangerous", "autonomous"]
+            .canFind(permission))
+            throw new InvalidInputException("Invalid permission mode");
+
+        string[] args = arguments(prompt, model);
+        Execution ret = newExecution(kind, directory, model, id);
+        ret.mode = mode.idup;
+        ret.trusted = trusted;
+        ret.profileName = profileName.idup;
+        string[] options = ["--export", ret.exportPath];
+        if (permission.length)
+            options ~= ["--permission-mode", permission];
+        if (trusted)
+            options ~= ["--respect-workspace-trust", "false"];
+
+        args = args[0..$-2]~options~args[$-2..$];
+        if (id.length)
+            args = ["--resume", id]~args;
+
+        return launch(ret, args, null, dependency, environment);
     }
 }
