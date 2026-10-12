@@ -63,7 +63,8 @@ protected:
         Execution execution,
         string[] arguments,
         Execution prerequisite = null,
-        Execution dependency = null
+        Execution dependency = null,
+        string[string] environment = null
     )
     {
         size_t active;
@@ -72,9 +73,13 @@ protected:
 
         if (active >= 8)
             throw new ConflictException("Execution capacity reached");
+        string[string] child = childEnvironment();
+        foreach (name, value; environment)
+            child[name] = value;
+
         execution.start(
             [command]~arguments,
-            childEnvironment(),
+            child,
             execution.kind == ExecutionKind.Remove ? 10.seconds : 120.seconds,
             prerequisite,
             dependency

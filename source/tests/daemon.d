@@ -248,7 +248,7 @@ while :; do sleep 0.05; done
         hooks[event][0]["hooks"].array.length.should == 1;
         JSONValue hook = hooks[event][0]["hooks"][0];
         hook["type"].str.should == "command";
-        hook["timeout"].integer.should == (event == "PreToolUse" ? 12 : 6);
+        hook["timeout"].integer.should == (event == "PermissionRequest" ? 12 : 6);
         hook["command"].str.canFind(endpoint).should == true;
         parseJSON(invokeHook(hook["command"].str, payload)).should == parseJSON("{}");
         invokeHook(hook["command"].str, parseJSON("{}"), 22).should == "";
@@ -293,21 +293,31 @@ while :; do sleep 0.05; done
 `);
     request("/api/policy/check", 503, policyRequest.toString())["denied"].boolean.should == true;
 
-    JSONValue hookRequest = JSONValue([
-        "hook_event_name": JSONValue("PreToolUse"),
+    JSONValue permissionRequest = JSONValue([
+        "hook_event_name": JSONValue("PermissionRequest"),
+        "session_id": JSONValue("hook-session"),
         "cwd": JSONValue(fixture.root),
         "tool_name": JSONValue("exec"),
         "tool_input": JSONValue(["command": JSONValue("git status")])
     ]);
     write(policyPath, "rules:\n  - action: allow\n");
-    request("/api/hooks/pre-tool-use", 200, hookRequest.toString()).should == parseJSON("{}");
+    request("/api/hooks/permission-request", 200, permissionRequest.toString()).should == parseJSON("{}");
     write(policyPath, "rules:\n  - action: deny\n    reason: Blocked\n");
-    request("/api/hooks/pre-tool-use", 200, hookRequest.toString())["decision"].str.should == "block";
-    request("/api/hooks/pre-tool-use", 200, hookRequest.toString())["reason"].str.should == "Blocked";
+    request("/api/hooks/permission-request", 200, permissionRequest.toString())["decision"].str.should == "block";
+    request("/api/hooks/permission-request", 200, permissionRequest.toString())["reason"].str.should == "Blocked";
+    JSONValue preToolUse = JSONValue([
+        "hook_event_name": JSONValue("PreToolUse"),
+        "session_id": JSONValue("hook-session"),
+        "cwd": JSONValue(fixture.root),
+        "tool_name": JSONValue("exec"),
+        "tool_input": JSONValue(["command": JSONValue("git status")])
+    ]);
+    request("/api/hooks/pre-tool-use", 200, preToolUse.toString()).should == parseJSON("{}");
     write(policyPath, "rules: []\n");
-    request("/api/hooks/pre-tool-use", 200, hookRequest.toString())["decision"].str.should == "block";
-    request("/api/hooks/pre-tool-use", 200, hookRequest.toString())["reason"].str.should == "No policy rule matched";
-    parseJSON(invokeHook(hooks["PreToolUse"][0]["hooks"][0]["command"].str, hookRequest))["decision"].str
+    request("/api/hooks/permission-request", 200, permissionRequest.toString())["decision"].str.should == "block";
+    request("/api/hooks/permission-request", 200, permissionRequest.toString())["reason"].str
+        .should == "No policy rule matched";
+    parseJSON(invokeHook(hooks["PermissionRequest"][0]["hooks"][0]["command"].str, permissionRequest))["decision"].str
         .should == "block";
 
     request("/api/health")["status"].str.should == "ok";
@@ -519,6 +529,20 @@ unittest
     request("/api/hooks/pre-tool-use", 200, gate.toString())["decision"].str.should == "block";
     request("/api/hooks/pre-tool-use", 200, gate.toString())["reason"].str
         .should == "You have unread events - read them first: call read_events";
+    JSONValue context = JSONValue([
+        "hook_event_name": JSONValue("UserPromptSubmit"),
+        "session_id": JSONValue("session-2"),
+        "prompt": JSONValue("continue")
+    ]);
+    request("/api/hooks/user-prompt-submit", 200, context.toString())["hookSpecificOutput"]["additionalContext"].str
+        .should == "You have 1 unread event - read them with read_events: ping from marlow.";
+    context["hook_event_name"] = JSONValue("PostToolUse");
+    context["tool_name"] = JSONValue("exec");
+    context["tool_input"] = JSONValue(["command": JSONValue("git status")]);
+    request("/api/hooks/post-tool-use", 200, context.toString())["hookSpecificOutput"]["additionalContext"].str
+        .should == "You have 1 unread event - read them with read_events: ping from marlow.";
+    context["session_id"] = JSONValue("session-1");
+    request("/api/hooks/post-tool-use", 200, context.toString()).object.length.should == 0;
     gate["tool_name"] = JSONValue("mcp__autonom-coord__read_messages");
     gate["tool_input"] = JSONValue(["source": JSONValue("pings")]);
     request("/api/hooks/pre-tool-use", 200, gate.toString())["decision"].str.should == "block";
