@@ -5,4 +5,10 @@ bin/
 !.devin/hooks.v1.json
 docs/*
 test-workspace
+extension/node_modules/
+extension/dist/
+extension/LICENSE.txt
+.playwright-mcp/
 __pycache__
+.agents/
+.devin/
