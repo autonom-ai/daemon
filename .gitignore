@@ -5,3 +5,4 @@ bin/
 !.devin/hooks.v1.json
 docs/*
 test-workspace
+__pycache__
