@@ -23,18 +23,6 @@
       ]
     }
   ],
-  "PermissionRequest": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "curl -qfsS -m 10 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/permission-request\"",
-          "timeout": 12
-        }
-      ]
-    }
-  ],
   "UserPromptSubmit": [
     {
       "matcher": "",

@@ -184,11 +184,10 @@ while :; do sleep 0.05; done
     request("/api/health", 405, "{}")["error"].str.should == "Method not allowed";
 
     JSONValue hooks = parseJSON(readText("templates/hooks.v1.json"));
-    hooks.object.length.should == 8;
+    hooks.object.length.should == 7;
     foreach (event, path; [
         "PreToolUse": "pre-tool-use",
         "PostToolUse": "post-tool-use",
-        "PermissionRequest": "permission-request",
         "UserPromptSubmit": "user-prompt-submit",
         "Stop": "stop",
         "PostCompaction": "post-compaction",
@@ -248,7 +247,7 @@ while :; do sleep 0.05; done
         hooks[event][0]["hooks"].array.length.should == 1;
         JSONValue hook = hooks[event][0]["hooks"][0];
         hook["type"].str.should == "command";
-        hook["timeout"].integer.should == (event == "PermissionRequest" ? 12 : 6);
+        hook["timeout"].integer.should == 6;
         hook["command"].str.canFind(endpoint).should == true;
         parseJSON(invokeHook(hook["command"].str, payload)).should == parseJSON("{}");
         invokeHook(hook["command"].str, parseJSON("{}"), 22).should == "";
@@ -300,11 +299,6 @@ while :; do sleep 0.05; done
         "tool_name": JSONValue("exec"),
         "tool_input": JSONValue(["command": JSONValue("git status")])
     ]);
-    write(policyPath, "rules:\n  - action: allow\n");
-    request("/api/hooks/permission-request", 200, permissionRequest.toString()).should == parseJSON("{}");
-    write(policyPath, "rules:\n  - action: deny\n    reason: Blocked\n");
-    request("/api/hooks/permission-request", 200, permissionRequest.toString())["decision"].str.should == "block";
-    request("/api/hooks/permission-request", 200, permissionRequest.toString())["reason"].str.should == "Blocked";
     JSONValue preToolUse = JSONValue([
         "hook_event_name": JSONValue("PreToolUse"),
         "session_id": JSONValue("hook-session"),
@@ -312,13 +306,17 @@ while :; do sleep 0.05; done
         "tool_name": JSONValue("exec"),
         "tool_input": JSONValue(["command": JSONValue("git status")])
     ]);
+    write(policyPath, "rules:\n  - action: allow\n");
     request("/api/hooks/pre-tool-use", 200, preToolUse.toString()).should == parseJSON("{}");
+    request("/api/hooks/permission-request", 200, permissionRequest.toString()).should == parseJSON("{}");
+    write(policyPath, "rules:\n  - action: deny\n    reason: Blocked\n");
+    request("/api/hooks/pre-tool-use", 200, preToolUse.toString())["decision"].str.should == "block";
+    request("/api/hooks/pre-tool-use", 200, preToolUse.toString())["reason"].str.should == "Blocked";
+    request("/api/hooks/permission-request", 200, permissionRequest.toString()).should == parseJSON("{}");
     write(policyPath, "rules: []\n");
-    request("/api/hooks/permission-request", 200, permissionRequest.toString())["decision"].str.should == "block";
-    request("/api/hooks/permission-request", 200, permissionRequest.toString())["reason"].str
+    request("/api/hooks/pre-tool-use", 200, preToolUse.toString())["decision"].str.should == "block";
+    request("/api/hooks/pre-tool-use", 200, preToolUse.toString())["reason"].str
         .should == "No policy rule matched";
-    parseJSON(invokeHook(hooks["PermissionRequest"][0]["hooks"][0]["command"].str, permissionRequest))["decision"].str
-        .should == "block";
 
     request("/api/health")["status"].str.should == "ok";
 
