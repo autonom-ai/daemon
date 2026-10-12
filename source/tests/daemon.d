@@ -9,9 +9,9 @@ import core.sys.linux.sys.file : flock, LOCK_EX;
 import core.thread : Thread;
 import core.time : Duration, msecs, seconds;
 import std.algorithm : canFind;
-import std.array : join, replicate;
+import std.array : join, replace, replicate;
 import std.conv : octal, to;
-import std.file : mkdirRecurse, readText, setAttributes, write;
+import std.file : exists, getcwd, mkdirRecurse, readText, setAttributes, write;
 import std.json : JSONValue, parseJSON;
 import std.net.curl : CurlException, HTTP;
 import std.path : buildPath;
@@ -46,6 +46,8 @@ struct RunningDaemon
 
 RunningDaemon startDaemon(Fixture fixture)
 {
+    requestToken = fixture.bridge.access.clientToken;
+    hookTokens = null;
     RunningDaemon ret;
     string path = buildPath(fixture.root, "daemon.log");
     ret.log = File(path, "w");
@@ -98,6 +100,58 @@ string invokeHook(string command, JSONValue payload, int expected = 0)
 
     output.rewind();
     return cast(string)output.byChunk(4096).join;
+}
+
+JSONValue hookSession(Fixture fixture, string id)
+{
+    string original = fixture.config.devinCommand~".original";
+    if (!exists(original))
+    {
+        write(original, exists(fixture.config.devinCommand) ? readText(fixture.config.devinCommand) :
+            "#!/bin/sh\nexit 0\n");
+        setAttributes(original, octal!"700");
+    }
+
+    write(fixture.config.devinCommand, `#!/bin/sh
+export_path=
+previous=
+for argument do
+    if [ "$previous" = --export ]; then export_path=$argument; fi
+    previous=$argument
+    prompt=$argument
+done
+case "$prompt" in
+    auth:*)
+        session=${prompt#auth:}
+        printf '%s' "$AUTONOM_RUN_TOKEN" > "$(dirname "$0")/$session.token"
+        printf '{"session_id":"%s"}' "$session" > "$export_path"
+        trap 'exit 0' TERM
+        while :; do sleep 0.05; done ;;
+esac
+exec "$0.original" "$@"
+`);
+    setAttributes(fixture.config.devinCommand, octal!"700");
+    JSONValue ret = request("/api/sessions", 202, JSONValue([
+        "prompt": JSONValue("auth:"~id),
+        "directory": JSONValue(fixture.root)
+    ]).toString());
+    string tokenPath = buildPath(fixture.root, id~".token");
+    waitUntil(delegate bool()
+    {
+        return exists(tokenPath);
+    });
+    hookTokens[id] = readText(tokenPath);
+    request("/api/hooks/session-start", 200, JSONValue([
+        "hook_event_name": JSONValue("SessionStart"),
+        "session_id": JSONValue(id)
+    ]).toString());
+    return ret;
+}
+
+void finishHookSession(JSONValue execution)
+{
+    request("/api/executions/"~execution["id"].str~"/stop", 202, "{}");
+    waitForExecution(execution);
 }
 
 JSONValue waitForExecution(JSONValue accepted)
@@ -184,10 +238,11 @@ while :; do sleep 0.05; done
     request("/api/health", 405, "{}")["error"].str.should == "Method not allowed";
 
     JSONValue hooks = parseJSON(readText("templates/hooks.v1.json"));
-    hooks.object.length.should == 7;
+    hooks.object.length.should == 8;
     foreach (event, path; [
         "PreToolUse": "pre-tool-use",
         "PostToolUse": "post-tool-use",
+        "PermissionRequest": "permission-request",
         "UserPromptSubmit": "user-prompt-submit",
         "Stop": "stop",
         "PostCompaction": "post-compaction",
@@ -247,10 +302,14 @@ while :; do sleep 0.05; done
         hooks[event][0]["hooks"].array.length.should == 1;
         JSONValue hook = hooks[event][0]["hooks"][0];
         hook["type"].str.should == "command";
-        hook["timeout"].integer.should == 6;
-        hook["command"].str.canFind(endpoint).should == true;
-        parseJSON(invokeHook(hook["command"].str, payload)).should == parseJSON("{}");
-        invokeHook(hook["command"].str, parseJSON("{}"), 22).should == "";
+        hook["timeout"].integer.should == (event == "PermissionRequest" ? 250 : 20);
+        hook["command"].str.canFind("hook.py").should == true;
+        hooks[event][0]["hooks"][0]["command"] = JSONValue(
+            hook["command"].str.replace("{{AUTONOM_ROOT}}", getcwd())
+        );
+        string command = hooks[event][0]["hooks"][0]["command"].str;
+        parseJSON(invokeHook(command, payload)).should == parseJSON("{}");
+        parseJSON(invokeHook(command, parseJSON("{}"))).should == parseJSON("{}");
     }
 
     JSONValue policyRequest = JSONValue([
@@ -306,17 +365,23 @@ while :; do sleep 0.05; done
         "tool_name": JSONValue("exec"),
         "tool_input": JSONValue(["command": JSONValue("git status")])
     ]);
+    JSONValue hookExecution = hookSession(fixture, "hook-session");
     write(policyPath, "rules:\n  - action: allow\n");
     request("/api/hooks/pre-tool-use", 200, preToolUse.toString()).should == parseJSON("{}");
-    request("/api/hooks/permission-request", 200, permissionRequest.toString()).should == parseJSON("{}");
+    JSONValue permission = request("/api/hooks/permission-request", 200, permissionRequest.toString());
+    string permissionPath = "/api/permissions/"~permission["permission"].str;
+    request(permissionPath)["decision"].str.should == "";
+    request(permissionPath, 200, `{"decision":"approve"}`)["decision"].str.should == "approve";
     write(policyPath, "rules:\n  - action: deny\n    reason: Blocked\n");
     request("/api/hooks/pre-tool-use", 200, preToolUse.toString())["decision"].str.should == "block";
     request("/api/hooks/pre-tool-use", 200, preToolUse.toString())["reason"].str.should == "Blocked";
-    request("/api/hooks/permission-request", 200, permissionRequest.toString()).should == parseJSON("{}");
     write(policyPath, "rules: []\n");
     request("/api/hooks/pre-tool-use", 200, preToolUse.toString())["decision"].str.should == "block";
     request("/api/hooks/pre-tool-use", 200, preToolUse.toString())["reason"].str
         .should == "No policy rule matched";
+    finishHookSession(hookExecution);
+    foreach (id; ["session-0", "session-1", "batch-owned", "batch-other"])
+        finishHookSession(hookSession(fixture, id));
 
     request("/api/health")["status"].str.should == "ok";
 
@@ -340,7 +405,7 @@ while :; do sleep 0.05; done
     }
 
     request("/api/profiles").array.length.should == 12;
-    request("/api/sessions").array[0].str.should == "session-0";
+    request("/api/sessions").array.canFind(JSONValue("session-0")).should == true;
     JSONValue launch = JSONValue([
         "prompt": JSONValue("callback"),
         "directory": JSONValue(fixture.root)
@@ -449,8 +514,8 @@ while :; do sleep 0.05; done
     });
     wait(daemon.process).should == 0;
     foreach (event, groups; hooks.object)
-        invokeHook(groups[0]["hooks"][0]["command"].str,
-            JSONValue(["hook_event_name": JSONValue(event)]), 7).should == "";
+        parseJSON(invokeHook(groups[0]["hooks"][0]["command"].str,
+            JSONValue(["hook_event_name": JSONValue(event)]))).should == parseJSON("{}");
 }
 
 @Name("Daemon coordinates rooms, messages, and the event gate") @Serial
@@ -470,7 +535,7 @@ unittest
     request("/api/profiles/marlow/session", 200, `{"id":"session-1"}`);
     request("/api/profiles/wren/session", 200, `{"id":"session-2"}`);
 
-    request("/api/rooms", 400);
+    request("/api/rooms").array.length.should == 0;
     request("/api/rooms?session=missing", 409)["error"].str.should == "No profile is registered for this session";
     request("/api/rooms?session=session-1", 400, `{"name":"general","extra":true}`);
     JSONValue created = request("/api/rooms?session=session-1", 201, `{"name":"#General"}`);
@@ -508,6 +573,9 @@ unittest
             lock.close();
     }
 
+    hookSession(fixture, "session-2");
+    mkdirRecurse(buildPath(fixture.root, ".devin"));
+    write(buildPath(fixture.root, ".devin", "policy.yml"), "rules:\n  - action: allow\n");
     flock(lock.fileno, LOCK_EX).should == 0;
     JSONValue gate = JSONValue([
         "hook_event_name": JSONValue("PreToolUse"),
@@ -615,7 +683,7 @@ unittest
     request("/api/profiles/marlow/session", 200, `{"id":"session-1"}`);
     request("/api/profiles/wren/session", 200, `{"id":"session-2"}`);
 
-    request("/api/schedules", 400);
+    request("/api/schedules").array.length.should == 0;
     request("/api/schedules?session=missing", 409);
     request("/api/schedules?session=session-1", 405, null, "application/json", HTTP.Method.del);
     request("/api/schedules?session=session-1", 400, `{"type":"unknown"}`);
@@ -629,7 +697,7 @@ unittest
     request("/api/schedules?session=session-1", 400, `{"type":"ping","from":"missing"}`);
     request("/api/schedules?session=session-1", 400, `{"type":"ping","room":"general"}`);
     request("/api/schedules?session=session-1", 400, `{"type":"ping","unknown":true}`);
-    request("/api/events", 400);
+    request("/api/events")["events"].array.length.should == 0;
     request("/api/events?session=missing", 409);
     request("/api/events?session=session-2", 405, "{}", "application/json", HTTP.Method.post);
 
@@ -679,4 +747,27 @@ unittest
     fired["events"].array[0]["type"].str.should == "clock";
     fired["events"].array[0]["text"].str.should == "scheduled wake, repeats every 1s";
     request("/api/events?session=session-1")["events"].array.length.should == 0;
+}
+
+@Name("Unmanaged sessions cannot acquire Autonom identity through hooks") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    JSONValue payload = JSONValue([
+        "hook_event_name": JSONValue("PreToolUse"),
+        "session_id": JSONValue("desktop-session"),
+        "tool_name": JSONValue("mcp__autonom-coord__set_profile"),
+        "tool_input": JSONValue(["name": JSONValue("intruder")])
+    ]);
+    JSONValue response = request("/api/hooks/pre-tool-use", 200, payload.toString());
+    response["decision"].str.should == "block";
+    ("hookSpecificOutput" in response.object).should == null;
+    request("/api/profiles").array.length.should == 0;
 }

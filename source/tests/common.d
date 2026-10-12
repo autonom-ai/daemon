@@ -4,6 +4,7 @@ import autonom.agent;
 import autonom.config;
 import autonom.interop.devin;
 
+import std.algorithm.searching : startsWith;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
 import std.conv : to;
@@ -16,6 +17,8 @@ import std.uuid;
 public:
 
 enum ROUTER = "router:\n  type: openrouter\n  key: test-key\n  url: https://openrouter.ai\n  name: OpenRouter\n";
+string requestToken;
+string[string] hookTokens;
 
 JSONValue request(
     string path,
@@ -30,6 +33,25 @@ JSONValue request(
     client.connectTimeout = 1.seconds;
     client.operationTimeout = 2.seconds;
     client.method = method;
+    if (requestToken.length)
+        client.addRequestHeader("x-autonom-client", requestToken);
+    if (path.startsWith("/api/hooks/") && data.length)
+    {
+        try
+        {
+            JSONValue payload = parseJSON(data);
+            if ("session_id" in payload.object)
+            {
+                string* token = payload["session_id"].str in hookTokens;
+                if (token !is null)
+                    client.addRequestHeader("x-autonom-run", *token);
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+
     if (data !is null)
         client.setPostData(data, contentType);
 
