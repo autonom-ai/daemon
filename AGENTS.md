@@ -29,8 +29,8 @@
 - `POST /api/sessions/<id>/resume` continues a session with a prompt and returns its execution ID; the execution exposes a failed status if the backend rejects the session.
 - `DELETE /api/sessions/<id>` returns one removal-execution record. `POST /api/sessions/remove` validates the whole batch and returns `{"ids":[...],"executions":[{"id":"...","sessionId":"..."}],"failed":[...]}`. Removal executes asynchronously; poll each execution and trust only `status: succeeded`.
 - `templates/hooks.v1.json`, installed at `.devin/hooks.v1.json`, forwards all eight Devin hook events to `POST /api/hooks/<kebab-case-event>` using curl.
-- `PreToolUse` evaluates workspace policy and returns `{"decision":"block","reason":"..."}` on denial or failure, or `{}` when allowed; remaining hook endpoints return `{}`.
-- Hook forwarding uses loopback and `AUTONOM_PORT` (default 8080), disables proxies, and times out after five seconds (ten seconds for pre-tool policy screening).
+- `templates/mcp_config.json`, installed at `.devin/mcp_config.json`, runs `source/coord/server.py` as the `autonom-coord` MCP server: a stdlib-only Python stdio JSON-RPC server that proxies tool calls to the daemon's HTTP API and takes the caller's session from the `session_id` the hooks inject.
+- Hook forwarding uses loopback and `AUTONOM_PORT` (default 8080), disables proxies, and times out after five seconds (ten seconds for permission screening).
 - Start, print, resume, and removal commands run as bounded, persisted executions outside the Serverino request worker; hooks can be served while those processes run.
 - Backend session listing remains synchronous and is limited to two seconds; model-screening policy checks remain synchronous and are limited to eight seconds.
 
@@ -52,6 +52,7 @@
 - Coordination endpoints take the caller's `session` as a query parameter and require a registered session: `GET/POST /api/rooms`, `GET/DELETE /api/rooms/<name>`, `GET/POST /api/rooms/<name>/messages`, `GET/POST /api/rooms/<name>/membership`, `POST /api/rooms/<name>/admins`, `DELETE /api/rooms/<name>/admins?profile=`, and `GET/POST /api/messages` (`source=dms|pings`).
 - Reading a stream advances the cursor past the entries returned, and a first read starts with the newest `limit` entries. Own posts are never unread; message text is capped at 4000 characters.
 - `PreToolUse` blocks every tool while the session's profile has unread events, except `mcp__autonom-coord__read_events`; it injects `session_id` into `mcp__autonom-coord__*` input, adopts a freshly started session to its profile when its first hook arrives from the wake workspace, and fails closed when profile access cannot be verified.
+- `UserPromptSubmit` and `PostToolUse` inject an `additionalContext` reminder naming up to five unread events when the session's profile has any; unregistered sessions and sessions with no unread events get `{}`.
 
 # Events
 
@@ -64,6 +65,8 @@
 
 # Policy
 
+- Policy is enforced by the `PermissionRequest` hook, which fires only when a tool call needs a permission decision: denials return `{"decision":"block","reason":"..."}` and everything else returns `{}`, so policy can auto-reject but never auto-approve. `PreToolUse` never screens.
+- The policy directory comes from the hook payload's `directory`/`cwd`, then a `directory` query parameter, then the session's execution workspace, then the CLI session database's working directory.
 - `POST /api/policy/check` accepts string `directory` and `tool`, with optional object `input`.
 - Workspace policy is `<directory>/.devin/policy.yml`, containing a required `rules` list; files reload on each check.
 - `templates/policy.yml` is the starting workspace policy, installed at `.devin/policy.yml`; it screens with `inception/mercury-decide:free`.

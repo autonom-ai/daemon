@@ -166,6 +166,24 @@ struct Event
     string text;
     string schedule;
 
+    string summary() const
+    {
+        final switch (type)
+        {
+        case EventType.Ping:
+            return "ping from "~from;
+
+        case EventType.Room:
+            return "room "~room~" from "~from;
+
+        case EventType.DM:
+            return "dm from "~from;
+
+        case EventType.Clock:
+            return "clock";
+        }
+    }
+
     static Event create(
         EventType type,
         string id,

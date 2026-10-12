@@ -162,7 +162,7 @@ public:
                 entry.id,
                 from.name,
                 entry.text,
-                to.name,
+                null,
                 pingSchedule(target, from.name)
             );
             profiles[target.name] = target;
@@ -413,20 +413,10 @@ private:
 
     string eventLine(Event event)
     {
-        final switch (event.type)
-        {
-        case EventType.Ping:
-            return "- ping from "~event.from~": "~event.text;
+        if (event.type == EventType.Clock)
+            return "- "~event.summary~" ("~event.text~")";
 
-        case EventType.Room:
-            return "- room "~event.room~" from "~event.from~": "~event.text;
-
-        case EventType.DM:
-            return "- dm from "~event.from~": "~event.text;
-
-        case EventType.Clock:
-            return "- clock ("~event.text~")";
-        }
+        return "- "~event.summary~": "~event.text;
     }
 
     string wakePrompt(Event[] batch, string owner)

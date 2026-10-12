@@ -42,7 +42,8 @@ for argument do
 done
 printf '%s\n' "$@" >> invocations.txt
 printf -- '---\n' >> invocations.txt
-[ "$prompt" = /compact ] && exit 0
+[ -n "$DEVIN_COMPACTION_THRESHOLDS" ] && printf '%s' "$DEVIN_COMPACTION_THRESHOLDS" > compaction-thresholds.txt
+[ "$prompt" = "Reply with exactly: OK" ] && exit 0
 case "$1" in
     --print)
         count=0
@@ -299,7 +300,7 @@ unittest
     string[] calls = invocations(fixture.fixture.root);
     argument(calls[1], "--resume").should == true;
     argument(calls[1], marlow.session.id).should == true;
-    argument(calls[1], "/compact").should == false;
+    calls[1].canFind("Reply with exactly: OK").should == false;
     calls[1].canFind("You were woken by 1 event").should == true;
     calls[1].canFind("- ping from wren: hello").should == true;
     calls[1].canFind("Continue your work.").should == true;
@@ -332,11 +333,12 @@ unittest
         return calls.length >= 3;
     });
     string[] calls = invocations(fixture.fixture.root);
-    argument(calls[1], "/compact").should == true;
     argument(calls[1], "--resume").should == true;
     argument(calls[1], marlow.session.id).should == true;
+    calls[1].canFind("Reply with exactly: OK").should == true;
+    readText(buildPath(fixture.fixture.root, "compaction-thresholds.txt")).should == fixture.config.compactionThresholds;
     argument(calls[2], "--resume").should == true;
-    argument(calls[2], "/compact").should == false;
+    calls[2].canFind("Reply with exactly: OK").should == false;
     calls[2].canFind("You were woken by 1 event").should == true;
     calls[2].canFind("- ping from wren: hello").should == true;
 }
@@ -359,9 +361,10 @@ unittest
         return invocations(fixture.fixture.root).length >= 3;
     });
     string[] calls = invocations(fixture.fixture.root);
-    argument(calls[1], "/compact").should == true;
+    calls[1].canFind("Reply with exactly: OK").should == true;
+    readText(buildPath(fixture.fixture.root, "compaction-thresholds.txt")).should == fixture.config.compactionThresholds;
     argument(calls[2], "--resume").should == true;
-    argument(calls[2], "/compact").should == false;
+    calls[2].canFind("Reply with exactly: OK").should == false;
     calls[2].canFind("- ping from wren: hello").should == true;
 }
 

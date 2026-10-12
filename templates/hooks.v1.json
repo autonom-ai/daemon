@@ -5,9 +5,8 @@
       "hooks": [
         {
           "type": "command",
-          "command":
-            "curl -qfsS -m 10 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/pre-tool-use\"",
-          "timeout": 12
+          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/pre-tool-use\"",
+          "timeout": 6
         }
       ]
     }
@@ -18,8 +17,7 @@
       "hooks": [
         {
           "type": "command",
-          "command":
-            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/post-tool-use\"",
+          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/post-tool-use\"",
           "timeout": 6
         }
       ]
@@ -31,9 +29,8 @@
       "hooks": [
         {
           "type": "command",
-          "command":
-            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/permission-request\"",
-          "timeout": 6
+          "command": "curl -qfsS -m 10 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/permission-request\"",
+          "timeout": 12
         }
       ]
     }
@@ -44,8 +41,7 @@
       "hooks": [
         {
           "type": "command",
-          "command":
-            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/user-prompt-submit\"",
+          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/user-prompt-submit\"",
           "timeout": 6
         }
       ]
@@ -57,8 +53,7 @@
       "hooks": [
         {
           "type": "command",
-          "command":
-            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/stop\"",
+          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/stop\"",
           "timeout": 6
         }
       ]
@@ -70,8 +65,7 @@
       "hooks": [
         {
           "type": "command",
-          "command":
-            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/post-compaction\"",
+          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/post-compaction\"",
           "timeout": 6
         }
       ]
@@ -83,8 +77,7 @@
       "hooks": [
         {
           "type": "command",
-          "command":
-            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-start\"",
+          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-start\"",
           "timeout": 6
         }
       ]
@@ -96,8 +89,7 @@
       "hooks": [
         {
           "type": "command",
-          "command":
-            "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-end\"",
+          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-end\"",
           "timeout": 6
         }
       ]

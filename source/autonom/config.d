@@ -8,10 +8,12 @@ import mir.deser.yaml;
 
 import core.time : Duration, hours, seconds;
 import std.algorithm.searching : canFind;
+import std.array : join;
 import std.ascii : isDigit;
 import std.conv : to;
 import std.path;
 import std.process : environment;
+import std.string : split, strip;
 
 private:
 
@@ -81,6 +83,39 @@ Duration readDuration(YamlAlgebraic value, string name)
     return parseDuration(value.get!string, name);
 }
 
+string readThresholds(string text, string name)
+{
+    string[] parts = text.split(",");
+    if (parts.length != 2 && parts.length != 3)
+        throw new Exception(name~" must be <spawn>,<hard> or <spawn>,<apply>,<hard>");
+
+    long[] values;
+    foreach (part; parts)
+    {
+        long value;
+        try
+            value = part.strip.to!long;
+        catch (Exception)
+            throw new Exception(name~" must be positive token counts");
+
+        if (value < 1)
+            throw new Exception(name~" must be positive token counts");
+
+        values ~= value;
+    }
+
+    if (values.length == 3 && !(values[0] <= values[1] && values[1] <= values[2]))
+        throw new Exception(name~" requires spawn <= apply <= hard");
+    if (values.length == 2 && values[0] > values[1])
+        throw new Exception(name~" requires spawn <= hard");
+
+    string[] normalized;
+    foreach (value; values)
+        normalized ~= value.to!string;
+
+    return normalized.join(",");
+}
+
 public:
 
 class Config
@@ -92,6 +127,7 @@ class Config
     bool compactOnResume;
     Duration offlineStartAfter = 1.hours;
     Duration offlineCompactAfter = 1.hours;
+    string compactionThresholds = "1,2,3";
     IRouter router;
 
     static string defaultPath()
@@ -147,6 +183,13 @@ class Config
 
             case "offlineCompactAfter":
                 offlineCompactAfter = readDuration(pair.value, key);
+                continue;
+
+            case "compactionThresholds":
+                if (pair.value.kind != YamlAlgebraic.Kind.string)
+                    throw new Exception("compactionThresholds must be a threshold list");
+
+                compactionThresholds = readThresholds(pair.value.get!string, key);
                 continue;
 
             default:
