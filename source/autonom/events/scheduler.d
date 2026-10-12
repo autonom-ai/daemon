@@ -21,6 +21,7 @@ import std.json : JSONType, JSONValue;
 import std.net.curl : HTTP;
 import std.path : buildNormalizedPath, buildPath;
 import std.process : environment;
+import std.stdio : stderr;
 
 public:
 
@@ -172,7 +173,7 @@ public:
             deliver(profiles[name], events, from);
     }
 
-    bool adopt(string session, string directory)
+    bool adopt(string session, string directory, string execution = null)
     {
         if (!session.length || !directory.length)
             return false;
@@ -191,6 +192,8 @@ public:
         foreach (i, ref wake; pendingWakes)
         {
             if (wake.session.length || !wake.workspace.length)
+                continue;
+            if (execution.length && wake.execution != execution)
                 continue;
             if (buildNormalizedPath(wake.workspace) != directory)
                 continue;
@@ -477,10 +480,50 @@ private:
     {
         if (!batch.length)
             return;
+        if (profile.name == HUMAN_NAME)
+        {
+            foreach (event; batch)
+                events.surface(profile, event);
+
+            return;
+        }
 
         Session session = profile.session;
-        bool active = wakeInFlight(profile.name) ||
-            (session !is null && (session.isRunning() || bridge.online(session.id)));
+        bool profileOnline = session !is null && (session.isRunning() || bridge.online(session.id));
+        bool hasWakeInFlight = wakeInFlight(profile.name);
+        bool active = hasWakeInFlight || profileOnline;
+
+        string profileState;
+        if (profileOnline)
+            profileState = "online";
+        else if (session is null)
+            profileState = "offline duration unknown";
+        else
+        {
+            Duration offlineDuration = offline(session);
+            if (offlineDuration == Duration.max)
+                profileState = "offline duration unknown";
+            else
+                profileState = "offline for "~offlineDuration.to!string;
+        }
+
+        foreach (event; batch)
+        {
+            stderr.writeln(
+                "autonom event_fired at=",
+                Clock.currTime(UTC()).toISOExtString(),
+                " profile=",
+                profile.name,
+                " type=",
+                cast(string)event.type,
+                " schedule=",
+                event.schedule.length ? event.schedule : "none",
+                " state=\"",
+                profileState,
+                "\" wake_in_flight=",
+                hasWakeInFlight
+            );
+        }
 
         bool scheduled;
         foreach (event; batch)
@@ -614,6 +657,7 @@ private:
             client.proxy = "";
             client.connectTimeout = 1.seconds;
             client.operationTimeout = 2.seconds;
+            client.addRequestHeader("x-autonom-client", bridge.access.clientToken);
             client.setPostData("{}", "application/json");
             client.perform();
         }

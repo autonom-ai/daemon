@@ -48,7 +48,14 @@ void profileSession(Request request, Output output)
     if (profile is null)
         respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
     else if (request.method == Request.Method.Post)
-        respond(output, profileStore.register(profile.name, readField!"id"(request)).toJSON());
+    {
+        string session = readField!"id"(request);
+        if (!bridge.access.client(request.header.read("x-autonom-client")) &&
+            bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
+            throw new ProfileConflictException("A session can register only its own managed identity");
+
+        respond(output, profileStore.register(profile.name, session).toJSON());
+    }
     else if (profile.session !is null)
         respond(output, profile.session.toJSON());
     else
@@ -90,6 +97,7 @@ class ProfileStore
 {
 private:
     Bridge bridge;
+    Profile human;
     Profile[string] profiles;
     string[string] assignments;
     string[string] bindings;
@@ -218,6 +226,7 @@ public:
     this(Config configuration, Bridge bridge)
     {
         this.bridge = bridge;
+        human = new Profile(HUMAN_NAME);
         directory = buildPath(configuration.dataDir, "agents");
         if ((exists(configuration.dataDir) && isSymlink(configuration.dataDir)) ||
             (exists(directory) && isSymlink(directory)))
@@ -239,7 +248,11 @@ public:
 
     Profile get(string name)
     {
-        Profile* found = canonicalName(name) in profiles;
+        name = canonicalName(name);
+        if (name == HUMAN_NAME)
+            return human;
+
+        Profile* found = name in profiles;
         return found is null ? null : *found;
     }
 
