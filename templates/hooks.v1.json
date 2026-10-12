@@ -1,86 +1,10 @@
 {
-  "PreToolUse": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/pre-tool-use\"",
-          "timeout": 6
-        }
-      ]
-    }
-  ],
-  "PostToolUse": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/post-tool-use\"",
-          "timeout": 6
-        }
-      ]
-    }
-  ],
-  "UserPromptSubmit": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/user-prompt-submit\"",
-          "timeout": 6
-        }
-      ]
-    }
-  ],
-  "Stop": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/stop\"",
-          "timeout": 6
-        }
-      ]
-    }
-  ],
-  "PostCompaction": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/post-compaction\"",
-          "timeout": 6
-        }
-      ]
-    }
-  ],
-  "SessionStart": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-start\"",
-          "timeout": 6
-        }
-      ]
-    }
-  ],
-  "SessionEnd": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "curl -qfsS -m 5 -x '' --json @- \"http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-end\"",
-          "timeout": 6
-        }
-      ]
-    }
-  ]
+  "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/coord/hook.py\"", "timeout": 20}]}],
+  "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/coord/hook.py\"", "timeout": 20}]}],
+  "PermissionRequest": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/coord/hook.py\"", "timeout": 250}]}],
+  "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/coord/hook.py\"", "timeout": 20}]}],
+  "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/coord/hook.py\"", "timeout": 20}]}],
+  "PostCompaction": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/coord/hook.py\"", "timeout": 20}]}],
+  "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/coord/hook.py\"", "timeout": 20}]}],
+  "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/coord/hook.py\"", "timeout": 20}]}]
 }
