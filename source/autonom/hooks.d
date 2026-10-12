@@ -232,6 +232,9 @@ void preToolUse(Request request, Output output)
         return;
 
     string directory = hookDirectory(data, session, request);
+    if (blockedByPolicy(directory, tool, hookInput(data), output))
+        return;
+
     if (session.length && directory.length)
         scheduler.adopt(session, directory);
 
@@ -252,22 +255,7 @@ void preToolUse(Request request, Output output)
 @endpoint @route!"/api/hooks/permission-request"
 void permissionRequest(Request request, Output output)
 {
-    JSONValue data;
-    if (!acceptHook(request, output, "PermissionRequest", data))
-        return;
-
-    string tool = hookTool(data);
-    if (!tool.length)
-    {
-        respond(output, hookResponse());
-        return;
-    }
-
-    string session = hookSession(data);
-    if (blockedByPolicy(hookDirectory(data, session, request), tool, hookInput(data), output))
-        return;
-
-    respond(output, hookResponse());
+    respondHook!"PermissionRequest"(request, output);
 }
 
 @endpoint @route!"/api/hooks/post-tool-use"
