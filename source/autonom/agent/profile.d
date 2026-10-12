@@ -34,6 +34,7 @@ package(autonom.agent):
 
 public:
     const string name;
+    alias session this;
 
     Session session()
         => _session;
