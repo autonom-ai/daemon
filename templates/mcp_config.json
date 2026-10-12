@@ -3,6 +3,10 @@
     "autonom-coord": {
       "command": "python3",
       "args": ["{{AUTONOM_ROOT}}/source/coord/server.py"]
+    },
+    "autonom-orchestrate": {
+      "command": "python3",
+      "args": ["{{AUTONOM_ROOT}}/source/coord/orchestrate.py"]
     }
   }
 }

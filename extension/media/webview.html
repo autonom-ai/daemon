@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}}; script-src 'nonce-{{NONCE}}'; img-src {{CSP_SOURCE}} data:; font-src {{CSP_SOURCE}};">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="autonom-icons" content="{{ICONS_URI}}">
+    <title>Autonom</title>
+    <link rel="stylesheet" href="{{CSS_URI}}">
+</head>
+<body data-view="{{VIEW}}">
+    <div id="app"></div>
+    <div id="modal-root"></div>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+    <script nonce="{{NONCE}}" src="{{JS_URI}}"></script>
+</body>
+</html>

@@ -11,8 +11,9 @@ import std.algorithm.searching : canFind;
 import std.array : join;
 import std.ascii : isDigit;
 import std.conv : to;
+import std.file : getcwd;
 import std.path;
-import std.process : environment;
+import std.process : environment, thisProcessID;
 import std.string : split, strip;
 
 private:
@@ -120,9 +121,10 @@ public:
 
 class Config
 {
-    const string path;
+    string path;
     Duration executionTimeout = 30.minutes;
     string dataDir;
+    string repository;
     string sessionLockDir;
     string sessionDatabase;
     string devinCommand;
@@ -149,6 +151,7 @@ class Config
         this.path = configPath;
         string base = dirName(configPath);
         dataDir = base;
+        repository = getcwd();
         sessionLockDir = defaultSessionLockDir;
         YamlAlgebraic settings = readText(configPath).deserializeYaml!YamlAlgebraic(configPath);
         if (settings.kind != YamlAlgebraic.Kind.object)
@@ -216,6 +219,10 @@ class Config
                 dataDir = value;
                 break;
 
+            case "repository":
+                repository = value;
+                break;
+
             case "sessionLockDir":
                 sessionLockDir = value;
                 break;
@@ -234,6 +241,7 @@ class Config
         if (router is null)
             throw new Exception("Configuration requires router");
         dataDir = resolvePath(dataDir, base);
+        repository = resolvePath(repository, base);
         sessionLockDir = resolvePath(sessionLockDir, base);
         sessionDatabase = buildPath(dirName(sessionLockDir), "sessions.db");
         if (devinCommand.canFind('/'))

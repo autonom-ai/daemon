@@ -21,6 +21,7 @@ import std.file;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.path : buildPath;
 import std.stdio : File;
+import std.string : toLower;
 
 public:
 
@@ -35,7 +36,7 @@ void sessions(Request request, Output output)
     else
     {
         JSONValue data = readLaunch(request);
-        string profileName = data["profile"].str;
+        string profileName = data["profile"].str.toLower;
         if (profileName.length)
         {
             if (!validName(profileName) || profileName == "human")
@@ -45,6 +46,11 @@ void sessions(Request request, Output output)
             if (profile !is null && profile.session !is null &&
                 (profile.session.isRunning() || bridge.online(profile.session.id)))
                 throw new ConflictException("Profile is already active");
+            foreach (execution; bridge.listExecutions())
+            {
+                if (execution.running && execution.profileName == profileName)
+                    throw new ConflictException("Profile already has a starting session");
+            }
         }
 
         respond(output, bridge.start(
@@ -148,7 +154,11 @@ public:
         Execution dependency = null,
         string mode = null
     )
-        => submit(ExecutionKind.Resume, prompt, directory, model, id, dependency, null, mode);
+    {
+        Execution ret = submit(ExecutionKind.Resume, prompt, directory, model, id, dependency, null, mode);
+        session(id).bindExecution(ret);
+        return ret;
+    }
 
     Execution compact(string id, string directory, string model = null)
         => submit(
@@ -205,15 +215,6 @@ protected:
 private:
     enum COMPACT_PROMPT = "Reply with exactly: OK";
     enum COMPACTION_THRESHOLDS_ENV = "DEVIN_COMPACTION_THRESHOLDS";
-    enum string[] SCRUB_PREFIXES = [
-        "ACP_",
-        "ELECTRON_",
-        "OPENROUTER_API_KEY",
-        "VSCODE_",
-        "WINDSURF_",
-        "AUTONOM_RUN_",
-        "AUTONOM_CLIENT_"
-    ];
 
     string lockPath(string id) const
         => buildPath(sessionLockDir, id~".lock");

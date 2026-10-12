@@ -231,7 +231,15 @@ public:
 
     JSONValue toJSON()
     {
-        JSONValue ret = metadata.toJSON();
+        SessionMetadata data = metadata;
+        if (!data.id.length && _execution !is null)
+        {
+            data.model = _execution.model;
+            data.mode = _execution.mode;
+            data.directory = _execution.workspace;
+        }
+
+        JSONValue ret = data.toJSON();
         ret["id"] = JSONValue(id);
         ret["status"] = JSONValue(cast(string)status);
         ret["exitStatus"] = exitStatus.isNull ? JSONValue(null) : JSONValue(exitStatus.get);
