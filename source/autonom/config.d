@@ -6,7 +6,7 @@ import intuit.router : IRouter;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
 
-import core.time : Duration, hours, seconds;
+import core.time : Duration, hours, minutes, seconds;
 import std.algorithm.searching : canFind;
 import std.array : join;
 import std.ascii : isDigit;
@@ -120,6 +120,8 @@ public:
 
 class Config
 {
+    const string path;
+    Duration executionTimeout = 30.minutes;
     string dataDir;
     string sessionLockDir;
     string sessionDatabase;
@@ -144,6 +146,7 @@ class Config
     this(string path = defaultPath)
     {
         string configPath = buildNormalizedPath(absolutePath(expandTilde(path)));
+        this.path = configPath;
         string base = dirName(configPath);
         dataDir = base;
         sessionLockDir = defaultSessionLockDir;
@@ -175,6 +178,10 @@ class Config
                     throw new Exception("compactOnResume must be true or false");
 
                 compactOnResume = pair.value.get!bool;
+                continue;
+
+            case "executionTimeout":
+                executionTimeout = readDuration(pair.value, key);
                 continue;
 
             case "offlineStartAfter":
