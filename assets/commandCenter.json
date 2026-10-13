@@ -29,19 +29,19 @@
     "tabs": {
         "schedules": {
             "title": "Schedules",
-            "file": "schedules.html"
+            "file": "pages/schedules.html"
         },
         "events": {
             "title": "Events",
-            "file": "events.html"
+            "file": "pages/events.html"
         },
         "policy": {
             "title": "Policy",
-            "file": "policy.html"
+            "file": "pages/policy.html"
         },
         "settings": {
             "title": "Settings",
-            "file": "settings.html"
+            "file": "pages/settings.html"
         }
     },
     "activeTab": "schedules"

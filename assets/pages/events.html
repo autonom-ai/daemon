@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; img-src data:; form-action 'none';">
+    <title>Events</title>
+    <style>
+        :root {
+            --bg-page: #121212;
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --card-bg: rgba(255, 255, 255, 0.025);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --row-border: rgba(255, 255, 255, 0.05);
+            --accent-purple: #8b5cf6;
+            --pill-active-bg: rgba(255, 255, 255, 0.08);
+            --pill-active-border: rgba(255, 255, 255, 0.12);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-page);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 36px 44px 60px 44px;
+            -webkit-font-smoothing: antialiased;
+        }
+        .container { max-width: 960px; margin: 0 auto; }
+        .breadcrumb {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .breadcrumb span.current { color: var(--text-primary); font-weight: 500; }
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.015em;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+        p.subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 12px;
+        }
+        .pills {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pill {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid transparent;
+            border-radius: 9999px;
+            padding: 5px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .pill:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.04); }
+        .pill.active {
+            background: var(--pill-active-bg);
+            color: var(--text-primary);
+            border-color: var(--pill-active-border);
+        }
+        .btn-primary {
+            background: #ffffff;
+            color: #111827;
+            border: none;
+            border-radius: 6px;
+            padding: 7px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.15s ease;
+        }
+        .btn-primary:hover { background: #e5e7eb; }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-primary);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
+        .callout {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-left: 3px solid #8b5cf6;
+            border-radius: 8px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 28px;
+            gap: 16px;
+        }
+        .callout-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .callout-icon {
+            color: #a78bfa;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+        }
+        .callout-title {
+            font-size: 13.5px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+        .callout-desc {
+            font-size: 12.5px;
+            color: var(--text-secondary);
+        }
+        .section-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            margin-top: 28px;
+        }
+        .card-group {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .card-row {
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--row-border);
+            gap: 16px;
+        }
+        .card-row:last-child { border-bottom: none; }
+        .card-row-info { flex: 1; }
+        .card-row-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-row-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.45;
+        }
+        .badge {
+            font-size: 11px;
+            font-weight: 500;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: rgba(139, 92, 246, 0.15);
+            color: #a78bfa;
+            border: 1px solid rgba(139, 92, 246, 0.25);
+        }
+        .badge-green {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+        .badge-neutral {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .empty-state {
+            padding: 36px 20px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        .empty-icon { font-size: 28px; margin-bottom: 8px; opacity: 0.6; }
+        .empty-text { font-size: 13.5px; color: var(--text-secondary); margin-bottom: 4px; }
+        .empty-subtext { font-size: 12.5px; color: var(--text-muted); }
+        code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <span>Autonom</span>
+            <span>/</span>
+            <span class="current">Events</span>
+        </div>
+        <h1>Events</h1>
+        <p class="subtitle">Coordination event bus, incoming agent pings, and cross-session delivery queues.</p>
+
+        <div class="callout">
+            <div class="callout-content">
+                <div class="callout-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                </div>
+                <div>
+                    <div class="callout-title">Unread events are enforced by PreToolUse</div>
+                    <div class="callout-desc">All tools except <code>read_events</code> are gated until pending messages and room events are acknowledged.</div>
+                </div>
+            </div>
+            <button class="btn-secondary" onclick="pollNow()">Poll Now</button>
+        </div>
+
+        <div class="toolbar">
+            <div class="pills">
+                <button class="pill active" onclick="selectPill(this)">All (0)</button>
+                <button class="pill" onclick="selectPill(this)">Pings</button>
+                <button class="pill" onclick="selectPill(this)">Direct Messages</button>
+                <button class="pill" onclick="selectPill(this)">Room Activity</button>
+                <button class="pill" onclick="selectPill(this)">Clock Wakes</button>
+            </div>
+            <button class="btn-primary" onclick="alert('Cleared all acknowledged inbox items.');">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Acknowledge All
+            </button>
+        </div>
+
+        <div class="section-title">Profile Inboxes</div>
+        <div class="card-group">
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-6l-2 3h-4l-2-3H2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-7z"></path><path d="M5.45 5.11L2 12v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-7l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg>
+                </div>
+                <div class="empty-text">No pending unread events</div>
+                <div class="empty-subtext">Events arriving for offline or active profiles surface here and in <code>UserPromptSubmit</code> context.</div>
+            </div>
+        </div>
+
+        <div class="section-title">Event Streams & Delivery Bus</div>
+        <div class="card-group">
+            <div class="card-row">
+                <div class="card-row-info">
+                    <div class="card-row-title">
+                        Append-Only Stream Store
+                        <span class="badge-green">Healthy</span>
+                    </div>
+                    <div class="card-row-desc">JSON lines streams held in memory (1,000 item ring buffer) and flushed atomically to <code>coord/inboxes/&lt;profile&gt;/events.json</code>.</div>
+                </div>
+            </div>
+            <div class="card-row">
+                <div class="card-row-info">
+                    <div class="card-row-title">
+                        Per-Profile Read Cursors
+                        <span class="badge">Isolated</span>
+                    </div>
+                    <div class="card-row-desc">Each profile maintains independent cursor offsets in <code>cursors.json</code> so concurrent agents consume streams without collision.</div>
+                </div>
+            </div>
+            <div class="card-row">
+                <div class="card-row-info">
+                    <div class="card-row-title">
+                        Wake Reconciliation
+                        <span class="badge-neutral">Auto-Resume</span>
+                    </div>
+                    <div class="card-row-desc">Unscheduled pings to offline profiles spawn fresh sessions; scheduled events resume existing profiles automatically.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let vscode = null;
+        try {
+            if (typeof acquireVsCodeApi === "function") vscode = acquireVsCodeApi();
+        } catch {}
+
+        function selectPill(btn) {
+            document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+            if (btn) btn.classList.add("active");
+        }
+
+        function pollNow() {
+            if (vscode) {
+                vscode.postMessage({ reqId: "poll-events", action: "getState" });
+            }
+        }
+    </script>
+</body>
+</html>

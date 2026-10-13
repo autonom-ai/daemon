@@ -1,6 +1,6 @@
 # Command Center validation methodology
 
-This document is the acceptance procedure for `cet.autonom-command-center`. It exists because the previous iteration failed on exactly this point: it reported success from tests that manufactured the UI state they were meant to observe. Read `docs/COMMAND_CENTER.md` first for the architecture and safety contract; this document defines how to prove behavior against a real, logged-in Devin Desktop.
+This document is the acceptance procedure for the `source/launcher/` Command Center adapter. It exists because an earlier iteration failed on exactly this point: it reported success from tests that manufactured the UI state they were meant to observe. Read `docs/COMMAND_CENTER.md` first for the architecture and safety contract; this document defines how to prove behavior against a real, logged-in Devin Desktop.
 
 ## The one rule
 
@@ -18,11 +18,11 @@ Corollaries:
 | Layer | What it proves | What it cannot prove |
 | --- | --- | --- |
 | `npm run check` | Types and API shape compile | Runtime behavior |
-| `npm test` (unit) | Pure logic: schema validation, overlay math, rollback, CDP framing | Desktop integration |
-| Installed-VSIX live test | The packaged artifact works in Devin Desktop | Nothing beyond the tested build |
+| `npm test` (unit) | Pure logic: config validation and confinement, overlay math, descriptor rollback, pipe framing, CDP session scoping, bridge authorization, control socket | Desktop integration |
+| Live launcher run | The built launcher attaches to the installed Desktop | Nothing beyond the tested build |
 | Adversarial/negative test | The system fails closed on hostile or malformed input | Happy-path correctness |
 
-A release needs all four. Unit coverage for this work lives in `extension/tests/unit/`: `center.ts` (config schema, path confinement, CSP), `native.ts` (overlay immutability, descriptor rollback, provider mode), `cdp.ts` (loopback enforcement, bounded protocol handling, build pinning, identity matching).
+A release needs all four. Unit coverage lives in `source/launcher/tests/unit/`: `content.ts` (overlay math, page CSP), `center.ts` (schema, confinement, size caps), `runtime.ts` (overlay immutability, descriptor rollback, provider mode), `desktop.ts` (pipe framing, binary resolution, build pin), `cdp.ts` (request correlation, session scoping, capture), `config.ts` (settings and daemon YAML), `bridge.ts` (authorization and actions), `control.ts` (socket protocol).
 
 ## Live acceptance procedure
 
@@ -30,58 +30,53 @@ A release needs all four. Unit coverage for this work lives in `extension/tests/
 
 - Devin Desktop **1.126.0**, commit `fcf7ba39e6150055fad817f8716385b4d320d46d`.
 - Native host bundle `out/vs/workbench/workbench.desktop.main.js` SHA-256 `da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d`.
-- The legacy `cet.autonom` 0.4.0 extension is **disabled**. It edits vendor files and would contaminate results.
-- A trusted workspace containing `.devin/commandCenter.json` and its referenced page files.
+- No running Devin Desktop window: the pipe must reach the browser process the launcher spawns.
+- The repository `assets/commandCenter.json` and its `pages/*.html` files are present.
 - No concurrent change to Desktop's `user-data-dir`.
 
 Record the pristine baseline before touching anything:
 
 ```bash
+pgrep -af devin-desktop
 ss -ltnp 'sport = :9882'
-curl --noproxy '*' -sS http://127.0.0.1:9882/json/version
-devin-desktop --list-extensions --show-versions
+sha256sum /usr/share/devin-desktop/resources/app/out/vs/workbench/workbench.desktop.main.js
 ```
 
-### 2. Launch with the debug port
-
-The extension host reaches the renderer over loopback CDP. Launch the already-logged-in instance:
+### 2. Build and launch
 
 ```bash
-devin-desktop --remote-debugging-port=9882 --disable-extension cet.autonom &
+cd source/launcher
+npm ci
+npm run check
+npm test
+npm run build
+node dist/launcher.js /abs/path/to/workspace
 ```
 
-The `Warning: 'remote-debugging-port' is not in the list of known options` message is expected; Electron forwards it. Do not copy or replace the user-data directory to get a "clean" run — test the real profile.
+The launcher verifies the build pin before spawning Desktop, starts the page bridge, launches Desktop with `--remote-debugging-pipe`, waits for the workbench window, and attaches the runtime. It prints the workspace, daemon port, Command Center definition, and control socket. If Desktop opens in editor mode, open the agent window (Ctrl+') and the launcher attaches within five seconds.
 
-### 3. Install the artifact
+Do not copy or replace the user-data directory to get a "clean" run — test the real profile.
+
+### 3. Observe through the control socket
 
 ```bash
-cd extension && npm run package
-devin-desktop --install-extension ../bin/autonom-command-center-0.5.2.vsix --force
+node cdp.mjs status
+node cdp.mjs targets
+node cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
+node cdp.mjs screenshot workbench /tmp/autonom-autonom.png
 ```
 
-Installing while Desktop runs can restart or close windows. Warn the user first, and prefer completing all source changes before installing. After install, confirm the version with `--list-extensions --show-versions`.
+Assert:
 
-### 4. Attach and observe
-
-`extension/.devin/cdp.mjs` is the inspection harness. It attaches to one target and supports `targets`, `eval`, `screenshot`, `command`, `install`, and `hot`. Target selection matches a `page` (or `iframe`) whose id or URL contains the argument.
-
-Drive the **installed** extension through its own commands rather than calling the runtime directly, so the test exercises the shipped code path:
-
-```bash
-node .devin/cdp.mjs command <workbenchTargetId> \
-  '{"command":"autonomCenter.attach","arguments":["/abs/path/.devin/commandCenter.json"]}'
-```
-
-Assert, in the same target:
-
-- `globalThis.__autonomCenter.status()` reports the expected `mode`, `enabled`, `revision`, `activeTab`, and item labels.
-- The Pages list contains the renamed item and excludes hidden ones.
+- `status` reports the expected `mode`, `enabled`, `revision`, `activeTab`, and item labels.
+- The Pages list contains the configured rows and excludes hidden ones.
 - The custom page webview is present and the native content is hidden while it is active.
 - No extra or unexpected sidebar rows exist.
+- `ss -ltnp` shows no listening DevTools port.
 
 Capture a screenshot for each state and keep it beside the assertion output.
 
-### 5. Toggle both providers
+### 4. Toggle both providers
 
 Click the on-screen toggle (not a programmatic state set) and re-assert:
 
@@ -89,50 +84,63 @@ Click the on-screen toggle (not a programmatic state set) and re-assert:
 - Devin Cloud mode: `mode === "devin-cloud"`, native labels restored, custom page removed.
 - Toggling back restores Autonom without a window reload.
 
-### 6. Reload content without restarting
+### 5. Reload content without restarting
 
-Edit the referenced HTML, then run `autonomCenter.reload` and confirm the new content renders in the same window. This is the rapid-iteration path and must not require an install or reload.
+Edit a page file, then:
 
-### 7. Fail-closed and negative checks
+```bash
+node cdp.mjs hot
+```
+
+Confirm the new content renders in the same window. This is the rapid-iteration path and must not require a Desktop restart.
+
+### 6. Fail-closed and negative checks
 
 Prove the guardrails, not just the happy path:
 
-- Invalid JSON, unknown tab reference, duplicate id, symlink, or traversal in the config → reload rejected, last valid state intact.
-- A build with a different commit/hash → attach refused with "Unsupported Desktop build".
-- No matching renderer, or two matching renderers → identity discovery fails closed.
-- Wrong owner → install refused.
-- Unattended crash → heartbeat expires and wrappers are removed.
+- Invalid JSON, unknown tab reference, duplicate id, symlink, or traversal in the definition → the launcher refuses to start before spawning Desktop; the last valid state stays active on `hot`.
+- A build with a different version, commit, or hash → refused with "Unsupported Devin Desktop build" or "not the verified pristine build".
+- A second launcher on the same socket path → refused with "already listening".
+- A bridge request with a wrong or missing token → HTTP 403; an unknown action → HTTP 400.
+- Killing the launcher (`Ctrl+C`, `SIGKILL`) → the 30-second lease expires and the runtime wrappers are removed.
+- Starting the launcher while Desktop already runs → the spawn exits and the launcher reports that Desktop exited before attaching.
 
-### 8. Integrity check
+### 7. Integrity check
 
-Confirm the integrity warning behavior matches `docs/COMMAND_CENTER.md`: it is dismissed only for the exact verified legacy residue, and any other mismatch leaves the native warning visible. Never dismiss a warning you cannot fully account for.
-
-### 9. Clean up
-
-Run `autonomCenter.disable` and verify native labels and navigation return. Then confirm no vendor file, `product.json`, CSP, or profile-data change occurred:
+Confirm no vendor file, `product.json`, CSP, or profile-data change occurred:
 
 ```bash
 git status --short
+sha256sum /usr/share/devin-desktop/resources/app/out/vs/workbench/workbench.desktop.main.js
 ```
+
+There is no integrity-suppression path in the launcher: it never patches a file, so it must never dismiss a warning. Any visible corruption warning means something else changed the installation.
+
+### 8. Clean up
+
+```bash
+node cdp.mjs detach
+```
+
+Verify native labels and navigation return, then stop the launcher. Desktop keeps running without the Command Center overlay.
 
 ## Rapid iteration loop
 
-While developing the runtime bundle, rebuild and push it into the running renderer without a Desktop restart:
+While developing the runtime bundle or the pages:
 
 ```bash
-cd extension && npm run build
-node .devin/cdp.mjs hot <workbenchTargetId> '{"enabled":true,...}'
+cd source/launcher && npm run build
+node cdp.mjs hot
 ```
 
-`hot` captures the native service references, then calls `AutonomNative.replace(...)`, which disposes the previous runtime and installs the rebuilt one in place. Use it for runtime/UI changes. The installed-extension path (`npm run package` + `--install-extension`) is still required to validate that the **shipped** artifact works; `hot` alone never closes a release gate.
+`hot` re-reads the definition and the rebuilt runtime and re-installs it in place. Use it for runtime/UI changes; the full launcher restart is still required to validate the launch path itself.
 
 ## Recording results
 
 For each run, record:
 
 - Desktop version, commit, native bundle hash.
-- Installed extension version and target id.
-- Every command issued and its raw output.
+- Launcher command, settings, and the exact control-socket calls with raw output.
 - Screenshot paths for Autonom and Devin Cloud.
 - Pass/fail per assertion, and any deviation.
 
