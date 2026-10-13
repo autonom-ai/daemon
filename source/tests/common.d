@@ -1,8 +1,8 @@
 module tests.common;
 
-import autonom.agent;
-import autonom.config;
-import autonom.interop.devin;
+import daemon.agent;
+import daemon.config;
+import daemon.interop.devin;
 
 import std.algorithm.searching : startsWith;
 import core.thread : Thread;

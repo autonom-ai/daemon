@@ -1,11 +1,11 @@
-module autonom.coord.bus;
+module daemon.coord.bus;
 
-import autonom.agent;
-import autonom.coord.room;
-import autonom.coord.stream;
-import autonom.config;
-import autonom.exception;
-import autonom.storage;
+import daemon.agent;
+import daemon.coord.room;
+import daemon.coord.stream;
+import daemon.config;
+import daemon.exception;
+import daemon.storage;
 
 import std.algorithm : sort;
 import std.file;

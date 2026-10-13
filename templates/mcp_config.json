@@ -2,11 +2,11 @@
   "mcpServers": {
     "autonom-coord": {
       "command": "python3",
-      "args": ["{{AUTONOM_ROOT}}/source/coord/server.py"]
+      "args": ["{{AUTONOM_ROOT}}/source/mcp/server.py"]
     },
     "autonom-orchestrate": {
       "command": "python3",
-      "args": ["{{AUTONOM_ROOT}}/source/coord/orchestrate.py"]
+      "args": ["{{AUTONOM_ROOT}}/source/mcp/orchestrate.py"]
     }
   }
 }

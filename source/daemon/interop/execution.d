@@ -1,10 +1,10 @@
-module autonom.interop.execution;
+module daemon.interop.execution;
 
-// TODO: Execution records should eventually be replaced by the CLI session database (autonom.interop.devin.db).
+// TODO: Execution records should eventually be replaced by the CLI session database (daemon.interop.devin.db).
 
-import autonom.interop.session;
-import autonom.server;
-import autonom.storage;
+import daemon.interop.session;
+import daemon.server;
+import daemon.storage;
 import serverino;
 
 import core.stdc.errno : errno, ESRCH;
@@ -366,7 +366,7 @@ public:
         _state.sessionId = sessionId.idup;
     }
 
-    package(autonom.interop) void identify(string session)
+    package(daemon.interop) void identify(string session)
     {
         Session.validateId(session);
         synchronized (mutex)
@@ -403,7 +403,7 @@ public:
     string errorPath() const
         => buildPath(directory, id~".err");
 
-    package(autonom.interop) static string[string] childEnvironment() nothrow
+    package(daemon.interop) static string[string] childEnvironment() nothrow
     {
         string[string] ret;
         try
@@ -428,7 +428,7 @@ public:
         return ret;
     }
 
-    package(autonom.interop) static bool createProcessGroup() nothrow @nogc @trusted
+    package(daemon.interop) static bool createProcessGroup() nothrow @nogc @trusted
     {
         return setpgid(0, 0) == 0 && prctl(
             PR_SET_PDEATHSIG,
@@ -439,7 +439,7 @@ public:
         ) == 0;
     }
 
-    package(autonom.interop) static void signal(Pid process, int signal)
+    package(daemon.interop) static void signal(Pid process, int signal)
     {
         if (process !is null && process.processID > 0)
         {

@@ -1,12 +1,12 @@
-module autonom.agent.store;
+module daemon.agent.store;
 
-import autonom.agent.profile;
-import autonom.config;
-import autonom.exception;
-import autonom.interop.bridge;
-import autonom.interop.session;
-import autonom.server;
-import autonom.storage;
+import daemon.agent.profile;
+import daemon.config;
+import daemon.exception;
+import daemon.interop.bridge;
+import daemon.interop.session;
+import daemon.server;
+import daemon.storage;
 import serverino;
 
 import std.algorithm : sort;

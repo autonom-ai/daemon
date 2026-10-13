@@ -1,9 +1,9 @@
 module tests.coord;
 
-import autonom.agent;
-import autonom.coord;
-import autonom.coord.access;
-import autonom.coord.stream;
+import daemon.agent;
+import daemon.coord;
+import daemon.coord.access;
+import daemon.coord.stream;
 import tests.common;
 import serverino : endpoint, route;
 import unit_threaded : Name, should, shouldThrow;

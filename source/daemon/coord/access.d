@@ -1,10 +1,10 @@
-module autonom.coord.access;
+module daemon.coord.access;
 
-import autonom.agent;
-import autonom.coord;
-import autonom.events.event : EventType;
-import autonom.exception;
-import autonom.server;
+import daemon.agent;
+import daemon.coord;
+import daemon.events.event : EventType;
+import daemon.exception;
+import daemon.server;
 import serverino;
 
 import std.algorithm.searching : canFind, startsWith;

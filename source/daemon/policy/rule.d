@@ -1,6 +1,6 @@
-module autonom.policy.rule;
+module daemon.policy.rule;
 
-import autonom.storage;
+import daemon.storage;
 import intuit.response.decision;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
@@ -12,7 +12,7 @@ import std.path : buildPath;
 import std.regex : Regex, matchFirst, regex;
 import std.string : strip;
 
-package(autonom.policy):
+package(daemon.policy):
 
 enum PolicyAction : string
 {

@@ -1,6 +1,6 @@
 module tests.permission;
 
-import autonom.interop.permission;
+import daemon.interop.permission;
 import unit_threaded : Name, should, shouldThrow;
 
 import std.json : JSONValue;

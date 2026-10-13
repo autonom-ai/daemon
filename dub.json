@@ -5,10 +5,10 @@
 				"source/tests/**",
 				"source/evals/**"
 			],
-			"mainSourceFile": "source/autonom/app.d",
+			"mainSourceFile": "source/daemon/app.d",
 			"name": "daemon",
 			"sourcePaths": [
-				"source/autonom"
+				"source/daemon"
 			],
 			"targetName": "autonom-daemon",
 			"targetType": "executable"
@@ -18,7 +18,7 @@
 				"unit-threaded": "2.2.6"
 			},
 			"excludedSourceFiles": [
-				"source/autonom/app.d",
+				"source/daemon/app.d",
 				"source/evals/**"
 			],
 			"mainSourceFile": "bin/ut.d",
@@ -28,7 +28,7 @@
 				"$DUB run unit-threaded@2.2.6 -c gen_ut_main -- -f bin/ut.d source/tests"
 			],
 			"sourcePaths": [
-				"source/autonom",
+				"source/daemon",
 				"source/tests"
 			],
 			"targetName": "autonom-unit",

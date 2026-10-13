@@ -1,5 +1,5 @@
-module autonom.coord;
+module daemon.coord;
 
-public import autonom.coord.bus : Bus;
-public import autonom.coord.room : Room;
-public import autonom.coord.stream : Entry, Stream;
+public import daemon.coord.bus : Bus;
+public import daemon.coord.room : Room;
+public import daemon.coord.stream : Entry, Stream;

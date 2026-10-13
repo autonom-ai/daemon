@@ -1,15 +1,15 @@
-module autonom.client;
+module daemon.client;
 
-import autonom.agent;
-import autonom.coord;
-import autonom.coord.access : caller, postRoomMessage;
-import autonom.events.event : EventType;
-import autonom.exception;
-import autonom.interop.devin.db : readSessionMessages;
-import autonom.interop.execution;
-import autonom.interop.session;
-import autonom.server;
-import autonom.storage;
+import daemon.agent;
+import daemon.coord;
+import daemon.coord.access : caller, postRoomMessage;
+import daemon.events.event : EventType;
+import daemon.exception;
+import daemon.interop.devin.db : readSessionMessages;
+import daemon.interop.execution;
+import daemon.interop.session;
+import daemon.server;
+import daemon.storage;
 import serverino;
 
 import std.algorithm : sort;
