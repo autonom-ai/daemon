@@ -2,11 +2,13 @@
 
 ## Status and safety model
 
-The extension is now `cet.autonom-command-center` version `0.5.2`. It adapts Devin Desktop **1.126.0** at runtime; it does not alter Desktop JavaScript, HTML, CSP, `product.json`, checksums, or the Devin profile data directory. The adapter is deliberately pinned to one inspected build and refuses to attach when its commit or native host bundle differs.
+The adapter is `source/launcher/`, a launcher that starts Devin Desktop with `--remote-debugging-pipe` and attaches the Command Center to the workbench renderer. It is pinned to Devin Desktop **1.126.0** and refuses to attach to any other build.
 
-Devin's native integrity check remains authoritative. On Desktop 1.126.0 only, the adapter dismisses the visible corruption toast only when it verifies the exact historical Autonom 0.4.0 residue: exactly three product-checksum mismatches with the known old patched hashes; a pristine native host bundle; and `product.checksums.orig.json` plus the restored workbench/chat/sessions files all matching the recorded pristine hashes. Any extra, missing, unknown, or changed mismatch fails this test and leaves the native toast visible. This dismisses only the exact toast through Devin's normal Clear Notification action in the current window. It does not mark the installation pure, write `integrityService` storage, change `product.json`, or modify any Desktop/user-data files. The checked proof and suppression state are attached to this extension activation and are revalidated on configuration reload; a newly modified build that fails the native-host pin will not attach, let alone hide its warning.
+The debugging pipe is created by the launcher process and inherited as file descriptors 3 and 4 of the browser process, so the Chrome DevTools Protocol endpoint never listens on a loopback port. No local web page or unrelated process can reach the renderer, and there is no `--remote-debugging-port` to leave behind. The launcher also passes `--disable-extension cet.autonom` and `--disable-extension cet.autonom-command-center`, because the legacy `cet.autonom` 0.4.0 extension edits installed bundles and would contaminate both the build pin and the runtime.
 
-The previous `cet.autonom` extension (`0.4.0`) is a separate, legacy implementation which edits installed bundles and `product.json`. Do not enable it alongside this runtime adapter. This build has a distinct extension ID and does not migrate, remove, or rewrite the old extension's files or its historical backups. It does not delete old `autonom.*` files in Desktop's installation.
+Nothing is written to Desktop's installation or profile data. The adapter wraps the native navigation manifest getter and the native surface controller in memory, keeps a cached overlay snapshot for React's external store, and restores every captured property descriptor on dispose. Because it never patches a file, there is no checksum residue and no integrity warning to dismiss: Devin's native integrity check stays authoritative and untouched.
+
+Devin Desktop must not already be running when the launcher starts. Electron's single-instance lock would forward the launch request to the running window, the freshly spawned process would exit, and the pipe would never reach a browser process.
 
 ## Verified native boundaries
 
@@ -19,9 +21,11 @@ The inspected page-list and active-surface pipeline is:
 
 The adapter temporarily wraps the in-memory manifest getter and the current window's native surface controller. It keeps a stable, cached overlay snapshot, notifies the native manifest event, and leaves React responsible for rendering its original navigation. Selecting an Autonom item calls the existing native `devin.desktopNav.openSurface` command.
 
-Custom HTML is placed in a separate native Electron webview over that controller's existing page mount. The existing remote webview stays mounted and is hidden only while a custom page is active; no native sidebar siblings, chat, composer, or other native page are hidden. Custom webviews have `allowScripts: false`, `allowForms: false`, no local resource roots, and a `default-src 'none'` CSP. A heartbeat removes runtime wrappers if the extension host disappears. Disable and deactivation restore captured property descriptors and the original navigation state.
+Custom HTML is placed in a separate native Electron webview over that controller's existing page mount. The existing remote webview stays mounted and is hidden only while a custom page is active; no native sidebar siblings, chat, composer, or other native page are hidden. Custom webviews have no local resource roots, and a page that is a full HTML document supplies its own CSP; fragments are wrapped with `default-src 'none'` and no scripts. A 30-second lease removes the runtime wrappers if the launcher disappears.
 
-The test run observed two brief CDP debugger pauses while it captured the private native references during first attachment. Normal config reloads use the already-captured references and do not pause the renderer again. CDP is loopback-only, target URLs and socket hosts are validated, and a random command identity binds attachment to exactly one window. No auth token or capability is serialized to a webview or an output log.
+The attach flow captures the private native references with two brief CDP debugger pauses; every breakpoint is removed and the renderer is resumed in a `finally`, and the debugger domain is disabled afterwards. Config reloads (`hot`) reuse the already-captured references and do not pause the renderer again.
+
+The sidebar React context is the only source of those services, so the agent window must be mounted before the runtime can attach. The workbench mode is persisted per workspace; if the window opens in editor mode, the launcher logs the hint and retries every five seconds until the agent window appears.
 
 ### Pin for Desktop 1.126.0
 
@@ -31,6 +35,8 @@ The test run observed two brief CDP debugger pauses while it captured the privat
 - Build: `1.126.0`, Devin Desktop / Windsurf `3.10.48`
 
 These references point into minified private implementation details, not a supported Desktop extension API. A version, commit, hash, API-shape, or React-boundary change must fail closed and be re-researched before extending the pin. Do not replace the pin with a loose DOM heuristic.
+
+The `devin-desktop` command in `PATH` is a shell shim that launches the CLI, which spawns the GUI with ignored stdio; the launcher therefore resolves the Electron binary beside the shim (`<root>/devin-desktop` for `<root>/bin/devin-desktop`) and spawns that directly.
 
 ## Native visual language
 
@@ -48,15 +54,13 @@ Useful pinned theme tokens include `--text-primary`, `--text-secondary`, `--tint
 
 The actual native page-item data contract is `{id, path, label, icon}` (Desktop may add fields such as `beta` and `render`). Preserve unknown native fields and do not mutate native item objects. Custom config IDs use lowercase ASCII letters, digits, and hyphens. A visible custom page item maps to `/autonom/<tab-id>`; its matching native surface keeps the original ID, so React's page activation and accessible label remain native.
 
-## Workspace files
+## Command Center assets
 
-The starting example is committed in the repository's `.devin/` directory:
+The definition and its content live in the repository's `assets/` directory:
 
-- `commandCenter.json` describes visible pages and provider mode.
-- `hello.html` replaces the Automations content in the example.
-- `notes.html` supplies an additional page.
-
-Configuration is opt-in and does not attach on extension startup. For a trusted workspace, run **Autonom Command Center: Attach**; its default file is `<workspace>/.devin/commandCenter.json`. The command takes an optional absolute config path. **Reload Configuration** re-reads and validates the full config and every page file before applying anything. Editing files has no visible effect until reload. The test window uses the already-logged-in Devin profile but stores none of this configuration under Desktop's application data directory.
+- `commandCenter.json` describes the visible pages and provider mode.
+- `pages/*.html` are the page documents; `events.html`, `policy.html`, `schedules.html`, and `settings.html` ship by default.
+- `icons/*.svg` are the Autonom line and fill marks, inlined into the runtime at build time.
 
 Example:
 
@@ -64,15 +68,13 @@ Example:
 {
     "enabled": true,
     "items": [
-        { "id": "automations", "label": "Jared", "tab": "hello" },
-        { "id": "security", "hidden": true },
-        { "id": "notes", "label": "Notes", "icon": "wiki", "tab": "notes" }
+        { "id": "schedules", "label": "Schedules", "icon": "automations", "tab": "schedules" },
+        { "id": "security", "hidden": true }
     ],
     "tabs": {
-        "hello": { "title": "Hello world", "file": "hello.html" },
-        "notes": { "title": "Notes", "file": "notes.html" }
+        "schedules": { "title": "Schedules", "file": "pages/schedules.html" }
     },
-    "activeTab": "hello"
+    "activeTab": "schedules"
 }
 ```
 
@@ -80,21 +82,54 @@ A native item is renamed by its exact manifest `id`; `{ "id": "security", "hidde
 
 Config rules:
 
-- A trusted workspace is required; there is no automatic attach or automatic creation of configuration files.
 - `enabled` must be boolean. `items` and `tabs` are capped at 100 entries each; IDs are capped at 64 ASCII characters.
 - Each page file is a regular no-follow file beneath the directory containing `commandCenter.json`, capped at 256 KiB. All page content combined is capped at 1 MiB. Titles are capped at 200 characters.
-- Invalid JSON, invalid schema, duplicate IDs, unknown tab references, symlinks, and path traversal reject the complete reload; the last valid native snapshot remains active.
-- Page contents are trusted workspace-authored HTML fragments; their renderer is nevertheless script-, form-, and network-disabled. Do not weaken the CSP or enable remote resources to make a page work.
+- Invalid JSON, invalid schema, duplicate IDs, unknown tab references, symlinks, and path traversal reject the complete load; the last valid native snapshot remains active.
+- Page contents are trusted repository-authored HTML. Full documents keep their own CSP and are allowed to run inline scripts so they can talk to the bridge; fragments are wrapped with `default-src 'none'` and no scripts. Do not enable remote resources.
 
-## Commands and workflow
+## Launcher bridge
 
-- **Attach**: validate and read the config, open the native all-sessions/Agent view only when needed, identify this extension activation's exact renderer, then apply the runtime overlay.
-- **Reload Configuration**: re-read the selected config and referenced HTML and update the existing native runtime without another debugger pause.
-- **Disable**: disconnect the adapter and restore native manifest/controller descriptors.
-- **Show Native Status**: report bounded IDs, labels, paths, active tab, provider, revision, and window ID.
-- **Open Tab**: open a configured custom surface through the native navigation command.
-- **Edit Configuration**: open the workspace JSON file.
+Pages talk to the daemon through a token-authenticated loopback HTTP endpoint that the launcher owns. The injected runtime receives the endpoint URL and a random token, and forwards each `acquireVsCodeApi()` message to it; the launcher holds the daemon client capability (`dataDir/client.token`) and performs every file write. Capabilities never reach a page, a webview, or a log.
 
-Package and verify from `extension/` with `npm run check`, `npm test`, `npm audit`, and `npm run package`. The output is `bin/autonom-command-center-0.5.2.vsix`; install/update with `devin-desktop --install-extension <path-to-vsix> --force`. The integration test uses a logged-in Desktop started with `devin-desktop --remote-debugging-port=9882 --disable-extension cet.autonom &`. Keep the old extension disabled; the separate `cet.autonom-command-center` ID avoids overwriting or activating it.
+Bridge actions: `getState` (daemon `/api/client/state` for the workspace), `getSettings`/`saveSettings` (launcher settings), `getDaemon`/`saveDaemon` (daemon YAML), `editConfig` (open the daemon configuration in Desktop), `editPolicy` (open the workspace policy), and `registerSession` (adopt a focused ACP session). Unknown actions fail with HTTP 400.
 
-A genuine live acceptance run must install the packaged VSIX, use the registered `autonomCenter.*` extension-host commands against the target identified by the activation UUID, take CDP screenshots, and verify both Autonom and Devin Cloud views. Do not count direct `AutonomNative.install()` injection alone as extension installation validation. Do not patch the integrity service, rewrite checksums, change app CSP, or use isolated/mutated profile data to obtain a green test.
+## Launcher settings
+
+`~/.config/autonom/launcher.yml` owns the launcher's own values:
+
+- `port`: daemon loopback port (default 8080).
+- `configFile`: daemon YAML path (default `~/.config/autonom/config.yml`).
+- `commandCenterConfig`: Command Center definition (default `assets/commandCenter.json`).
+
+`--port`, `--daemon-config`, `--config`, `--desktop`, `--socket`, `AUTONOM_PORT`, and `AUTONOM_CONFIG` override the file. The Settings page edits the port and the daemon parameters through the bridge.
+
+## Control socket
+
+The launcher serves `$XDG_RUNTIME_DIR/autonom/launcher.sock` with mode 0600. It is a private, same-user channel for inspection and never a network endpoint:
+
+```bash
+node source/launcher/cdp.mjs status
+node source/launcher/cdp.mjs targets
+node source/launcher/cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
+node source/launcher/cdp.mjs screenshot workbench /tmp/autonom.png
+node source/launcher/cdp.mjs hot
+node source/launcher/cdp.mjs detach
+```
+
+`hot` re-reads `commandCenter.json` and the rebuilt runtime bundle and re-attaches every window without restarting Desktop. `detach` disposes the runtime, restores native Devin, and stops managing until the launcher restarts.
+
+## Build and verification
+
+From `source/launcher/`:
+
+```bash
+npm ci
+npm run check   # tsc --noEmit
+npm test        # build + unit tests
+npm run build   # dist/launcher.js and dist/runtime.js
+node dist/launcher.js /path/to/workspace
+```
+
+Unit tests cover configuration validation and path confinement, overlay immutability and descriptor rollback, provider-mode restoration, pipe framing, CDP session scoping and capture, bridge authorization, launcher settings, and the control socket. They never close a live gate.
+
+A genuine live acceptance run quits Devin Desktop, starts the launcher, and observes through the control socket: `globalThis.__autonomCenter.status()` must report the configured mode, revision, active tab, and items; the Pages list must show the renamed rows and exclude hidden ones; the custom page webview must be present with the native content hidden; both providers must toggle on screen; and `hot` must pick up edited page content without a restart. Do not patch Desktop, weaken Electron flags, or use isolated/mutated profile data to obtain a green run. See `docs/COMMAND_CENTER_VALIDATION.md`.
