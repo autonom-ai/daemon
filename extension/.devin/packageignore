@@ -1,9 +1,0 @@
-source/**
-tests/**
-node_modules/**
-.devin/**
-dist/tests/**
-dist/preview.js
-dist/types/**
-package-lock.json
-tsconfig.json
