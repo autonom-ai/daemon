@@ -604,11 +604,12 @@ def worktree_create(arguments):
 
 def worktree_remove(arguments):
     caller(arguments)
-    body = {"force": bool(arguments.get("force"))}
+    force = "true" if arguments.get("force") else "false"
     return call(
         "DELETE",
         "/api/worktrees/" + urllib.parse.quote(required(arguments, "name")),
-        body,
+        None,
+        {"force": force},
     )
 
 

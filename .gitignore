@@ -12,3 +12,4 @@ extension/LICENSE.txt
 __pycache__
 .agents/
 .devin/
+.autonom-worktrees/

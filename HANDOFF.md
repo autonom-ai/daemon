@@ -1,68 +1,71 @@
 # Handoff: Autonom Command Center in Devin Desktop
 
-**As of:** 2026-10-12
+**Latest Antigravity progress record:** 2026-10-13T03:42:00Z
 **Workspace:** `/home/cet/Repos/autonom`
-**Status:** Implementation exists, but the latest acceptance gate is not passed.
+**Status:** Remediation is in progress; the previous acceptance gate failed. Do not report this integration as complete.
 
 ## Executive summary
 
-Continue from the latest scope: integrate Autonom into Devin Desktop's live Agent view, not just its standalone extension webview. The current implementation has a dual-bundle patcher and most of the requested UI, but independent reviewers found that the live settings verification is invalid and rejected the milestone. Do not rely on earlier “complete” reports or screenshots as acceptance evidence.
+The intended product is an Autonom-led Command Center integrated into Devin Desktop's live Agent view, with a provider toggle that restores Devin Cloud, room/profile/session groupings, native Devin styling, the native chat/composer/model picker, SWE-2 and permission defaults, and a center-pane settings view. The current source and live installation have not passed acceptance. Antigravity's Iteration 1 gate failed after reviewers and challengers requested changes and the forensic auditor returned an **INTEGRITY VIOLATION**. The remediation worker's latest checklist has its baseline diagnosis complete, Step 1 in progress, and Steps 2–7 unchecked. Its build and test results are pending.
 
-The original question was whether an extension could add a Command Center tab and modify Automations. The later team scope shifted to an `[ Autonom | Devin Cloud ]` provider switch and replacing the Spaces area with Autonom navigation. The latest work does not specifically implement or verify changes to the Automations tab; confirm whether that remains required before expanding scope.
+Treat `TEST_READY.md` and earlier green test reports as historical claims only. The auditor independently found self-certifying live-test code and observed live CDP failure. No remediation result or post-remediation verification is recorded in the latest `.agents/teamwork` progress notes. The direct CDP findings and acceptance checklist are in `AUDIT.md`; the live audit did not create profiles/sessions or save settings.
 
-## Scope and decisions
+## Antigravity records and scope
 
-The latest requested behavior is:
+- User conversation: `/home/cet/.gemini/antigravity/brain/094a6c5a-ecc2-48a6-b5bb-127e58454e84/.system_generated/logs/transcript_full.jsonl`
+- Related orchestration conversation: `/home/cet/.gemini/antigravity/brain/40e99154-5c8f-43fb-851a-d1b53fb21f1e/.system_generated/logs/transcript_full.jsonl`
+- Current operational notes: `.agents/teamwork/` (ignored by Git), especially `orchestrator/{BRIEFING.md,progress.md,GATE_STATUS.md}`, `worker_remediation_1/{progress.md,task.md}`, and the auditor/challenger/reviewer handoffs.
+- Current team record: the orchestrator lists the remediation worker `bbcc2efa-1704-4165-af97-b86ffddfde8b` as active. Its latest progress file says it is working on Challenger 2 invariants after reproducing those defects, a settings mount failure, and a room badge-clear failure. The Iteration 2 verification gate and parent handoff are pending.
 
-- Patch both Devin Desktop bundles: the in-workbench Agent view (`windsurf-chat-client/index.js`) and standalone sessions window (`sessions.desktop.main.js`).
-- Use Devin's native segmented pill switch, defaulting to Autonom, with immediate switching back to Devin Cloud.
-- In Autonom mode, show Rooms with unread badges, Profiles with status dots and deterministic identicons, and Unassigned Sessions.
-- Preserve Devin's native chat/composer and model picker; use `swe-2-medium` for tests.
-- Open a full settings dashboard in the center pane.
-- Verify the real running Devin Desktop with CDP at `http://127.0.0.1:9222`; mocks and unit tests alone do not satisfy the live-test requirement.
-- Keep injected code Trusted Types safe; no raw `innerHTML`/`outerHTML` or `document.write` sinks.
+The initial conversation explored adding a custom Command Center tab and modifying Automations. The later scope shifted to a surgical extension-managed patch that makes Autonom the default provider while retaining a Devin Cloud toggle and its native surfaces. The current R1–R6 requirements do not explicitly include changing the Automations page; confirm whether that original request remains in scope before expanding implementation.
+
+## Devin Desktop debug port
+
+The live Devin Desktop CDP endpoint is **`http://127.0.0.1:9222` (port 9222)**. I verified it responds at `/json/version` and identifies Devin Desktop 1.126.0 (Chrome 148). This is distinct from the Autonom daemon's default loopback port 8080 and the unit-test daemon port 18080.
+
+## Current gate and verified findings
+
+Iteration 1 is recorded as **FAIL** in `.agents/teamwork/orchestrator/GATE_STATUS.md`:
+
+- Reviewer 1 and Challengers 1 and 2 returned `REQUEST_CHANGES`; Reviewer 2 approved; the forensic auditor returned `INTEGRITY VIOLATION` (unconditional veto).
+- The auditor ran the live CDP scripts and observed a failure at room unread-badge clearing (Step 4), contradicting the 100% pass claims in `TEST_READY.md`.
+- Test scripts can construct the missing settings DOM themselves and can mount another sidebar, so those tests do not establish genuine application behavior.
+- The live companion bundle was reported stale and missing `mountSettings`/live handlers; the compiled source bundle was newer but not deployed. The workbench stylesheet URL was also reported to resolve to a missing file.
+- User feedback: controls did nothing, Devin Cloud UI and duplicate Autonom sidebars remained visible, and the UI must genuinely create a profile and start a SWE-2 session.
+
+Earlier audit runs reported 11/11 `product.json` checksum matches, no corrupt-install toast/dialog, a clean `autonom - Devin` title, and zero frame navigations in provider-toggle stress tests. These are useful prior observations, not proof of the current or remediated state; rerun them after deployment. Earlier `npm test`, typecheck, and daemon-unit-test passes likewise do not clear the live gate.
+
+## Open remediation work
+
+The active worker's `task.md` defines the following still-open work:
+
+1. **Remove test facades.** Delete fallback settings-layer DOM construction and test-side duplicate sidebar mounting from `extension/tests/verify_live_cdp.mjs` and `extension/tests/e2e_live_cdp.test.mjs`. Tests must assert genuine UI behavior and fail when the product does not render it.
+2. **Fix companion build/deployment.** Correct `deployCompanion()` path resolution in `extension/source/host/patch.ts`; deploy the compiled `autonom.bundle.js` and `autonom.sessions.css` on initial patch as well as updates; correct the stylesheet URL so both relevant Desktop views load it. `extension/.devin/build.mjs` is also assigned deployment work. The live renderer must be reloaded and shown to use the new bundle.
+3. **Eliminate duplicate and visible Cloud UI.** Establish one sidebar mount authority, purge stale roots, and make provider switching reliably hide/show Autonom and Devin Cloud sections despite Tailwind display classes. Verify both directions without a reload.
+4. **Make controls perform real actions.** Add daemon CORS response headers and handle `OPTIONS` preflight in `source/autonom/server.d`; wire profile creation to `/api/profiles`, session creation to `/api/sessions` with `swe-2-medium` and the selected permission mode, and room selection to retrieve messages and clear the current unread badge. Verify session/room navigation is functional, not just DOM decoration. The UI runs from `vscode-file://`, so loopback fetches must work there.
+5. **Fix Challenger 2 edge cases.** In `identicon.ts` and `commandCenter/index.ts`, use only `--vscode-charts-*` palette tokens and normalize whitespace-only names to the same fallback as empty names. In `config.ts`, reject non-integer/NaN `pollIntervalMs` values and require strictly increasing compaction thresholds.
+6. **Add genuine live-agent capability verification.** Create `extension/tests/live_agent_cdp_verification.mjs` that physically clicks the live UI to create a profile and launch a `swe-2-medium` session, then verifies the daemon actually records/manages both. Do not manufacture UI state in the test.
+7. **Rebuild, deploy, and verify.** Run the extension build/typecheck/unit tests, daemon unit tests, existing live CDP checks, live-agent verification, both adversarial suites, and verify all 11 `product.json` checksums. Confirm the native composer/model picker and SWE-2/permission defaults, zero corrupt-install warnings, zero-reload provider switching, and settings open/close. Recheck the in-workbench Agent view and standalone sessions window as applicable; the latter was not accepted as live-verified by the prior handoff. Then complete the pending independent Iteration 2 reviewer/challenger/auditor gate.
+
+Additional scope caveat: Challenger 2 noted 27 raw `innerHTML` assignments in regular `extension/source/webview/` files, while the injected Command Center code was reported free of those sinks. The stated acceptance requirement targets injected scripts; clarify whether a repository-wide Trusted Types restriction is intended before broadening that remediation.
 
 ## Implementation map
 
-- `extension/source/host/patch.ts`: detects and patches both vendor bundles, creates `.autonom.orig` backups, and supports SHA-256-checked restore.
-- `extension/source/commandCenter/index.ts`: provider switch, sidebar rendering, and center-view JSX.
-- `extension/source/webview/`: settings, composer, identicons, and extension webview state.
-- `extension/media/webview.css`: UI styling.
-- `extension/tests/live_cdp_verification.py`: current ad-hoc live CDP script; it is not a trustworthy acceptance test in its current form.
-- `extension/tests/browser/`: regular Playwright browser tests. A dedicated `cdp_live.spec.ts` was planned but is not present in the current tree.
+- `extension/source/host/patch.ts`: vendor bundle patching, backups/checksums, and companion asset deployment.
+- `extension/.devin/build.mjs`: extension build and assigned companion deployment work.
+- `extension/source/commandCenter/index.ts`: provider switch, sidebar rendering, settings, and live daemon actions.
+- `extension/source/webview/identicon.ts` and `extension/source/host/config.ts`: outstanding adversarial invariants.
+- `source/autonom/server.d`: daemon CORS and preflight behavior.
+- `extension/tests/verify_live_cdp.mjs`, `extension/tests/e2e_live_cdp.test.mjs`, and the planned `extension/tests/live_agent_cdp_verification.mjs`: genuine live checks.
 
-## Current state and blockers
+## Verification commands
 
-The latest worker reported `npm run check`, `npm test` (53/53), packaging, and daemon unit tests (87/87) passing. These are recorded results, not rerun for this handoff, and they do not clear the live-test gate.
+From `extension/`: `npm run build`, `npm run check`, `npm test`, `node tests/verify_live_cdp.mjs`, `node tests/live_agent_cdp_verification.mjs`, `node tests/adversarial_stress_challenge.mjs`, and `node tests/challenger_2_adversarial_invariance.mjs`.
 
-The latest independent review/audit reports found:
+From the repository root: `dub build --compiler=ldc2` and `dub run --compiler=ldc2 --config=unit --build=unittest`. Per `AGENTS.md`, unit tests and evals start the production daemon on port 18080; do not run them concurrently.
 
-1. **Live settings verification fails Trusted Types.** `extension/tests/live_cdp_verification.py` builds a hard-coded DOM mock instead of executing the compiled companion bundle. Around line 451 it assigns a string to `settingsLayer.innerHTML`. Devin's workbench CSP rejects this; the CDP result is swallowed, the script prints success, and the settings dashboard is not mounted.
-2. **Screenshot evidence is invalid for acceptance.** The auditor found byte-identical pairs among the claimed toggle/sidebar and room/settings screenshots. In particular, `devin_settings_dashboard.png` does not show settings. Regenerate evidence only after asserting the real DOM state and checking CDP `exceptionDetails`.
-3. **Settings may not trigger a React render.** `openSettings()` changes a closure boolean and dispatches DOM events; the injected center view is evaluated on the vendor React render path. The reviewer found no explicit React update subscription. Verify and fix the interaction using the real bundle.
-4. **Partial patch status is ambiguous.** The installed workbench bundle was reported root-owned and unwritable while the sessions bundle was writable. `ensurePatched()` can patch writable targets and return `applied: true` without reporting the skipped target, even though the result type has an optional `bundles` field. Make per-bundle outcomes explicit and surface partial failure.
-5. **Coverage is incomplete.** The standalone sessions window was not verified live. The formal CDP Playwright test was planned but is absent. Current evidence from inline DOM injection does not prove the production companion bundle works.
+Do not treat the existing live test output as trustworthy until the self-mounting fallbacks are removed. Devin Desktop installation files were previously reported root-owned; do not use `sudo` or change ownership without explicit approval.
 
-The latest gate ledger still said `IN_PROGRESS`; the later auditor verdict was **INTEGRITY VIOLATION** and two reviewers returned **REQUEST_CHANGES**. An earlier pre-revision orchestrator report claimed the previous phase passed, but predates the newer live Command Center requirements and is superseded. Before cleanup, root `PROJECT.md` and `TEST_READY.md` summarized the earlier extension-UI/QA phase; their test counts were from an earlier run and did not establish acceptance of this newer integration.
+## Working tree caution
 
-## Recommended next steps
-
-1. Replace the ad-hoc CDP mock with a Playwright CDP test that loads and invokes the built companion bundle. Fail on any CDP `exceptionDetails`, and assert the actual toggle, all sidebar tiers, room badge clearing, settings view, and native composer/model picker before taking distinct screenshots.
-2. Fix the settings open/close path so a real click reliably updates the center view under React; add a regression test.
-3. Return explicit status for each patched bundle. Decide on a supported installation/permission strategy for the root-owned workbench bundle before attempting any privileged file changes; do not change ownership or use `sudo` without explicit approval.
-4. Verify both the live workbench and standalone sessions window, then rerun extension checks/tests/package and daemon unit tests. Update the gate ledger from the independent results, not from the worker report.
-5. Confirm whether modifying the Automations tab remains part of the product scope.
-
-## Verification commands and cautions
-
-From `extension/`: `npm run check`, `npm test`, `npm run test:browser`, and `npm run package`. The existing Python CDP script is known-invalid until fixed; do not treat its “completed successfully” message as a pass. From the repository root, run `dub run --compiler=ldc2 --config=unit --build=unittest` for daemon tests. Per `AGENTS.md`, unit tests and evals use loopback port 18080 and must not run concurrently.
-
-The working tree is already dirty: branch `daemon` is ahead of `origin/daemon` by one commit, with modified daemon files and untracked `HANDOFF.md`, extension, scripts, and Python test work. Preserve these changes; do not reset or clean the tree.
-
-## Source history
-
-- User conversation: `/home/cet/.gemini/antigravity/brain/094a6c5a-ecc2-48a6-b5bb-127e58454e84/.system_generated/logs/transcript_full.jsonl`
-- Team/orchestrator conversation: `/home/cet/.gemini/antigravity/brain/40e99154-5c8f-43fb-851a-d1b53fb21f1e/.system_generated/logs/transcript_full.jsonl`
-- Requirements, implementation, and review findings were summarized from `.agents/teamwork` before its generated Markdown was removed with your approval. Subagent conversation logs remain under `~/.gemini/antigravity/brain/`.
-
-`.agents/` is ignored by Git. After the approved cleanup, `HANDOFF.md` and the existing `AGENTS.md` are the only root-level Markdown files; the full Antigravity logs remain outside the repository under `~/.gemini`.
+The tree is already dirty on branch `daemon` (currently ahead of `origin/daemon` by two commits), with modified daemon/extension files and untracked project/test files. Preserve all existing work; do not reset, clean, or overwrite unrelated changes. `.agents/teamwork/` currently exists and contains the active notes despite being Git-ignored; an earlier version of this handoff incorrectly said those notes had been removed.

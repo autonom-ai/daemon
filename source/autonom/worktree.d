@@ -13,26 +13,26 @@ import serverino;
 import core.sync.mutex;
 import core.thread : Thread;
 import core.time : Duration, minutes, msecs, seconds;
-import std.algorithm : map, sort;
-import std.array : array, join;
+import std.algorithm : sort;
+import std.array : join;
 import std.ascii : isAlphaNum;
 import std.conv : to;
 import std.datetime : Clock, UTC;
 import std.file;
 import std.json : JSONType, JSONValue, parseJSON;
-import std.path : buildNormalizedPath, buildPath;
+import std.path : buildPath;
 import std.process : Pid, spawnProcess, tryWait, wait;
 import std.process : ProcessConfig = Config;
 import std.stdio : File;
-import std.string : lineSplitter, strip, startsWith;
+import std.string : lineSplitter, strip;
 import std.typecons : Nullable;
+
 private:
 
 enum REGISTRY_FILE = "worktrees.json";
 enum MERGES_FILE = "merges.json";
 enum WORKTREES_DIR = ".autonom-worktrees";
 enum BRANCH_PREFIX = "autonom/";
-enum MAX_WORKTREES = 64;
 enum GIT_TIMEOUT = 2.minutes;
 enum MAX_OUTPUT = 1024 * 1024;
 
@@ -46,12 +46,22 @@ string git(string[] arguments, string directory)
         errors.close();
     }
 
+    string[string] environment = childEnvironment();
+    if (!("GIT_AUTHOR_NAME" in environment))
+        environment["GIT_AUTHOR_NAME"] = "Autonom";
+    if (!("GIT_AUTHOR_EMAIL" in environment))
+        environment["GIT_AUTHOR_EMAIL"] = "autonom@localhost";
+    if (!("GIT_COMMITTER_NAME" in environment))
+        environment["GIT_COMMITTER_NAME"] = "Autonom";
+    if (!("GIT_COMMITTER_EMAIL" in environment))
+        environment["GIT_COMMITTER_EMAIL"] = "autonom@localhost";
+
     Pid process = spawnProcess(
         ["git"]~arguments,
         File("/dev/null", "r"),
         output,
         errors,
-        childEnvironment(),
+        environment,
         ProcessConfig.retainStdout | ProcessConfig.retainStderr,
         directory
     );
@@ -79,17 +89,13 @@ string git(string[] arguments, string directory)
     output.rewind();
     errors.rewind();
     string text = cast(string)output.byChunk(4096).join;
-    if (text.length > MAX_OUTPUT)
+    string detail = strip(cast(string)errors.byChunk(4096).join);
+    if (text.length > MAX_OUTPUT || detail.length > MAX_OUTPUT)
         throw new Exception("git output is too large");
 
     if (result.status != 0)
-    {
-        string detail = strip(cast(string)errors.byChunk(4096).join);
-        if (!detail.length)
-            detail = strip(cast(string)output.byChunk(4096).join);
-
-        throw new BackendException(detail.length ? detail : "git failed (exit "~result.status.to!string~")");
-    }
+        throw new BackendException(detail.length ? detail : text.length ? strip(text) :
+            "git failed (exit "~result.status.to!string~")");
 
     return text;
 }
@@ -350,16 +356,30 @@ private:
     {
         string path = buildPath(repository, ".gitignore");
         string content = exists(path) ? readText(path, 1024 * 1024) : "";
+        bool present;
         foreach (line; content.lineSplitter)
         {
             if (line.strip == WORKTREES_DIR~"/" || line.strip == WORKTREES_DIR)
-                return;
+                present = true;
         }
 
+        if (present)
+            return;
+
+        bool committed = clean(repository);
         if (content.length && content[$ - 1] != '\n')
             content ~= "\n";
 
         write(path, content~WORKTREES_DIR~"/\n");
+        if (committed)
+        {
+            git(["add", ".gitignore"], repository);
+            try
+                git(["commit", "-m", "Ignore Autonom worktrees", "--no-verify", "--no-gpg-sign"], repository);
+            catch (BackendException)
+            {
+            }
+        }
     }
 
     Room conflictRoom(Merge merge, Profile[] members, Profile human)
@@ -428,9 +448,6 @@ public:
             loadMerges();
         }
     }
-
-    string base()
-        => repository;
 
     Worktree[] list()
     {
@@ -504,12 +521,12 @@ public:
             if (source.length)
                 arguments ~= source;
 
+            ignoreWorktrees();
             try
                 git(arguments, repository);
             catch (BackendException error)
                 throw new InvalidInputException(error.msg);
 
-            ignoreWorktrees();
             Worktree ret = Worktree.create(name, path, branch);
             worktrees[name] = ret;
             saveWorktrees();
@@ -591,8 +608,13 @@ public:
             string[] files = unmerged(targetEntry.path);
             if (!files.length)
             {
-                git(["merge", "--abort"], targetEntry.path);
-                throw new ConflictException("Merge failed without conflicts: "~summary);
+                git(["commit", "--no-edit", "--no-verify", "--no-gpg-sign"], targetEntry.path);
+                JSONValue ret = emptyObject();
+                ret["status"] = JSONValue("merged");
+                ret["target"] = JSONValue(target);
+                ret["source"] = JSONValue(source);
+                ret["summary"] = summary.length ? JSONValue(summary) : JSONValue(null);
+                return ret;
             }
 
             Profile human = profileStore.get(HUMAN_NAME);
@@ -746,17 +768,11 @@ void worktree(Request request, Output output)
         return;
     }
 
-    JSONValue data = readBody(request);
-    bool force;
-    if ("force" in data.object)
-    {
-        if (data["force"].type != JSONType.true_ && data["force"].type != JSONType.false_)
-            throw new InvalidInputException("force must be true or false");
+    string force = request.get.read("force");
+    if (force.length && force != "true" && force != "false")
+        throw new InvalidInputException("force must be true or false");
 
-        force = data["force"].boolean;
-    }
-
-    respond(output, worktreeManager.remove(name, force));
+    respond(output, worktreeManager.remove(name, force == "true"));
 }
 
 @endpoint @route!(matchesPath!"/api/worktrees/<name>/merge")

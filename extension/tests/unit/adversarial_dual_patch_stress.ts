@@ -1,8 +1,9 @@
 import {
     BOOTSTRAP_HEADER,
+    computeProductChecksum,
     computeSha256,
     PatchManager,
-    MARKER_V1,
+    MARKER_V4,
     MARKER_P1,
     MARKER_P2,
     MARKER_P3,
@@ -19,18 +20,20 @@ function createRealisticWorkbenchBundle(): string {
     const part1 = `"use strict";(self.webpackChunk=self.webpackChunk||[]).push([[123],{456:(e,t,n)=>{var tX=n(789);var rNj=n(101);var rNG=n(102);var rNR=n(103);var rDI=n(104);var eU={current:null};var tg="spaces-sidebar-anchor";var iqs=n(105);var ewt=n(106);`;
     const hook1 = `function renderNewSessionBtn(isActive){return (0,tX.jsx)(rNj,{children:(0,tX.jsxs)(rNG,{ariaLabel:"New session",isActive:isActive,variant:"nav",elem:null}))};`;
     const hook2 = `function renderSpacesRail(){return {children:[tg,(0,tX.jsx)(rNR,{children:(0,tX.jsx)(rDI,{ref:eU,className:"static z-auto bg-transparent",label:"Spaces",children:"Spaces"})})]};};`;
+    const hook2Tail = `var wbTail = 'td(null)}})]})})})},iql="session-repo-filter"';`;
     const hook3 = `function renderViewport(){return {children:[(0,tX.jsx)(iqs,{}),(0,tX.jsx)(ewt,{})]};};`;
     const part2 = `e.exports={renderNewSessionBtn,renderSpacesRail,renderViewport};}}]);`;
-    return part1 + hook1 + hook2 + hook3 + part2;
+    return part1 + hook1 + hook2 + hook2Tail + hook3 + part2;
 }
 
 function createRealisticSessionsBundle(): string {
     const part1 = `"use strict";define(["require","exports"],function(e,t){var _=e("jsxRuntime");var nft=e("slot1");var ift=e("btn1");var eft=e("slot2");var YY1=e("btn2");var Tm={current:null};var jY="spaces-anchor";var vsu=e("comp1");var WTr=e("comp2");`;
     const hook1 = `function renderNewSessionBtn(a){return (0,_.jsx)(nft,{children:(0,_.jsxs)(ift,{ariaLabel:"New session",isActive:a,variant:"nav",elem:null}))};`;
     const hook2 = `function renderSpacesRail(){return {children:[jY,(0,_.jsx)(eft,{children:(0,_.jsx)(YY1,{ref:Tm,className:"static z-auto bg-transparent",label:"Spaces",children:"Spaces"})})]};};`;
+    const hook2Tail = `var sessTail = 'Sv(null)}})]})})})},bsu="session-repo-filter"';`;
     const hook3 = `function renderViewport(){return {children:[(0,_.jsx)(vsu,{}),(0,_.jsx)(WTr,{})]};};`;
     const part2 = `return {renderNewSessionBtn,renderSpacesRail,renderViewport};});`;
-    return part1 + hook1 + hook2 + hook3 + part2;
+    return part1 + hook1 + hook2 + hook2Tail + hook3 + part2;
 }
 
 function createRealisticSessionsHtml(): string {
@@ -133,14 +136,14 @@ test("ADVERSARIAL STRESS 1: Execute 50 consecutive patch and rollback cycles on 
             // Verify both bundle files now contain their respective surgical hooks
             const patchedWb = await readFile(env.wbBundlePath, "utf8");
             assert.ok(patchedWb.includes("wrapNewSession?.(tX)"), `Cycle ${cycle}: Workbench missing JSX injection`);
-            assert.ok(patchedWb.includes(MARKER_V1), `Cycle ${cycle}: Workbench missing MARKER_V1`);
+            assert.ok(patchedWb.includes(MARKER_V4), `Cycle ${cycle}: Workbench missing MARKER_V1`);
             assert.ok(patchedWb.includes(MARKER_P1), `Cycle ${cycle}: Workbench missing MARKER_P1`);
             assert.ok(patchedWb.includes(MARKER_P2), `Cycle ${cycle}: Workbench missing MARKER_P2`);
             assert.ok(patchedWb.includes(MARKER_P3), `Cycle ${cycle}: Workbench missing MARKER_P3`);
 
             const patchedSess = await readFile(env.sessBundlePath, "utf8");
             assert.ok(patchedSess.includes("wrapNewSession?.(_)"), `Cycle ${cycle}: Sessions missing JSX injection`);
-            assert.ok(patchedSess.includes(MARKER_V1), `Cycle ${cycle}: Sessions missing MARKER_V1`);
+            assert.ok(patchedSess.includes(MARKER_V4), `Cycle ${cycle}: Sessions missing MARKER_V1`);
             assert.ok(patchedSess.includes(MARKER_P1), `Cycle ${cycle}: Sessions missing MARKER_P1`);
             assert.ok(patchedSess.includes(MARKER_P2), `Cycle ${cycle}: Sessions missing MARKER_P2`);
             assert.ok(patchedSess.includes(MARKER_P3), `Cycle ${cycle}: Sessions missing MARKER_P3`);
@@ -220,8 +223,8 @@ test("ADVERSARIAL STRESS 2: Read-only permissions (0444) on both bundles: checkS
             `Expected 'Write permission denied' in: ${status.error}`
         );
         assert.ok(
-            status.error.includes("sudo chown -R $USER"),
-            `Expected remediation command 'sudo chown -R $USER' in: ${status.error}`
+            status.error.includes("supported Devin Desktop installation permission mechanism"),
+            `Expected remediation command 'supported installation permissions' in: ${status.error}`
         );
 
         // Verify bundle-level detail
@@ -242,8 +245,8 @@ test("ADVERSARIAL STRESS 2: Read-only permissions (0444) on both bundles: checkS
             `Expected 'Write permission denied' in: ${patchResult.error}`
         );
         assert.ok(
-            patchResult.error.includes("sudo chown -R $USER"),
-            `Expected remediation command 'sudo chown -R $USER' in: ${patchResult.error}`
+            patchResult.error.includes("supported Devin Desktop installation permission mechanism"),
+            `Expected remediation command 'supported installation permissions' in: ${patchResult.error}`
         );
 
         // Verify files remain untouched and no unverified backups were created
@@ -276,17 +279,20 @@ test("ADVERSARIAL STRESS 3: Asymmetric read-only permissions (Workbench 0444, Se
         assert.equal(wbStatus?.writable, false);
         assert.equal(sessStatus?.writable, true);
 
-        // ensurePatched() should patch the writable sessions bundle while leaving unwritable workbench safe
+        // ensurePatched() patches the writable sessions bundle but reports the partial workbench failure
         const patchResult = await manager.ensurePatched();
-        assert.equal(patchResult.applied, true);
+        assert.equal(patchResult.applied, false);
+        assert.ok(patchResult.error?.includes("windsurf-chat-client"));
+        const workbenchResult = patchResult.bundles?.find((bundle) => bundle.id === "workbench");
+        const sessionsResult = patchResult.bundles?.find((bundle) => bundle.id === "sessions");
+        assert.equal(workbenchResult?.applied, false);
+        assert.equal(sessionsResult?.applied, true);
 
-        // Verify sessions was patched
         const patchedSess = await readFile(env.sessBundlePath, "utf8");
         assert.ok(patchedSess.includes("wrapNewSession?.(_)"));
 
-        // Verify workbench was NOT modified and remains pristine
         const wbContent = await readFile(env.wbBundlePath, "utf8");
-        assert.equal(wbContent.includes(MARKER_V1), false, "Unwritable workbench must NOT be modified");
+        assert.equal(wbContent.includes(MARKER_V4), false, "Unwritable workbench must NOT be modified");
 
         await chmod(env.wbBundlePath, 0o644);
     } finally {
@@ -409,6 +415,141 @@ test("ADVERSARIAL STRESS 5: Idempotence stress: 20 rapid redundant ensurePatched
             assert.equal(await manager.isPatched(), false);
         }
     } finally {
+        await env.close();
+    }
+});
+
+test("ADVERSARIAL STRESS 6: Product.json checksum synchronization across 50 consecutive patch and restore cycles with bit-for-bit checksum assertion", async () => {
+    const env = await createDualFixture();
+    try {
+        const manager = new PatchManager(env.directory);
+        const productJsonPath = join(env.directory, "product.json");
+
+        const pristineWbBuffer = await readFile(env.wbBundlePath);
+        const pristineSessBuffer = await readFile(env.sessBundlePath);
+        const pristineHtmlBuffer = await readFile(env.htmlPath);
+
+        const pristineWbChecksum = computeProductChecksum(pristineWbBuffer);
+        const pristineSessChecksum = computeProductChecksum(pristineSessBuffer);
+        const pristineHtmlChecksum = computeProductChecksum(pristineHtmlBuffer);
+
+        // Seed initial product.json
+        const initialProduct = {
+            nameShort: "Devin",
+            nameLong: "Devin",
+            checksums: {
+                "vs/workbench/windsurf-chat-client/index.js": pristineWbChecksum,
+                "vs/sessions/sessions.desktop.main.js": pristineSessChecksum,
+                "vs/sessions/electron-browser/sessions.html": pristineHtmlChecksum,
+                "vs/base/parts/sandbox/electron-browser/preload.js": "invariantPreloadChecksum1234567890123456789",
+            },
+        };
+        await writePrivateFile(productJsonPath, JSON.stringify(initialProduct, null, "\t") + "\n");
+
+        for (let cycle = 1; cycle <= 50; cycle++) {
+            // Apply patch
+            const patchRes = await manager.ensurePatched();
+            assert.equal(patchRes.applied, true, `Cycle ${cycle}: ensurePatched failed`);
+
+            // Verify checksums in product.json match live patched buffer digests
+            const currentWbBuf = await readFile(env.wbBundlePath);
+            const currentSessBuf = await readFile(env.sessBundlePath);
+            const currentHtmlBuf = await readFile(env.htmlPath);
+
+            const expectedWbChecksum = computeProductChecksum(currentWbBuf);
+            const expectedSessChecksum = computeProductChecksum(currentSessBuf);
+            const expectedHtmlChecksum = computeProductChecksum(currentHtmlBuf);
+
+            const productPatched = JSON.parse(await readFile(productJsonPath, "utf8"));
+            assert.equal(
+                productPatched.checksums["vs/workbench/windsurf-chat-client/index.js"],
+                expectedWbChecksum,
+                `Cycle ${cycle}: Workbench checksum mismatch in product.json`
+            );
+            assert.equal(
+                productPatched.checksums["vs/sessions/sessions.desktop.main.js"],
+                expectedSessChecksum,
+                `Cycle ${cycle}: Sessions checksum mismatch in product.json`
+            );
+            assert.equal(
+                productPatched.checksums["vs/sessions/electron-browser/sessions.html"],
+                expectedHtmlChecksum,
+                `Cycle ${cycle}: HTML checksum mismatch in product.json`
+            );
+            assert.equal(
+                productPatched.checksums["vs/base/parts/sandbox/electron-browser/preload.js"],
+                "invariantPreloadChecksum1234567890123456789",
+                `Cycle ${cycle}: Invariant checksum corrupted in product.json`
+            );
+
+            // Restore
+            const restoreRes = await manager.restoreOriginal();
+            assert.equal(restoreRes.restored, true, `Cycle ${cycle}: restoreOriginal failed`);
+
+            // Verify checksums in product.json restored to pristine
+            const productRestored = JSON.parse(await readFile(productJsonPath, "utf8"));
+            assert.equal(
+                productRestored.checksums["vs/workbench/windsurf-chat-client/index.js"],
+                pristineWbChecksum,
+                `Cycle ${cycle}: Restored workbench checksum mismatch`
+            );
+            assert.equal(
+                productRestored.checksums["vs/sessions/sessions.desktop.main.js"],
+                pristineSessChecksum,
+                `Cycle ${cycle}: Restored sessions checksum mismatch`
+            );
+            assert.equal(
+                productRestored.checksums["vs/sessions/electron-browser/sessions.html"],
+                pristineHtmlChecksum,
+                `Cycle ${cycle}: Restored HTML checksum mismatch`
+            );
+            assert.equal(
+                productRestored.checksums["vs/base/parts/sandbox/electron-browser/preload.js"],
+                "invariantPreloadChecksum1234567890123456789",
+                `Cycle ${cycle}: Invariant checksum corrupted after restore`
+            );
+        }
+    } finally {
+        await env.close();
+    }
+});
+
+test("ADVERSARIAL STRESS 7: Asymmetric directory permissions (root-owned 0555 workbench directory with user-owned 0644 file): backup cleanly falls back to sessionsDir and full rollback succeeds", async () => {
+    const env = await createDualFixture();
+    const wbDir = join(env.directory, "out", "vs", "workbench", "windsurf-chat-client");
+    try {
+        const manager = new PatchManager(env.directory);
+        const pristineWb = await readFile(env.wbBundlePath);
+        const pristineWbSha = computeSha256(pristineWb);
+
+        // Make workbench directory unwritable (0555), mimicking root ownership
+        await chmod(wbDir, 0o555);
+
+        // Primary backup path in wbDir is unwritable; fallback must point to sessionsDir
+        const fallbackBackup = join(manager.getSessionsDir(), "windsurf-chat-client.index.js.autonom.orig");
+        assert.equal(
+            manager.resolveBackupPath({ id: "workbench", displayName: "Workbench", bundleRelPath: "out/vs/workbench/windsurf-chat-client/index.js", jsxVar: "tX", hook1Slot: "" }, env.wbBundlePath),
+            fallbackBackup
+        );
+
+        // Apply patch
+        const patchRes = await manager.ensurePatched();
+        assert.equal(patchRes.applied, true);
+
+        // Pristine backup must exist in sessionsDir and match byte-for-byte
+        assert.equal(await readFile(fallbackBackup, "utf8"), pristineWb.toString("utf8"));
+        assert.equal(computeSha256(await readFile(fallbackBackup)), pristineWbSha);
+
+        // Rollback
+        const restoreRes = await manager.restoreOriginal();
+        assert.equal(restoreRes.restored, true);
+
+        // Restored file matches pristine SHA-256
+        const restoredWb = await readFile(env.wbBundlePath);
+        assert.equal(computeSha256(restoredWb), pristineWbSha);
+        assert.equal(Buffer.compare(pristineWb, restoredWb), 0);
+    } finally {
+        await chmod(wbDir, 0o755);
         await env.close();
     }
 });
