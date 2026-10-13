@@ -1,8 +1,8 @@
 {
-  "name": "autonom",
+  "name": "autonom-command-center",
   "displayName": "Autonom Command Center",
-  "description": "Autonom provider switch for the Devin Desktop Agent Command Center (proof of concept).",
-  "version": "0.4.0",
+  "description": "Runtime-only native Command Center configuration for Devin Desktop.",
+  "version": "0.5.2",
   "publisher": "cet",
   "repository": {
     "type": "git",
@@ -10,7 +10,6 @@
   },
   "license": "AGPL-3.0-only",
   "private": true,
-  "icon": "media/autonom.svg",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -19,33 +18,51 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:autonom.applyPatch",
-    "onCommand:autonom.restore",
-    "onCommand:autonom.status",
-    "onCommand:autonom.hotReload"
+    "onCommand:autonomCenter.attach",
+    "onCommand:autonomCenter.reload",
+    "onCommand:autonomCenter.hotReload",
+    "onCommand:autonomCenter.disable",
+    "onCommand:autonomCenter.status",
+    "onCommand:autonomCenter.openTab",
+    "onCommand:autonomCenter.editConfig",
+    "onCommand:autonomCenter.bridgeIdentity"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "autonom.applyPatch",
-        "title": "Apply Command Center Patch",
-        "category": "Autonom"
+        "command": "autonomCenter.attach",
+        "title": "Attach",
+        "category": "Autonom Command Center"
       },
       {
-        "command": "autonom.restore",
-        "title": "Restore Original Bundles",
-        "category": "Autonom"
+        "command": "autonomCenter.reload",
+        "title": "Reload Configuration",
+        "category": "Autonom Command Center"
       },
       {
-        "command": "autonom.status",
-        "title": "Show Patch Status",
-        "category": "Autonom"
+        "command": "autonomCenter.hotReload",
+        "title": "Hot Reload Native Runtime",
+        "category": "Autonom Command Center"
       },
       {
-        "command": "autonom.hotReload",
-        "title": "Hot-Reload Companion UI",
-        "category": "Autonom"
+        "command": "autonomCenter.disable",
+        "title": "Disable",
+        "category": "Autonom Command Center"
+      },
+      {
+        "command": "autonomCenter.status",
+        "title": "Show Native Status",
+        "category": "Autonom Command Center"
+      },
+      {
+        "command": "autonomCenter.openTab",
+        "title": "Open Tab",
+        "category": "Autonom Command Center"
+      },
+      {
+        "command": "autonomCenter.editConfig",
+        "title": "Edit Configuration",
+        "category": "Autonom Command Center"
       }
     ]
   },
@@ -54,7 +71,7 @@
     "build": "node .devin/build.mjs",
     "test": "npm run build && node --test dist/tests/*.js",
     "package:files": "vsce ls --no-dependencies --ignoreFile .devin/packageignore",
-    "package": "npm run build && vsce package --no-dependencies --ignoreFile .devin/packageignore --out ../bin/autonom-0.4.0.vsix"
+    "package": "npm run build && vsce package --no-dependencies --ignoreFile .devin/packageignore --out ../bin/autonom-command-center-0.5.2.vsix"
   },
   "devDependencies": {
     "@types/node": "22.18.8",

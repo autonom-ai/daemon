@@ -1,0 +1,27 @@
+{
+    "enabled": true,
+    "items": [
+        {
+            "id": "automations",
+            "label": "Jared",
+            "tab": "hello"
+        },
+        {
+            "id": "notes",
+            "label": "Custom notes",
+            "icon": "wiki",
+            "tab": "notes"
+        }
+    ],
+    "tabs": {
+        "hello": {
+            "title": "Hello world",
+            "file": "hello.html"
+        },
+        "notes": {
+            "title": "Custom notes",
+            "file": "notes.html"
+        }
+    },
+    "activeTab": "hello"
+}
