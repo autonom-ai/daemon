@@ -18,6 +18,7 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:autonomCenter.attach",
     "onCommand:autonomCenter.reload",
     "onCommand:autonomCenter.hotReload",

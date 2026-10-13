@@ -333,13 +333,15 @@ export function install(
      * and the row is removed entirely when the overlay is disabled.
      */
     /**
-     * Autonom logo icon.
+     * Autonom logo fill and line icons.
      * Source: Streamline (https://www.streamlinehq.com)
      * License: Creative Commons Attribution 4.0 International (CC BY 4.0)
      */
-    const AUTONOM_ICON_PATH = "M15.319 14.318c-1.397-.295-1.905-1.712-1.22-2.965c2.923-5.349 6.424-8.2 8.382-9.484a2.74 2.74 0 0 1 3.038 0c1.958 1.285 5.459 4.135 8.382 9.484c.685 1.253.177 2.67-1.22 2.965c-1.647.347-4.355.682-8.681.682s-7.034-.335-8.681-.682m23.784 13.3c.91-1.003 2.266-.728 3.017.413c3.453 5.246 4.525 9.676 4.852 12.151c.176 1.328-.492 2.552-1.667 3.055c-2.19.938-6.355 2.17-12.376 1.631c-1.31-.117-2.213-1.221-1.847-2.556c.43-1.57 1.366-4.046 3.38-7.733c2.012-3.687 3.572-5.782 4.641-6.961M5.88 28.03c.75-1.14 2.107-1.416 3.017-.413c1.07 1.179 2.63 3.274 4.642 6.961s2.948 6.164 3.379 7.733c.366 1.335-.537 2.439-1.847 2.556c-6.021.54-10.186-.693-12.376-1.631c-1.175-.503-1.843-1.727-1.667-3.055c.327-2.475 1.4-6.905 4.852-12.15M24 17.5c-1.9 0-3.517-.063-4.89-.165c.264 2.844.591 6.132.938 9.027a358 358 0 0 0-6.708 2.999a57 57 0 0 1 2.393 4.02a57 57 0 0 1 2.207 4.457a377 377 0 0 0 5.66-4.088c2.066 1.526 4.3 3.127 6.273 4.522c.577-1.367 1.353-2.985 2.394-4.891a58 58 0 0 1 2.209-3.738a389 389 0 0 0-6.565-2.95c.362-2.974.705-6.406.978-9.359A66 66 0 0 1 24 17.5";
+    const AUTONOM_FILL_PATH = "M15.319 14.318c-1.397-.295-1.905-1.712-1.22-2.965c2.923-5.349 6.424-8.2 8.382-9.484a2.74 2.74 0 0 1 3.038 0c1.958 1.285 5.459 4.135 8.382 9.484c.685 1.253.177 2.67-1.22 2.965c-1.647.347-4.355.682-8.681.682s-7.034-.335-8.681-.682m23.784 13.3c.91-1.003 2.266-.728 3.017.413c3.453 5.246 4.525 9.676 4.852 12.151c.176 1.328-.492 2.552-1.667 3.055c-2.19.938-6.355 2.17-12.376 1.631c-1.31-.117-2.213-1.221-1.847-2.556c.43-1.57 1.366-4.046 3.38-7.733c2.012-3.687 3.572-5.782 4.641-6.961M5.88 28.03c.75-1.14 2.107-1.416 3.017-.413c1.07 1.179 2.63 3.274 4.642 6.961s2.948 6.164 3.379 7.733c.366 1.335-.537 2.439-1.847 2.556c-6.021.54-10.186-.693-12.376-1.631c-1.175-.503-1.843-1.727-1.667-3.055c.327-2.475 1.4-6.905 4.852-12.15M24 17.5c-1.9 0-3.517-.063-4.89-.165c.264 2.844.591 6.132.938 9.027a358 358 0 0 0-6.708 2.999a57 57 0 0 1 2.393 4.02a57 57 0 0 1 2.207 4.457a377 377 0 0 0 5.66-4.088c2.066 1.526 4.3 3.127 6.273 4.522c.577-1.367 1.353-2.985 2.394-4.891a58 58 0 0 1 2.209-3.738a389 389 0 0 0-6.565-2.95c.362-2.974.705-6.406.978-9.359A66 66 0 0 1 24 17.5";
+    const AUTONOM_LINE_PATH = "M21.467 2.743a4.68 4.68 0 0 1 5.064 0c1.87 1.19 4.91 3.614 7.51 7.931c.667 1.105.841 2.442.358 3.645c-.496 1.235-1.594 2.095-2.962 2.334c-1.017.178-2.346.336-4.074.427v9.848l7.56 4.394c.99-1.551 1.826-2.686 2.514-3.518c.89-1.077 2.19-1.607 3.518-1.418c1.293.185 2.368 1.016 2.989 2.158c2.41 4.433 2.964 8.295 3.05 10.506a4.69 4.69 0 0 1-2.506 4.353c-1.951 1.033-5.554 2.478-10.572 2.593c-1.296.03-2.546-.488-3.35-1.51c-.825-1.048-1.022-2.432-.546-3.74c.34-.93.835-2.097 1.562-3.55l-7.583-4.408l-7.582 4.408c.726 1.452 1.222 2.62 1.561 3.55c.477 1.308.28 2.692-.545 3.74c-.804 1.022-2.054 1.54-3.35 1.51c-5.019-.115-8.621-1.56-10.572-2.593a4.69 4.69 0 0 1-2.506-4.353c.085-2.211.64-6.073 3.05-10.506c.62-1.142 1.696-1.973 2.989-2.158c1.327-.19 2.627.341 3.517 1.418c.688.832 1.525 1.967 2.515 3.517l7.558-4.393V17.08c-1.727-.091-3.055-.249-4.073-.427c-1.368-.239-2.466-1.099-2.962-2.334c-.483-1.203-.308-2.54.357-3.645c2.602-4.317 5.642-6.74 7.511-7.931m2.915 3.374a.69.69 0 0 0-.766 0c-1.453.926-4.009 2.93-6.232 6.619c1.324.221 3.418.427 6.615.427s5.291-.206 6.615-.427c-2.223-3.689-4.779-5.693-6.232-6.62M7.566 30.46c-2.057 3.787-2.497 7.02-2.564 8.745a.69.69 0 0 0 .38.663c1.517.803 4.513 2.03 8.792 2.129h.002c-.471-1.267-1.343-3.2-2.946-5.996c-1.59-2.774-2.81-4.494-3.664-5.541m32.866 0c-.852 1.047-2.072 2.767-3.662 5.54c-1.604 2.796-2.475 4.729-2.947 5.996h.003c4.279-.098 7.275-1.326 8.791-2.13a.69.69 0 0 0 .381-.662c-.067-1.725-.507-4.958-2.565-8.745";
 
-    const DEVIN_CLOUD_ICON_PATH = "M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579C14.758 6.804 16 8.137 16 9.773 16 11.569 14.502 13 12.687 13H3.781C1.708 13 0 11.366 0 9.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383";
+    const CLOUD_FILL_PATH = "M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579C14.758 6.804 16 8.137 16 9.773 16 11.569 14.502 13 12.687 13H3.781C1.708 13 0 11.366 0 9.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383";
+    const CLOUD_LINE_PATH = "M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579C14.758 6.804 16 8.137 16 9.773 16 11.569 14.502 13 12.687 13H3.781C1.708 13 0 11.366 0 9.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383zm.653.757c-.757.653-1.153 1.44-1.153 2.056v.448l-.445.049C2.064 6.805 1 7.952 1 9.318 1 10.785 2.23 12 3.781 12h8.906C13.98 12 15 10.988 15 9.773c0-1.216-1.02-2.228-2.313-2.228h-.5v-.5C12.188 4.825 10.328 3 8 3a4.53 4.53 0 0 0-2.941 1.1z";
 
     function createSvgIcon(viewBox: string, pathD: string): SVGSVGElement {
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -362,9 +364,9 @@ export function install(
      * Renders the Autonom/Devin Cloud switch above New session.
      *
      * Reuses Devin's own `.agent-editor-switch` classes for native styling and
-     * keeps both segments equal width with the active segment on the accent
-     * color. A small observer re-inserts the row if React replaces the menu,
-     * and the row is removed entirely when the overlay is disabled.
+     * keeps both segments equal width with the active segment on the focus gray.
+     * A small observer re-inserts the row if React replaces the menu, and the
+     * row is removed entirely when the overlay is disabled.
      */
     function renderProviderToggle(): void {
         const document = globalThis.document;
@@ -407,9 +409,9 @@ export function install(
             segments.style.alignItems = "center";
             segments.style.borderRadius = "7px";
             segments.style.backgroundColor = "var(--windsurf-switch-background, rgba(230, 230, 230, 0.05))";
-            for (const [provider, label, viewBox, pathD] of [
-                ["autonom", "Autonom", "0 0 48 48", AUTONOM_ICON_PATH],
-                ["devin-cloud", "Devin Cloud", "0 0 16 16", DEVIN_CLOUD_ICON_PATH],
+            for (const [provider, label] of [
+                ["autonom", "Autonom"],
+                ["devin-cloud", "Devin Cloud"],
             ] as const) {
                 const button = document.createElement("button");
                 button.type = "button";
@@ -429,7 +431,7 @@ export function install(
                 button.style.fontWeight = "500";
                 button.style.cursor = "pointer";
                 button.style.userSelect = "none";
-                button.style.transition = "background-color 0.15s ease, color 0.15s ease";
+                button.style.transition = "background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease";
                 button.dataset.autonomProvider = provider;
                 button.setAttribute("aria-label", label);
 
@@ -440,7 +442,10 @@ export function install(
                 iconSpan.style.justifyContent = "center";
                 iconSpan.style.lineHeight = "0";
                 iconSpan.style.flexShrink = "0";
-                iconSpan.appendChild(createSvgIcon(viewBox, pathD));
+                const isAutonom = provider === "autonom";
+                const initialViewBox = isAutonom ? "0 0 48 48" : "0 0 16 16";
+                const initialPath = isAutonom ? AUTONOM_FILL_PATH : CLOUD_LINE_PATH;
+                iconSpan.appendChild(createSvgIcon(initialViewBox, initialPath));
                 button.appendChild(iconSpan);
 
                 const text = document.createElement("span");
@@ -462,14 +467,30 @@ export function install(
             providerRow.appendChild(switchRoot);
         }
         for (const button of providerRow.querySelectorAll<HTMLButtonElement>("button[data-autonom-provider]")) {
+            const isAutonom = button.dataset.autonomProvider === "autonom";
             const active = button.dataset.autonomProvider === mode;
             button.setAttribute("aria-pressed", String(active));
             button.classList.toggle("active", active);
-            button.style.backgroundColor = active ? "rgb(var(--bg-accent-primary, 0 120 212))" : "transparent";
+            button.style.backgroundColor = active ? "rgb(var(--bg-elevated-transparent))" : "transparent";
+            button.style.borderColor = active ? "rgb(var(--border-secondary, 255 255 255 / 0.1))" : "transparent";
             button.style.color = active
-                ? "var(--vscode-button-foreground, var(--text-primary-strong, #fff))"
+                ? "var(--text-primary, var(--vscode-titleBar-activeForeground, #fff))"
                 : "var(--text-secondary, currentColor)";
-            button.style.boxShadow = active ? "0 1px 2px rgba(0, 0, 0, 0.1)" : "none";
+            button.style.opacity = active ? "1" : "0.56";
+            button.style.boxShadow = active ? "rgba(0, 0, 0, 0.05) 0px 1px 2px" : "none";
+
+            const path = button.querySelector<SVGPathElement>("path");
+            const svg = button.querySelector<SVGSVGElement>("svg");
+            const expectedViewBox = isAutonom ? "0 0 48 48" : "0 0 16 16";
+            const expectedPath = isAutonom
+                ? (active ? AUTONOM_FILL_PATH : AUTONOM_LINE_PATH)
+                : (active ? CLOUD_FILL_PATH : CLOUD_LINE_PATH);
+            if (svg && svg.getAttribute("viewBox") !== expectedViewBox) {
+                svg.setAttribute("viewBox", expectedViewBox);
+            }
+            if (path && path.getAttribute("d") !== expectedPath) {
+                path.setAttribute("d", expectedPath);
+            }
         }
     }
 
@@ -530,6 +551,16 @@ export function install(
                     pointer-events: none !important;
                     cursor: default !important;
                 }
+                /* Custom session page cleanups: hide Switch agent location, Go to sessions list, and Recent sessions list */
+                [data-beard-row="true"] button:first-child:not(:only-child) {
+                    display: none !important;
+                }
+                [data-beard-row="true"] button:last-child:not(:only-child) {
+                    display: none !important;
+                }
+                .windsurf-welcome-container .absolute.left-0.top-full {
+                    display: none !important;
+                }
             `;
         } else {
             overrideStyle?.remove();
@@ -543,6 +574,9 @@ export function install(
         if (!document?.body || isSyncing)
             return;
         isSyncing = true;
+        if (providerObserver) {
+            providerObserver.disconnect();
+        }
         try {
             updateOverrideStyles();
             renderProviderToggle();
@@ -638,13 +672,12 @@ export function install(
         }
     } finally {
         isSyncing = false;
-    }
-
         if (!providerObserver) {
             providerObserver = new MutationObserver(() => syncAutonomDomState());
-            providerObserver.observe(document.body, { childList: true, subtree: true });
         }
+        providerObserver.observe(document.body, { childList: true, subtree: true });
     }
+}
 
     wrap(manifest, "getManifest", effectiveManifest);
     const subscription = manifest.onDidChangeManifest(() => {
