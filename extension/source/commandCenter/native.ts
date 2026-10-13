@@ -332,6 +332,40 @@ export function install(
      * color. A small observer re-inserts the row if React replaces the menu,
      * and the row is removed entirely when the overlay is disabled.
      */
+    /**
+     * Autonom logo icon.
+     * Source: Streamline (https://www.streamlinehq.com)
+     * License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+     */
+    const AUTONOM_ICON_PATH = "M15.319 14.318c-1.397-.295-1.905-1.712-1.22-2.965c2.923-5.349 6.424-8.2 8.382-9.484a2.74 2.74 0 0 1 3.038 0c1.958 1.285 5.459 4.135 8.382 9.484c.685 1.253.177 2.67-1.22 2.965c-1.647.347-4.355.682-8.681.682s-7.034-.335-8.681-.682m23.784 13.3c.91-1.003 2.266-.728 3.017.413c3.453 5.246 4.525 9.676 4.852 12.151c.176 1.328-.492 2.552-1.667 3.055c-2.19.938-6.355 2.17-12.376 1.631c-1.31-.117-2.213-1.221-1.847-2.556c.43-1.57 1.366-4.046 3.38-7.733c2.012-3.687 3.572-5.782 4.641-6.961M5.88 28.03c.75-1.14 2.107-1.416 3.017-.413c1.07 1.179 2.63 3.274 4.642 6.961s2.948 6.164 3.379 7.733c.366 1.335-.537 2.439-1.847 2.556c-6.021.54-10.186-.693-12.376-1.631c-1.175-.503-1.843-1.727-1.667-3.055c.327-2.475 1.4-6.905 4.852-12.15M24 17.5c-1.9 0-3.517-.063-4.89-.165c.264 2.844.591 6.132.938 9.027a358 358 0 0 0-6.708 2.999a57 57 0 0 1 2.393 4.02a57 57 0 0 1 2.207 4.457a377 377 0 0 0 5.66-4.088c2.066 1.526 4.3 3.127 6.273 4.522c.577-1.367 1.353-2.985 2.394-4.891a58 58 0 0 1 2.209-3.738a389 389 0 0 0-6.565-2.95c.362-2.974.705-6.406.978-9.359A66 66 0 0 1 24 17.5";
+
+    const DEVIN_CLOUD_ICON_PATH = "M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579C14.758 6.804 16 8.137 16 9.773 16 11.569 14.502 13 12.687 13H3.781C1.708 13 0 11.366 0 9.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383";
+
+    function createSvgIcon(viewBox: string, pathD: string): SVGSVGElement {
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", viewBox);
+        svg.setAttribute("width", "14");
+        svg.setAttribute("height", "14");
+        svg.setAttribute("fill", "currentColor");
+        svg.setAttribute("aria-hidden", "true");
+        svg.style.flexShrink = "0";
+        svg.style.pointerEvents = "none";
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("fill-rule", "evenodd");
+        path.setAttribute("clip-rule", "evenodd");
+        path.setAttribute("d", pathD);
+        svg.appendChild(path);
+        return svg;
+    }
+
+    /**
+     * Renders the Autonom/Devin Cloud switch above New session.
+     *
+     * Reuses Devin's own `.agent-editor-switch` classes for native styling and
+     * keeps both segments equal width with the active segment on the accent
+     * color. A small observer re-inserts the row if React replaces the menu,
+     * and the row is removed entirely when the overlay is disabled.
+     */
     function renderProviderToggle(): void {
         const document = globalThis.document;
         if (!content.enabled || !document?.body) {
@@ -355,6 +389,8 @@ export function install(
             providerRow.dataset.slot = "sidebar-menu-item";
             providerRow.dataset.autonomProviderSwitch = "true";
             providerRow.className = reference.className;
+            providerRow.style.margin = "2px 0 8px 0";
+            providerRow.style.padding = "0";
             menu.insertBefore(providerRow, reference);
             const switchRoot = document.createElement("div");
             switchRoot.className = "agent-editor-switch";
@@ -364,18 +400,57 @@ export function install(
             const segments = document.createElement("div");
             segments.className = "switch-container";
             segments.style.width = "100%";
-            for (const [provider, label] of [["autonom", "Autonom"], ["devin-cloud", "Devin Cloud"]] as const) {
+            segments.style.height = "28px";
+            segments.style.padding = "2px";
+            segments.style.boxSizing = "border-box";
+            segments.style.display = "flex";
+            segments.style.alignItems = "center";
+            segments.style.borderRadius = "7px";
+            segments.style.backgroundColor = "var(--windsurf-switch-background, rgba(230, 230, 230, 0.05))";
+            for (const [provider, label, viewBox, pathD] of [
+                ["autonom", "Autonom", "0 0 48 48", AUTONOM_ICON_PATH],
+                ["devin-cloud", "Devin Cloud", "0 0 16 16", DEVIN_CLOUD_ICON_PATH],
+            ] as const) {
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "switch-segment";
                 button.style.flex = "1 1 0";
                 button.style.minWidth = "0";
+                button.style.height = "100%";
+                button.style.display = "flex";
+                button.style.alignItems = "center";
+                button.style.justifyContent = "center";
+                button.style.gap = "6px";
+                button.style.padding = "0 8px";
+                button.style.borderRadius = "5px";
+                button.style.border = "1px solid transparent";
+                button.style.boxSizing = "border-box";
+                button.style.fontSize = "12px";
+                button.style.fontWeight = "500";
+                button.style.cursor = "pointer";
+                button.style.userSelect = "none";
+                button.style.transition = "background-color 0.15s ease, color 0.15s ease";
                 button.dataset.autonomProvider = provider;
                 button.setAttribute("aria-label", label);
+
+                const iconSpan = document.createElement("span");
+                iconSpan.className = "segment-icon";
+                iconSpan.style.display = "inline-flex";
+                iconSpan.style.alignItems = "center";
+                iconSpan.style.justifyContent = "center";
+                iconSpan.style.lineHeight = "0";
+                iconSpan.style.flexShrink = "0";
+                iconSpan.appendChild(createSvgIcon(viewBox, pathD));
+                button.appendChild(iconSpan);
+
                 const text = document.createElement("span");
                 text.className = "segment-label";
+                text.style.overflow = "hidden";
+                text.style.textOverflow = "ellipsis";
+                text.style.whiteSpace = "nowrap";
                 text.textContent = label;
                 button.appendChild(text);
+
                 button.addEventListener("click", (event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -390,10 +465,11 @@ export function install(
             const active = button.dataset.autonomProvider === mode;
             button.setAttribute("aria-pressed", String(active));
             button.classList.toggle("active", active);
-            button.style.backgroundColor = active ? "rgb(var(--bg-accent-primary,0 120 212))" : "transparent";
+            button.style.backgroundColor = active ? "rgb(var(--bg-accent-primary, 0 120 212))" : "transparent";
             button.style.color = active
-                ? "var(--vscode-button-foreground,var(--text-primary-strong,#fff))"
-                : "var(--text-secondary,currentColor)";
+                ? "var(--vscode-button-foreground, var(--text-primary-strong, #fff))"
+                : "var(--text-secondary, currentColor)";
+            button.style.boxShadow = active ? "0 1px 2px rgba(0, 0, 0, 0.1)" : "none";
         }
     }
 
