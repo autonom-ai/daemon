@@ -137,6 +137,18 @@ void sessionLog(Request request, Output output)
         respond(output, JSONValue(["log": JSONValue(readText(session.logPath, 1024 * 1024))]));
 }
 
+@endpoint @route!(matchesPath!"/api/sessions/<id>/manage")
+void manageSession(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Post]))
+        return;
+
+    string id = routeParameter!"/api/sessions/<id>/manage"(request);
+    Session.validateId(id);
+    bridge.access.remember(id, false);
+    respond(output, JSONValue(["id": JSONValue(id), "managed": JSONValue(true)]));
+}
+
 enum SessionStatus : string
 {
     Offline = "offline",
