@@ -31,7 +31,7 @@ function sanitizedError(error: unknown): string
         return error.message;
 
     if (error instanceof Error
-        && /9882|ECONNREFUSED|CDP|debugger|WebSocket|connect|timeout|closed|session/i.test(error.message))
+        && /9882|ECONNREFUSED|CDP|debugger|debugging|WebSocket|connect|timeout|closed|session|discover/i.test(error.message))
         return "Runtime connection unavailable. Start Devin Desktop with loopback remote debugging on port 9882, "
             + "then run Autonom Command Center: Attach again.";
 
@@ -219,7 +219,7 @@ export function activate(context: vscode.ExtensionContext): void
 
         const center = await getRuntime();
         if (!(await center.status()).connected)
-            await vscode.commands.executeCommand("workbench.action.commandCenter.goToAllSessions");
+            await vscode.commands.executeCommand("workbench.action.commandCenter.goToAllSessions").then(undefined, () => {});
         const ret = await center.attach(content);
         selectedPath = path;
         lastContent = content;
@@ -593,21 +593,55 @@ export function activate(context: vscode.ExtensionContext): void
         },
     );
 
-    // Auto-attach on startup when a workspace folder is open.
+    // Auto-attach on launch when a trusted workspace folder is open.
+    let autoAttachActive = false;
+    async function autoAttach(retries = 20, delayMs = 1000): Promise<void>
+    {
+        if (autoAttachActive || stopping)
+            return;
+        autoAttachActive = true;
+        try
+        {
+            for (let attempt = 1; attempt <= retries; attempt++)
+            {
+                if (stopping)
+                    return;
+                if (!vscode.workspace.isTrusted || !vscode.workspace.workspaceFolders?.length)
+                    return;
+                try
+                {
+                    await attach();
+                    log("Auto-attached Command Center successfully on launch.");
+                    return;
+                }
+                catch (error: unknown)
+                {
+                    log(`Auto-attach attempt ${attempt}/${retries}: ${sanitizedError(error)}`);
+                    if (attempt < retries)
+                        await new Promise((r) => setTimeout(r, delayMs));
+                }
+            }
+        }
+        finally
+        {
+            autoAttachActive = false;
+        }
+    }
+
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
     {
-        void Promise.resolve().then(async () =>
-        {
-            try
-            {
-                await attach();
-            }
-            catch (error: unknown)
-            {
-                log(`Auto-attach skipped or failed: ${sanitizedError(error)}`);
-            }
-        });
+        void autoAttach();
     }
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeWorkspaceFolders(() =>
+        {
+            void autoAttach();
+        }),
+        vscode.workspace.onDidGrantWorkspaceTrust(() =>
+        {
+            void autoAttach();
+        }),
+    );
 }
 
 export async function deactivate(): Promise<void>

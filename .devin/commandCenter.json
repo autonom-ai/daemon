@@ -2,26 +2,47 @@
     "enabled": true,
     "items": [
         {
-            "id": "automations",
-            "label": "Command Center",
-            "tab": "autonom"
+            "id": "schedules",
+            "label": "Schedules",
+            "icon": "automations",
+            "tab": "schedules"
         },
         {
-            "id": "notes",
-            "label": "Custom notes",
-            "icon": "wiki",
-            "tab": "notes"
+            "id": "events",
+            "label": "Events",
+            "icon": "oncall",
+            "tab": "events"
+        },
+        {
+            "id": "policy",
+            "label": "Policy",
+            "icon": "security",
+            "tab": "policy"
+        },
+        {
+            "id": "settings",
+            "label": "Settings",
+            "icon": "settings",
+            "tab": "settings"
         }
     ],
     "tabs": {
-        "autonom": {
-            "title": "Autonom Command Center",
-            "autonom": true
+        "schedules": {
+            "title": "Schedules",
+            "file": "schedules.html"
         },
-        "notes": {
-            "title": "Custom notes",
-            "file": "notes.html"
+        "events": {
+            "title": "Events",
+            "file": "events.html"
+        },
+        "policy": {
+            "title": "Policy",
+            "file": "policy.html"
+        },
+        "settings": {
+            "title": "Settings",
+            "file": "settings.html"
         }
     },
-    "activeTab": "autonom"
+    "activeTab": "schedules"
 }

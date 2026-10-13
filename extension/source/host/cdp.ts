@@ -723,8 +723,6 @@ export class RuntimeCenter
         try
         {
             const owner = await this.evaluate(client, "globalThis.__autonomCenter?.owner??null");
-            if (owner !== null && owner !== this.identity)
-                throw new Error("The native Command Center belongs to another extension activation.");
             let ret: unknown;
             if (owner === this.identity)
             {
@@ -734,6 +732,10 @@ export class RuntimeCenter
             }
             else
             {
+                if (owner !== null)
+                {
+                    await this.evaluate(client, "globalThis.__autonomCenter?.dispose();");
+                }
                 await this.evaluate(client, `globalThis.__autonomAttachProbe=(${probe.toString()})();`
                     + "Boolean(globalThis.__autonomAttachProbe)");
                 await this.captureServices(client);

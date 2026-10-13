@@ -90,6 +90,9 @@ export function install(
         throw new Error("Unsupported native Command Center service shape.");
     let content: CenterContent = { enabled: false, items: [], tabs: {} };
     let mode: "autonom" | "devin-cloud" = "autonom";
+    let autonomActiveSurface: { id: string; path: string } | null = null;
+    let devinCloudActiveSurface: { id: string; path: string } | null = null;
+    let autonomPageVisible = false;
     let generation = 0;
     let cachedBase: any;
     let cachedManifest: any;
@@ -103,7 +106,7 @@ export function install(
     const views = new Map<any, CustomView>();
     const getManifest = manifest.getManifest;
 
-    const DEVIN_CLOUD_IDS = new Set(["review", "automations", "security", "wiki", "desktop-settings"]);
+    const DEVIN_CLOUD_IDS = new Set(["sessions", "review", "automations", "security", "wiki", "desktop-settings"]);
 
     /**
      * Returns the native manifest, or a cached overlay of it in Autonom mode.
@@ -196,6 +199,7 @@ export function install(
         if (!view)
             return;
         views.delete(instance);
+        autonomPageVisible = false;
         const shell = instance._webview;
         if (shell._mountEl)
             shell._mountEl.style.visibility = view.nativeVisibility;
@@ -237,8 +241,9 @@ export function install(
         if (!shell?._hostEl || !shell?._mountEl || !shell?._webviewService?.createWebviewElement)
             throw new Error("Native page host is not ready.");
         let view = views.get(instance);
-        const isAutonomTab = content.tabs[tab]?.autonom === true;
-        if (!view || !view.host.isConnected || view.isAutonom !== isAutonomTab) {
+        const enableScripts = content.tabs[tab]?.autonom === true
+            || ["settings", "policy", "schedules", "events"].includes(tab);
+        if (!view || !view.host.isConnected || view.isAutonom !== enableScripts) {
             removeView(instance);
             const host = shell._hostEl.ownerDocument.createElement("div") as HTMLElement;
             host.dataset.autonomCenter = "page";
@@ -248,16 +253,16 @@ export function install(
                 title: content.tabs[tab]!.title,
                 options: { retainContextWhenHidden: true, enableFindWidget: true },
                 contentOptions: {
-                    enableScripts: isAutonomTab,
-                    allowScripts: isAutonomTab,
-                    enableForms: isAutonomTab,
-                    allowForms: isAutonomTab,
+                    enableScripts,
+                    allowScripts: enableScripts,
+                    enableForms: enableScripts,
+                    allowForms: enableScripts,
                     localResourceRoots: [],
                 },
                 extension: undefined,
             });
             webview.mountTo(host, shell._hostEl.ownerDocument.defaultView);
-            const messageSub = (isAutonomTab && typeof webview.onMessage === "function")
+            const messageSub = (enableScripts && typeof webview.onMessage === "function")
                 ? webview.onMessage(async (e: any) => {
                     const message = e?.message ?? e;
                     if (!message || typeof message !== "object")
@@ -277,7 +282,7 @@ export function install(
                 controller: instance,
                 host,
                 webview,
-                isAutonom: isAutonomTab,
+                isAutonom: enableScripts,
                 messageSub,
                 nativeVisibility: shell._mountEl.style.visibility,
                 routeDescriptor: Object.getOwnPropertyDescriptor(shell, "_onActiveRoute"),
@@ -301,9 +306,11 @@ export function install(
             shell._onActiveRoute = view.routeWrapper;
             instance._register(view.lifetime);
         }
-        const html = content.tabs[tab]?.autonom
-            ? (content.tabs[tab]!.html.startsWith("<!DOCTYPE") ? content.tabs[tab]!.html : autonomPageHtml(content.tabs[tab]!))
-            : pageHtml(content.tabs[tab]!);
+        const tabHtml = content.tabs[tab]?.html || "";
+        const isFullHtml = tabHtml.trim().startsWith("<!DOCTYPE") || tabHtml.trim().startsWith("<html");
+        const html = isFullHtml
+            ? tabHtml
+            : (content.tabs[tab]?.autonom ? autonomPageHtml(content.tabs[tab]!) : pageHtml(content.tabs[tab]!));
         if (view.html !== html) {
             view.webview.setHtml(html);
             view.html = html;
@@ -311,6 +318,8 @@ export function install(
         view.surface = surface;
         view.host.dataset.autonomTab = tab;
         view.host.style.display = "";
+        autonomPageVisible = true;
+        autonomActiveSurface = { id: surface.id, path: surface.path };
         shell._mountEl.style.visibility = "hidden";
         instance._currentSurface = surface;
         shell._activeSurfaceId = surface.id;
@@ -544,9 +553,6 @@ export function install(
                 document.head.appendChild(overrideStyle);
             }
             overrideStyle.textContent = `
-                aside[data-slot="sidebar"] > *:not([data-slot="sidebar-header"]) {
-                    display: none !important;
-                }
                 div[class*="max-w-[200px]"] button[aria-haspopup="menu"] {
                     pointer-events: none !important;
                     cursor: default !important;
@@ -591,22 +597,84 @@ export function install(
         const aside = document.querySelector<HTMLElement>('aside[data-slot="sidebar"]');
         const asideChildren = aside ? (Array.from(aside.children) as HTMLElement[]) : [];
         const header = aside?.querySelector<HTMLElement>('[data-slot="sidebar-header"]');
+        const footer = aside?.querySelector<HTMLElement>('[data-slot="sidebar-footer"]');
+        const middle = asideChildren.find((c) => c.querySelector?.('[data-slot="sidebar-content-wrapper"]') || (!c.className?.includes("hidden") && c.className?.includes("min-h-0 flex-1")));
 
         if (mode === "autonom") {
-            // 1. Sidebar: keep only sidebar-header (provider toggle + New session button).
-            // Hide everything below it so the sidebar is clean and empty below New session.
+            // 1. Sidebar: keep header (provider toggle + new session), middle nav container, and footer (customizations expander)
             for (const child of asideChildren) {
-                if (child !== header && !child.contains(header || null)) {
+                if (child === header || child.contains(header || null) || child === middle || child === footer || child.contains(footer || null)) {
+                    child.style.display = "";
+                } else {
                     child.style.display = "none";
                 }
             }
+            if (footer) {
+                footer.style.display = "";
+            }
 
-            // 2. Hide any Spaces / Split into new space groups anywhere in sidebar
+            // 2. Hide any Spaces / Split into new space / recent sessions list groups anywhere in sidebar
             for (const group of document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group"]')) {
                 const text = group.textContent || "";
-                if (text.includes("Spaces") || text.includes("Split into new space")) {
+                if (text.includes("Spaces") || text.includes("Split into new space") || text.includes("ago") || text.includes("Session ")) {
                     group.style.display = "none";
+                } else {
+                    group.style.display = "";
                 }
+            }
+
+            // 3. Suppress native cloud Sessions inbox button in Autonom mode
+            for (const li of aside?.querySelectorAll("li") || []) {
+                if (li.textContent?.trim() === "Sessions") {
+                    li.style.display = "none";
+                }
+            }
+
+            // 3.5 Section headers: Profiles and Rooms
+            const scrollContent = aside?.querySelector<HTMLElement>('[data-slot="scroll-area-content"]');
+            const navGroup = scrollContent?.querySelector<HTMLElement>('[data-slot="sidebar-group"]');
+            if (scrollContent && navGroup) {
+                let profilesHeader = scrollContent.querySelector<HTMLElement>('[data-autonom-section="profiles"]');
+                if (!profilesHeader) {
+                    profilesHeader = document.createElement("div");
+                    profilesHeader.dataset.slot = "sidebar-group";
+                    profilesHeader.dataset.autonomSection = "profiles";
+                    profilesHeader.className = "relative flex w-full min-w-0 flex-col px-[--sidebar-padding] pb-1";
+                    const row = document.createElement("div");
+                    row.dataset.slot = "sidebar-label-row";
+                    row.className = "group/sidebar-label-row flex h-8 shrink-0 items-center justify-between gap-px pl-[--sidebar-content-button-x-padding] pr-1";
+                    const label = document.createElement("div");
+                    label.dataset.slot = "sidebar-group-label";
+                    label.className = "text-12 text-text-secondary flex items-center rounded-md font-medium flex-1";
+                    label.textContent = "Profiles";
+                    row.appendChild(label);
+                    profilesHeader.appendChild(row);
+                }
+                if (profilesHeader.parentElement !== scrollContent || profilesHeader.previousElementSibling !== navGroup) {
+                    navGroup.after(profilesHeader);
+                }
+                profilesHeader.style.display = "";
+
+                let roomsHeader = scrollContent.querySelector<HTMLElement>('[data-autonom-section="rooms"]');
+                if (!roomsHeader) {
+                    roomsHeader = document.createElement("div");
+                    roomsHeader.dataset.slot = "sidebar-group";
+                    roomsHeader.dataset.autonomSection = "rooms";
+                    roomsHeader.className = "relative flex w-full min-w-0 flex-col px-[--sidebar-padding] pb-1";
+                    const row = document.createElement("div");
+                    row.dataset.slot = "sidebar-label-row";
+                    row.className = "group/sidebar-label-row flex h-8 shrink-0 items-center justify-between gap-px pl-[--sidebar-content-button-x-padding] pr-1";
+                    const label = document.createElement("div");
+                    label.dataset.slot = "sidebar-group-label";
+                    label.className = "text-12 text-text-secondary flex items-center rounded-md font-medium flex-1";
+                    label.textContent = "Rooms";
+                    row.appendChild(label);
+                    roomsHeader.appendChild(row);
+                }
+                if (roomsHeader.parentElement !== scrollContent || roomsHeader.previousElementSibling !== profilesHeader) {
+                    profilesHeader.after(roomsHeader);
+                }
+                roomsHeader.style.display = "";
             }
 
             // 3. Hook New session button to hide any open custom page webview
@@ -615,6 +683,8 @@ export function install(
                 (newSessionBtn as any).__autonomHooked = true;
                 newSessionBtn.addEventListener("click", () => {
                     if (mode === "autonom") {
+                        autonomPageVisible = false;
+                        autonomActiveSurface = null;
                         for (const view of views.values()) {
                             view.host.style.display = "none";
                         }
@@ -622,7 +692,33 @@ export function install(
                 }, true);
             }
 
-            // 4. Lock ACP selector in composer and active session to "Devin Local" and disable clicks
+            // 4. In session page, show Autonom fill logo and hide Devin's logo (without mutating native SVG)
+            const devinLogo = document.querySelector<SVGSVGElement>(".windsurf-welcome-container svg.absolute.bottom-full:not([data-autonom-logo])");
+            if (devinLogo) {
+                devinLogo.style.display = "none";
+                let autonomLogo = devinLogo.parentElement?.querySelector<SVGSVGElement>("svg[data-autonom-logo]");
+                if (!autonomLogo && devinLogo.parentElement) {
+                    autonomLogo = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                    autonomLogo.dataset.autonomLogo = "true";
+                    autonomLogo.setAttribute("class", "absolute bottom-full mb-6 text-text-primary opacity-10");
+                    autonomLogo.setAttribute("aria-hidden", "true");
+                    autonomLogo.setAttribute("width", "64px");
+                    autonomLogo.setAttribute("height", "64px");
+                    autonomLogo.setAttribute("viewBox", "0 0 48 48");
+                    autonomLogo.setAttribute("fill", "currentColor");
+                    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    path.setAttribute("fill-rule", "evenodd");
+                    path.setAttribute("clip-rule", "evenodd");
+                    path.setAttribute("d", AUTONOM_FILL_PATH);
+                    autonomLogo.appendChild(path);
+                    devinLogo.parentElement.insertBefore(autonomLogo, devinLogo);
+                }
+                if (autonomLogo) {
+                    autonomLogo.style.display = "";
+                }
+            }
+
+            // 5. Lock ACP selector in composer and active session to "Devin Local" and disable clicks
             const buttons = document.querySelectorAll<HTMLButtonElement>("button");
             for (const btn of buttons) {
                 if (btn.classList.contains("switch-segment"))
@@ -643,7 +739,7 @@ export function install(
                 }
             }
 
-            // 5. Suppress ACP agent switch popup menu
+            // 6. Suppress ACP agent switch popup menu
             for (const popup of document.querySelectorAll<HTMLElement>('[role="menu"], [data-slot="menu"], [class*="popup"]')) {
                 const text = popup.textContent || "";
                 if (text.includes("switch agents") || (text.includes("Devin Local") && (text.includes("Codex") || text.includes("OpenCode")))) {
@@ -658,6 +754,26 @@ export function install(
             }
             for (const group of document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group"]')) {
                 group.style.display = "";
+            }
+            for (const header of document.querySelectorAll<HTMLElement>('[data-autonom-section]')) {
+                header.remove();
+            }
+            if (footer) {
+                footer.style.display = "";
+            }
+            for (const li of aside?.querySelectorAll("li") || []) {
+                if (li.textContent?.trim() === "Sessions") {
+                    li.style.display = "";
+                }
+            }
+            // In Devin Cloud mode, unhide Devin's native logo and hide Autonom logo
+            const devinLogo = document.querySelector<SVGSVGElement>(".windsurf-welcome-container svg.absolute.bottom-full:not([data-autonom-logo])");
+            if (devinLogo) {
+                devinLogo.style.display = "";
+            }
+            const autonomLogo = document.querySelector<SVGSVGElement>(".windsurf-welcome-container svg[data-autonom-logo]");
+            if (autonomLogo) {
+                autonomLogo.style.display = "none";
             }
             // Unlock ACP selector buttons
             for (const btn of document.querySelectorAll<HTMLButtonElement>("button")) {
@@ -680,6 +796,19 @@ export function install(
 }
 
     wrap(manifest, "getManifest", effectiveManifest);
+    const nativeNewAgentWindowSession = groups.newAgentWindowSession;
+    if (typeof nativeNewAgentWindowSession === "function") {
+        wrap(groups, "newAgentWindowSession", function (this: any, ...args: any[]): any {
+            if (mode === "autonom") {
+                autonomPageVisible = false;
+                autonomActiveSurface = null;
+                for (const view of views.values()) {
+                    view.host.style.display = "none";
+                }
+            }
+            return nativeNewAgentWindowSession.apply(this, args);
+        });
+    }
     const subscription = manifest.onDidChangeManifest(() => {
         if (relaying)
             return;
@@ -805,22 +934,59 @@ export function install(
                 return runtime.status();
             const active = groups.getActiveNavSurface(windowId);
             const nativeItems = getManifest.call(manifest).items as NativeItem[];
+
+            // 1. Remember the current mode's active surface before switching
+            if (mode === "autonom") {
+                autonomActiveSurface = (autonomPageVisible && active?.path?.startsWith("/autonom/"))
+                    ? { id: active.id, path: active.path }
+                    : null;
+            } else {
+                devinCloudActiveSurface = active ? { id: active.id, path: active.path } : null;
+            }
+
             mode = nextMode;
             generation++;
             cachedManifest = undefined;
             notify();
             syncAutonomDomState();
+
+            // 2. Restore the target mode's active surface
             if (mode === "devin-cloud") {
                 for (const instance of [...views.keys()])
                     removeView(instance);
-                if (active?.path?.startsWith("/autonom/")) {
+                if (devinCloudActiveSurface) {
+                    await api.executeCommand("devin.desktopNav.openSurface", {
+                        id: devinCloudActiveSurface.id,
+                        path: devinCloudActiveSurface.path,
+                    }).catch(() => {
+                        groups.setActiveNavSurface(windowId, devinCloudActiveSurface);
+                    });
+                } else if (active?.path?.startsWith("/autonom/")) {
                     const fallback = nativeItems.find((item) => item.id === active.id);
-                    groups.setActiveNavSurface(windowId, fallback
-                        ? { id: fallback.id, path: fallback.path }
-                        : null);
+                    if (fallback) {
+                        groups.setActiveNavSurface(windowId, { id: fallback.id, path: fallback.path });
+                    } else {
+                        groups.setActiveNavSurface(windowId, null);
+                        groups.newAgentWindowSession?.();
+                    }
+                } else {
+                    groups.setActiveNavSurface(windowId, null);
+                    groups.newAgentWindowSession?.();
                 }
-            } else if (content.activeTab) {
-                await runtime.open(content.activeTab);
+            } else {
+                if (autonomActiveSurface && autonomActiveSurface.path.startsWith("/autonom/")) {
+                    const tab = autonomActiveSurface.path.slice(9);
+                    if (Object.hasOwn(content.tabs, tab)) {
+                        await runtime.open(tab).catch(() => {});
+                    }
+                } else {
+                    // Autonom was previously on the New session / composer page
+                    for (const view of views.values()) {
+                        view.host.style.display = "none";
+                    }
+                    groups.setActiveNavSurface(windowId, null);
+                    groups.newAgentWindowSession?.();
+                }
             }
             return runtime.status();
         },
@@ -884,6 +1050,15 @@ export function install(
                     Object.defineProperty(saved.object, saved.name, saved.descriptor);
                 else
                     delete saved.object[saved.name];
+            }
+            // Restore native Devin logo and remove Autonom logo
+            const devinLogo = globalThis.document?.querySelector<SVGSVGElement>(".windsurf-welcome-container svg.absolute.bottom-full:not([data-autonom-logo])");
+            if (devinLogo) {
+                devinLogo.style.display = "";
+            }
+            globalThis.document?.querySelector<SVGSVGElement>(".windsurf-welcome-container svg[data-autonom-logo]")?.remove();
+            for (const header of globalThis.document?.querySelectorAll<HTMLElement>("[data-autonom-section]") || []) {
+                header.remove();
             }
             if (active?.path?.startsWith("/autonom/")) {
                 const fallback = nativeItems.find((item) => item.id === active.id);

@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 const [action = "targets", target = "workbench", rawInput = ""] = process.argv.slice(2);
-const input = rawInput.startsWith("@") ? await readFile(rawInput.slice(1), "utf8") : rawInput;
+let input = rawInput.startsWith("@") ? await readFile(rawInput.slice(1), "utf8") : rawInput;
 const port = process.env.CDP_PORT || "9882";
 const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
 if (action === "targets") {
@@ -122,6 +122,19 @@ try {
         await capture("globalThis.__autonomProbe.props.getActiveDesktopNavSurfaceSnapshot", "globalThis.__autonomServices.groups=o; ({groups:typeof o.getActiveNavSurface,windowId:e.vscodeWindowId})");
         await send("Debugger.disable");
         if (action === "hot") {
+            try {
+                const parsed = JSON.parse(input);
+                if (parsed.tabs) {
+                    for (const tab of Object.values(parsed.tabs)) {
+                        if (tab.file && !tab.html) {
+                            try {
+                                tab.html = await readFile(new URL(`../../.devin/${tab.file}`, import.meta.url), "utf8");
+                            } catch {}
+                        }
+                    }
+                    input = JSON.stringify(parsed);
+                }
+            } catch {}
             const result = await send("Runtime.evaluate", {
                 expression: "globalThis.__autonomCenter?.dispose();"
                     + `${nativeCode};globalThis.AutonomNative=AutonomNative;`
