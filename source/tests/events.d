@@ -1,15 +1,15 @@
 module tests.events;
 
-import autonom.agent;
-import autonom.config;
-import autonom.coord;
-import autonom.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
-import autonom.events.event;
-import autonom.events.schedule;
-import autonom.events.scheduler;
-import autonom.interop;
-import autonom.interop.devin;
-import autonom.interop.devin.db : SessionMetadata;
+import daemon.agent;
+import daemon.config;
+import daemon.coord;
+import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
+import daemon.events.event;
+import daemon.events.schedule;
+import daemon.events.scheduler;
+import daemon.interop;
+import daemon.interop.devin;
+import daemon.interop.devin.db : SessionMetadata;
 import tests.common;
 import arsd.sqlite;
 import serverino : endpoint, route;

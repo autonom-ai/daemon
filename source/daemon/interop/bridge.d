@@ -1,10 +1,10 @@
-module autonom.interop.bridge;
+module daemon.interop.bridge;
 
-import autonom.exception;
-import autonom.interop.access;
-import autonom.interop.execution;
-import autonom.interop.session;
-import autonom.storage;
+import daemon.exception;
+import daemon.interop.access;
+import daemon.interop.execution;
+import daemon.interop.session;
+import daemon.storage;
 
 import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_RDWR;
 import core.sys.posix.signal : SIGKILL;

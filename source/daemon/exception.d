@@ -1,4 +1,4 @@
-module autonom.exception;
+module daemon.exception;
 
 import std.exception : basicExceptionCtors;
 

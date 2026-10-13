@@ -1,6 +1,6 @@
 module tests.policy;
 
-import autonom.policy.access;
+import daemon.policy.access;
 import tests.common;
 import intuit.router.openrouter;
 import serverino : endpoint, route;

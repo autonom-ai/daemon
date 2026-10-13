@@ -1,8 +1,8 @@
 module tests.session;
 
-import autonom.agent;
-import autonom.interop;
-import autonom.interop.session;
+import daemon.agent;
+import daemon.interop;
+import daemon.interop.session;
 import tests.common;
 import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should, shouldThrow;

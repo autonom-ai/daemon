@@ -1,4 +1,4 @@
-module autonom.agent;
+module daemon.agent;
 
-public import autonom.agent.profile : HUMAN_NAME, Profile;
-public import autonom.agent.store : ProfileConflictException, ProfileStore, validName;
+public import daemon.agent.profile : HUMAN_NAME, Profile;
+public import daemon.agent.store : ProfileConflictException, ProfileStore, validName;

@@ -12,25 +12,25 @@
 
 # Runtime
 
-- `autonom.app` is the executable entrypoint; `autonom.server` assembles the worker-owned runtime and Serverino lifecycle.
-- `autonom.agent` owns profiles and durable profile-to-session assignments. `autonom.interop` owns canonical backend session handles, process executions, and CLI integration.
+- `daemon.app` is the executable entrypoint; `daemon.server` assembles the worker-owned runtime and Serverino lifecycle.
+- `daemon.agent` owns profiles and durable profile-to-session assignments. `daemon.interop` owns canonical backend session handles, process executions, and CLI integration.
 - One persistent Serverino worker owns mutable registries and profile state. Execution monitor threads own only their child process and execution record; do not add Serverino workers or worker recycling.
-- `autonom.events` owns pending events, schedules, session wakes, and the clock thread: `events.event` holds the pending-event store, `events.schedule` the schedule store and its endpoints, and `events.scheduler` the wake logic and background thread.
+- `daemon.events` owns pending events, schedules, session wakes, and the clock thread: `events.event` holds the pending-event store, `events.schedule` the schedule store and its endpoints, and `events.scheduler` the wake logic and background thread.
 - Execution records are version 2 with a `finishedAt` timestamp; version 1 records still load. `compact` uses the CLI compaction-threshold environment override, not `/compact`; an execution may declare a `dependency` that must finish before it spawns. Session metadata and conversation history come from the CLI database; executions track daemon-owned process lifecycle.
 - The daemon owns one scheduler thread. It only watches due clock times in the coordination files and pokes `POST /api/schedules/refresh` over loopback; the single worker fires due events and launches wakes during its per-request refresh, so all state stays worker-owned.
 - `interop.devin.db` reads model, working directory, title, mode, timestamps, and the main conversation chain from the CLI SQLite database (`arsd-official:sqlite`, opened read-only at `sessions.db` beside `sessionLockDir`). Execution launch values are used only while a new session has no database row. Last activity is not a running-state signal; a foreign held session lock means `loaded`, not `online`.
 - `AUTONOM_CONFIG` selects the required YAML configuration and `AUTONOM_PORT` overrides the default loopback port 8080.
 - `templates/config.yml` is the starting configuration. `devinCommand` and `router` are required; `dataDir` defaults to the config directory and `sessionLockDir` to the Devin XDG data path. `compactOnResume` (boolean) forces compaction before every resume, `offlineStartAfter`/`offlineCompactAfter` accept durations such as `30m` or `1h` or integer seconds, and `repository` names the git repository used for teammate worktrees (defaults to the daemon's working directory).
-- `autonom.router` supports `router.type: openrouter` with required `key`, `url`, and `name`; `referer` and `title` are optional. Missing or unsupported router settings fail startup; environment variables and `.env` files are not consulted for router keys.
+- `daemon.router` supports `router.type: openrouter` with required `key`, `url`, and `name`; `referer` and `title` are optional. Missing or unsupported router settings fail startup; environment variables and `.env` files are not consulted for router keys.
 - Devin Desktop exports `ACP_BACKEND=windsurf`; unset it for direct CLI checks. The bridge scrubs host prefixes itself.
 - Sessions own their IDs: Serverino request strings can reference reused buffers and cannot be retained as cache keys.
 - `POST /api/sessions` and `POST /api/print` return HTTP 202 with an execution ID. `GET /api/executions/<id>` exposes `running|stopping|succeeded|failed|stopped|interrupted`, exit status, error, session ID, and a print reply on success.
 - `POST /api/executions/<id>/stop` requests cancellation without waiting for the CLI process.
 - `POST /api/sessions/<id>/resume` continues a session with a prompt and returns its execution ID; the execution exposes a failed status if the backend rejects the session.
 - `DELETE /api/sessions/<id>` returns one removal-execution record. `POST /api/sessions/remove` validates the whole batch and returns `{"ids":[...],"executions":[{"id":"...","sessionId":"..."}],"failed":[...]}`. Removal executes asynchronously; poll each execution and trust only `status: succeeded`.
-- `templates/hooks.v1.json`, installed by the extension at `.devin/hooks.v1.json`, forwards all eight Devin hook events through `source/coord/hook.py`; replace `{{AUTONOM_ROOT}}` when installing manually. The Python hook applies a 2 GB memory limit in its launch command. Policy is on `PreToolUse`; `PermissionRequest` queues human approvals and waits in the hook process, never the Serverino worker.
-- `templates/mcp_config.json`, installed at `.devin/mcp_config.json`, runs `source/coord/server.py` as the `autonom-coord` MCP server: a stdlib-only Python stdio JSON-RPC server that proxies tool calls to the daemon's HTTP API and takes the caller's session from the `session_id` the hooks inject.
-- `source/coord/server.py --ensure` starts `bin/autonom-daemon` detached on `AUTONOM_PORT` and waits for health. Concurrent MCP servers single-flight under `$XDG_CACHE_HOME/autonom`; daemon output goes to `daemon-<port>.log`. A failed managed PreToolUse or PermissionRequest hook returns an explicit block, not a generic nonblocking error.
+- `templates/hooks.v1.json`, installed by the extension at `.devin/hooks.v1.json`, forwards all eight Devin hook events through `source/mcp/hook.py`; replace `{{AUTONOM_ROOT}}` when installing manually. The Python hook applies a 2 GB memory limit in its launch command. Policy is on `PreToolUse`; `PermissionRequest` queues human approvals and waits in the hook process, never the Serverino worker.
+- `templates/mcp_config.json`, installed at `.devin/mcp_config.json`, runs `source/mcp/server.py` as the `autonom-coord` MCP server: a stdlib-only Python stdio JSON-RPC server that proxies tool calls to the daemon's HTTP API and takes the caller's session from the `session_id` the hooks inject.
+- `source/mcp/server.py --ensure` starts `bin/autonom-daemon` detached on `AUTONOM_PORT` and waits for health. Concurrent MCP servers single-flight under `$XDG_CACHE_HOME/autonom`; daemon output goes to `daemon-<port>.log`. A failed managed PreToolUse or PermissionRequest hook returns an explicit block, not a generic nonblocking error.
 - Hook forwarding uses loopback and `AUTONOM_PORT` (default 8080), disables proxies, and authenticates with the daemon-issued `AUTONOM_RUN_TOKEN`. Managed tools and hooks bind this capability to one live execution and session; unmanaged sessions expose no Autonom MCP tools, and their ordinary tools are not screened by Autonom.
 - Start, print, resume, and removal commands run as bounded, persisted executions outside the Serverino request worker; hooks can be served while those processes run.
 - Backend session listing remains synchronous and is limited to two seconds; model-screening policy checks remain synchronous and are limited to eight seconds.
@@ -46,7 +46,7 @@
 
 # Worktrees
 
-- `autonom.worktree` owns per-teammate git worktrees: branches `autonom/<name>` at `.autonom-worktrees/<name>` inside the configured `repository` (defaults to the daemon's working directory), based on HEAD or an explicit `source` ref. Creating a worktree commits a `.gitignore` entry when the repository is clean.
+- `daemon.worktree` owns per-teammate git worktrees: branches `autonom/<name>` at `.autonom-worktrees/<name>` inside the configured `repository` (defaults to the daemon's working directory), based on HEAD or an explicit `source` ref. Creating a worktree commits a `.gitignore` entry when the repository is clean.
 - `GET/POST /api/worktrees` list and create; `GET/DELETE /api/worktrees/<name>` inspect and remove (`force` query parameter discards uncommitted changes). Removing refuses while a merge involving the worktree is open. Worktree endpoints require the client capability.
 - `POST /api/worktrees/<name>/merge` merges `source` into `target`; a clean merge commits itself and returns `status: merged`. A conflict stages the merge, creates a room named `merge-<target>-<source>` owned by `human` with the involved profiles as members and admins, surfaces a room event for each, and returns `status: conflict` with the conflicted files.
 - `POST /api/worktrees/<name>/merge/abort` resets the target and destroys the conflict room; `.../merge/finish` commits the resolved merge and destroys the room, refusing while unmerged paths remain. Merge state persists in `dataDir/merges.json`.
@@ -54,7 +54,7 @@
 
 # Orchestration
 
-- `source/coord/orchestrate.py` is the `autonom-orchestrate` MCP server: stdio JSON-RPC over the daemon's client capability (`dataDir/client.token`), because starting sessions and reading every execution needs control-plane access. It refuses to run without `AUTONOM_RUN_TOKEN`, so only Autonom-managed sessions can start it, and its tools are `team_*` (status, start, stop, wait, remove, worktree and merge helpers, message, models).
+- `source/mcp/orchestrate.py` is the `autonom-orchestrate` MCP server: stdio JSON-RPC over the daemon's client capability (`dataDir/client.token`), because starting sessions and reading every execution needs control-plane access. It refuses to run without `AUTONOM_RUN_TOKEN`, so only Autonom-managed sessions can start it, and its tools are `team_*` (status, start, stop, wait, remove, worktree and merge helpers, message, models).
 - `dataDir` is discovered from `AUTONOM_DATA_DIR`, then the `dataDir` key in `AUTONOM_CONFIG` (or the XDG config path), then the config directory.
 - `team_start` creates the profile when missing, defaults the directory to the caller's workspace or a named worktree, defaults the model to the caller's model or `swe-2-medium`, and defaults the permission mode to `bypass`; workspace policy still screens every teammate tool call.
 - `team_remove` removes the session, waits for the removal execution, then deletes the profile and its inbox. Teammates reach the orchestrator through rooms, DMs, and pings using their own `autonom-coord` server.
@@ -64,7 +64,7 @@
 # Coordination
 
 - Coordination state lives under `dataDir/coord`: `rooms/<name>/{messages.jsonl,profiles.json}` and `inboxes/<profile>/{dms.jsonl,pings.jsonl,cursors.json,events.json,schedules.json}` plus `wakes.json`. Workspaces keep only `.devin/policy.yml` and `.devin/hooks.v1.json`.
-- `autonom.coord` owns the bus: append-only jsonl streams with the most recent 1000 entries held in memory, per-profile read cursors, and rooms with an owner, admins, and an optional involved list.
+- `daemon.coord` owns the bus: append-only jsonl streams with the most recent 1000 entries held in memory, per-profile read cursors, and rooms with an owner, admins, and an optional involved list.
 - Cursors index the in-memory window and are clamped to it on load, so a restart re-delivers at most one window per stream. Trimming shifts cursors with the window.
 - Rooms are global and report themselves as unknown to profiles that cannot see them and to non-administrators; only the original owner changes admins.
 - Coordination endpoints take the caller's `session` as a query parameter and require a registered session: `GET/POST /api/rooms`, `GET/DELETE /api/rooms/<name>`, `GET/POST /api/rooms/<name>/messages`, `GET/POST /api/rooms/<name>/membership`, `POST /api/rooms/<name>/admins`, `DELETE /api/rooms/<name>/admins?profile=`, and `GET/POST /api/messages` (`source=dms|pings`).
@@ -98,7 +98,7 @@
 # Extension
 
 - `extension/` is the VS Code / Devin Desktop extension. Its chat uses daemon-launched CLI print/resume processes, not Desktop's agent panel or a custom ACP client. Bootstrap Icons supply all UI icons; `diagram-3-fill` is used for the SVG activity-bar mark and the PNG extension icon.
-- Build and verify from `extension/`: `npm ci`, `npm run check`, `npm test`, `npm audit`, `npm run package`. The VSIX is `bin/autonom-0.4.0.vsix` in the repository root. Python integration helpers: `ulimit -v 2000000 && PYTHONDONTWRITEBYTECODE=1 python3 source/coord/tests.py` from the root.
+- Build and verify from `extension/`: `npm ci`, `npm run check`, `npm test`, `npm audit`, `npm run package`. The VSIX is `bin/autonom-0.4.0.vsix` in the repository root. Python integration helpers: `ulimit -v 2000000 && PYTHONDONTWRITEBYTECODE=1 python3 source/mcp/tests.py` from the root.
 - The extension host owns HTTP, private files, workspace installation, and configuration; webviews own presentation only. Never send the OpenRouter key or client/run capabilities to a webview. Content is escaped, raw markdown HTML and remote images are disabled, and scripts use a nonce-based CSP.
 - Daemon HTTP endpoints except health and authenticated hooks require `x-autonom-client` or a session-bound `x-autonom-run` capability. `dataDir/client.token` is a private owner-only control capability; `managed.json` stores daemon-origin sessions and workspace-trust snapshots. Run capabilities are in memory, expire with the execution, and cannot claim another session.
 - `autonom.open` opens an editor-tab webview. The activity-bar `autonom.control` webview edits extension defaults, daemon scheduling settings, and workspace policy. Workspace setup preserves other hooks/MCP servers and never overwrites an existing policy. Secret editing uses a native password input and private atomic writes.

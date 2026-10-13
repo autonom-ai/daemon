@@ -1,4 +1,4 @@
-module autonom.storage;
+module daemon.storage;
 
 import core.sys.posix.fcntl;
 import core.sys.posix.sys.stat : fstat, stat_t, S_IFMT, S_IFREG;
@@ -12,7 +12,7 @@ import std.stdio : File;
 import std.string : toStringz;
 import std.uuid;
 
-package(autonom):
+package(daemon):
 
 File openFile(string path, int flags)
 {

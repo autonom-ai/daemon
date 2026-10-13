@@ -192,7 +192,7 @@ export class DaemonClient
             const root = this.settings.rootDirectory;
             if (!isAbsolute(root))
                 throw new Error("Choose the Autonom repository in the Control Center.");
-            const bootstrap = join(root, "source", "coord", "server.py");
+            const bootstrap = join(root, "source", "mcp", "server.py");
             const attributes = await lstat(bootstrap).catch(() => undefined);
             if (!attributes?.isFile() || attributes.isSymbolicLink())
                 throw new Error("The selected repository does not contain the Autonom MCP server.");
@@ -303,7 +303,7 @@ async function startDaemon(root: string, settings: Settings): Promise<void>
     delete environment.AUTONOM_CLIENT_TOKEN;
     await new Promise<void>((resolve, reject) =>
     {
-        const child = spawn("python3", [join(root, "source", "coord", "server.py"), "--ensure"], {
+        const child = spawn("python3", [join(root, "source", "mcp", "server.py"), "--ensure"], {
             cwd: root,
             env: environment,
             stdio: ["ignore", "pipe", "pipe"],

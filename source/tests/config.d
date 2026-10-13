@@ -1,6 +1,6 @@
 module tests.config;
 
-import autonom.config;
+import daemon.config;
 import intuit.router.openrouter;
 import tests.common;
 import unit_threaded : Name, should, shouldThrow;

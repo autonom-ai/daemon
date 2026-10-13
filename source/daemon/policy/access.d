@@ -1,9 +1,9 @@
-module autonom.policy.access;
+module daemon.policy.access;
 
-import autonom.config;
-import autonom.exception;
-import autonom.policy.rule;
-import autonom.server : policy, readBody, respond;
+import daemon.config;
+import daemon.exception;
+import daemon.policy.rule;
+import daemon.server : policy, readBody, respond;
 import intuit.response.decision;
 import intuit.router : IRouter, decisions;
 import serverino;

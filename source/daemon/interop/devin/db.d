@@ -1,4 +1,4 @@
-module autonom.interop.devin.db;
+module daemon.interop.devin.db;
 
 import arsd.sqlite;
 

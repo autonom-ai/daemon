@@ -206,7 +206,7 @@ async function integrationReady(workspace: string): Promise<boolean>
     const mcp = record(parseJson(await optionalText(join(workspace, ".devin", "mcp_config.json"))) as unknown);
     const server = record(record(mcp?.mcpServers)?.["autonom-coord"]);
     if (!Array.isArray(server?.args) || !server.args.some((argument) =>
-        typeof argument === "string" && argument.endsWith("source/coord/server.py")))
+        typeof argument === "string" && argument.endsWith("source/mcp/server.py")))
         return false;
     for (const event of ["PreToolUse", "PostToolUse", "PermissionRequest", "UserPromptSubmit", "SessionStart"])
     {
@@ -215,7 +215,7 @@ async function integrationReady(workspace: string): Promise<boolean>
         {
             const group = record(item);
             return Array.isArray(group?.hooks) && group.hooks.some((item) =>
-                text(record(item)?.command).includes("source/coord/hook.py"));
+                text(record(item)?.command).includes("source/mcp/hook.py"));
         }))
             return false;
     }

@@ -1,11 +1,11 @@
-module autonom.events.event;
+module daemon.events.event;
 
-import autonom.agent;
-import autonom.config;
-import autonom.coord.access : caller;
-import autonom.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
-import autonom.server;
-import autonom.storage;
+import daemon.agent;
+import daemon.config;
+import daemon.coord.access : caller;
+import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
+import daemon.server;
+import daemon.storage;
 import serverino;
 
 import std.datetime : Clock, UTC;

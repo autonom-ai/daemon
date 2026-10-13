@@ -1,10 +1,10 @@
-module autonom.interop.session;
+module daemon.interop.session;
 
-import autonom.exception;
-import autonom.interop.devin.db : SessionMetadata;
-import autonom.interop.execution;
-import autonom.server;
-import autonom.storage;
+import daemon.exception;
+import daemon.interop.devin.db : SessionMetadata;
+import daemon.interop.execution;
+import daemon.server;
+import daemon.storage;
 import serverino;
 
 import std.ascii;
@@ -164,7 +164,7 @@ abstract class Session
 private:
     Execution _execution;
 
-package(autonom.interop):
+package(daemon.interop):
     void bindExecution(Execution execution)
     {
         _execution = execution;

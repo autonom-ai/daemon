@@ -1,7 +1,7 @@
-module autonom.config;
+module daemon.config;
 
-import autonom.router;
-import autonom.storage;
+import daemon.router;
+import daemon.storage;
 import intuit.router : IRouter;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;

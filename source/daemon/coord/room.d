@@ -1,7 +1,7 @@
-module autonom.coord.room;
+module daemon.coord.room;
 
-import autonom.agent;
-import autonom.storage;
+import daemon.agent;
+import daemon.storage;
 
 import std.conv : octal;
 import std.file;

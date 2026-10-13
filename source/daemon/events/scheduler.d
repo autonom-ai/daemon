@@ -1,16 +1,16 @@
-module autonom.events.scheduler;
+module daemon.events.scheduler;
 
-import autonom.agent;
-import autonom.config;
-import autonom.coord;
-import autonom.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
-import autonom.events.event : Event, EventStore, EventType;
-import autonom.events.schedule : SCHEDULES_FILE, Schedule, ScheduleStore;
-import autonom.interop.devin;
-import autonom.interop.devin.db : SessionMetadata;
-import autonom.interop.execution;
-import autonom.interop.session;
-import autonom.storage;
+import daemon.agent;
+import daemon.config;
+import daemon.coord;
+import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
+import daemon.events.event : Event, EventStore, EventType;
+import daemon.events.schedule : SCHEDULES_FILE, Schedule, ScheduleStore;
+import daemon.interop.devin;
+import daemon.interop.devin.db : SessionMetadata;
+import daemon.interop.execution;
+import daemon.interop.session;
+import daemon.storage;
 import core.atomic : atomicLoad, atomicStore;
 import core.thread : Thread;
 import core.time : Duration, seconds;

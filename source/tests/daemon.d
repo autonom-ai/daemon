@@ -1,6 +1,6 @@
 module tests.daemon;
 
-import autonom.server : health, stop;
+import daemon.server : health, stop;
 import tests.common;
 import serverino : endpoint, route;
 import unit_threaded : Name, Serial, should;

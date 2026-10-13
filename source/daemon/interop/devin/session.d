@@ -1,10 +1,10 @@
-module autonom.interop.devin.session;
+module daemon.interop.devin.session;
 
-import autonom.exception;
-import autonom.interop.devin.bridge;
-import autonom.interop.devin.db : SessionMetadata;
-import autonom.interop.execution;
-import autonom.interop.session;
+import daemon.exception;
+import daemon.interop.devin.bridge;
+import daemon.interop.devin.db : SessionMetadata;
+import daemon.interop.execution;
+import daemon.interop.session;
 
 
 class DevinSession : Session
