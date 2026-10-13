@@ -1,7 +1,7 @@
 {
   "name": "autonom",
-  "displayName": "Autonom",
-  "description": "A workspace for daemon-managed Devin sessions, team rooms, direct messages, and scheduled events.",
+  "displayName": "Autonom Command Center",
+  "description": "Autonom provider switch for the Devin Desktop Agent Command Center (proof of concept).",
   "version": "0.4.0",
   "publisher": "cet",
   "repository": {
@@ -10,7 +10,7 @@
   },
   "license": "AGPL-3.0-only",
   "private": true,
-  "icon": "media/autonom.png",
+  "icon": "media/autonom.svg",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -18,177 +18,48 @@
     "Other"
   ],
   "main": "./dist/extension.js",
-  "extensionKind": [
-    "workspace"
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:autonom.applyPatch",
+    "onCommand:autonom.restore",
+    "onCommand:autonom.status",
+    "onCommand:autonom.hotReload"
   ],
-  "capabilities": {
-    "untrustedWorkspaces": {
-      "supported": false,
-      "description": "Autonom launches local agents and requires a trusted workspace."
-    }
-  },
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "autonom",
-          "title": "Autonom",
-          "icon": "media/autonom.svg"
-        }
-      ]
-    },
-    "views": {
-      "autonom": [
-        {
-          "type": "webview",
-          "id": "autonom.control",
-          "name": "Control Center"
-        }
-      ]
-    },
     "commands": [
       {
-        "command": "autonom.open",
-        "title": "Open Workspace",
-        "category": "Autonom",
-        "icon": "dist/icons/box-arrow-up-right.svg"
-      },
-      {
-        "command": "autonom.newSession",
-        "title": "New Session",
-        "category": "Autonom"
-      },
-      {
-        "command": "autonom.refresh",
-        "title": "Refresh",
-        "category": "Autonom",
-        "icon": "dist/icons/arrow-clockwise.svg"
-      },
-      {
-        "command": "autonom.setupWorkspace",
-        "title": "Set Up Workspace",
-        "category": "Autonom"
-      },
-      {
-        "command": "autonom.settings",
-        "title": "Open Control Center",
-        "category": "Autonom"
-      },
-      {
-        "command": "autonom.policy",
-        "title": "Edit Workspace Policy",
-        "category": "Autonom"
-      },
-      {
-        "command": "autonom.config",
-        "title": "Edit Daemon Configuration",
-        "category": "Autonom"
-      },
-      {
-        "command": "autonom.patchCommandCenter",
+        "command": "autonom.applyPatch",
         "title": "Apply Command Center Patch",
         "category": "Autonom"
       },
       {
-        "command": "autonom.restoreCommandCenter",
-        "title": "Restore Original Command Center",
+        "command": "autonom.restore",
+        "title": "Restore Original Bundles",
         "category": "Autonom"
       },
       {
-        "command": "autonom.verifyCommandCenter",
-        "title": "Check Command Center Status",
+        "command": "autonom.status",
+        "title": "Show Patch Status",
+        "category": "Autonom"
+      },
+      {
+        "command": "autonom.hotReload",
+        "title": "Hot-Reload Companion UI",
         "category": "Autonom"
       }
-    ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "autonom.open",
-          "when": "view == autonom.control",
-          "group": "navigation"
-        },
-        {
-          "command": "autonom.refresh",
-          "when": "view == autonom.control",
-          "group": "navigation"
-        }
-      ]
-    },
-    "configuration": {
-      "title": "Autonom",
-      "properties": {
-        "autonom.rootDirectory": {
-          "type": "string",
-          "default": "",
-          "scope": "machine",
-          "description": "Autonom repository containing bin/autonom-daemon and source/coord/server.py."
-        },
-        "autonom.configFile": {
-          "type": "string",
-          "default": "",
-          "scope": "machine",
-          "description": "Daemon YAML configuration. Empty uses the Autonom XDG config path."
-        },
-        "autonom.port": {
-          "type": "number",
-          "default": 8080,
-          "minimum": 1,
-          "maximum": 65535,
-          "scope": "machine",
-          "description": "Loopback port shared by the daemon, hooks, and MCP server."
-        },
-        "autonom.defaultModel": {
-          "type": "string",
-          "default": "swe-2-medium",
-          "description": "Default model for new sessions. Existing sessions retain their saved model."
-        },
-        "autonom.permissionMode": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "accept-edits",
-            "smart",
-            "bypass"
-          ],
-          "default": "auto",
-          "description": "Default session permission mode. Autonom policy still screens bypassed calls."
-        },
-        "autonom.pollIntervalMs": {
-          "type": "number",
-          "default": 1000,
-          "minimum": 500,
-          "maximum": 10000,
-          "description": "Refresh interval while the Autonom interface is visible."
-        },
-        "autonom.notifyPings": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show native notifications when the human profile is pinged."
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "check": "tsc --noEmit",
     "build": "node .devin/build.mjs",
     "test": "npm run build && node --test dist/tests/*.js",
-    "test:browser": "npm run build && playwright test",
-    "preview": "npm run build && node dist/preview.js",
     "package:files": "vsce ls --no-dependencies --ignoreFile .devin/packageignore",
     "package": "npm run build && vsce package --no-dependencies --ignoreFile .devin/packageignore --out ../bin/autonom-0.4.0.vsix"
   },
-  "dependencies": {
-    "jsonc-parser": "3.3.1",
-    "markdown-it": "14.3.2",
-    "yaml": "2.9.1"
-  },
   "devDependencies": {
-    "@playwright/test": "1.55.1",
-    "@types/markdown-it": "14.1.2",
     "@types/node": "22.18.8",
     "@types/vscode": "1.90.0",
     "@vscode/vsce": "4.0.0",
-    "bootstrap-icons": "1.13.1",
     "esbuild": "0.25.9",
     "typescript": "5.9.3"
   }

@@ -241,6 +241,70 @@ class OrchestrationTests(unittest.TestCase):
                                    "tool_name": "mcp__autonom-orchestrate__team_start"})
             self.assertEqual(result["decision"], "block")
 
+    def test_team_merge_posts_the_source_worktree(self):
+        calls = []
+
+        def fake(method, path, body=None, query=None):
+            calls.append((method, path, body))
+            return {"status": "merged"}
+
+        with patch.dict(os.environ, {"AUTONOM_RUN_TOKEN": "private"}), \
+             patch.object(orchestrate, "call", side_effect=fake):
+            result = orchestrate.dispatch("team_merge", {
+                "session_id": "orchestrator",
+                "target": "builder",
+                "source": "tester",
+            })
+
+        self.assertEqual(result, {"status": "merged"})
+        self.assertEqual(calls[-1], ("POST", "/api/worktrees/builder/merge", {"source": "tester"}))
+
+    def test_team_worktree_remove_passes_force_as_a_query(self):
+        calls = []
+
+        def fake(method, path, body=None, query=None):
+            calls.append((method, path, body, query))
+            return {"name": "tester"}
+
+        with patch.dict(os.environ, {"AUTONOM_RUN_TOKEN": "private"}), \
+             patch.object(orchestrate, "call", side_effect=fake):
+            orchestrate.dispatch("team_worktree_remove", {
+                "session_id": "orchestrator",
+                "name": "tester",
+                "force": True,
+            })
+
+        self.assertEqual(calls[-1], ("DELETE", "/api/worktrees/tester", None, {"force": "true"}))
+
+    def test_team_wait_returns_immediately_for_a_finished_execution(self):
+        with patch.dict(os.environ, {"AUTONOM_RUN_TOKEN": "private"}), \
+             patch.object(orchestrate, "call", return_value={"status": "failed", "error": "boom"}), \
+             patch.object(orchestrate.time, "sleep") as sleep:
+            result = orchestrate.dispatch("team_wait", {
+                "session_id": "orchestrator",
+                "execution": "execution-1",
+                "timeout": 30,
+            })
+
+        self.assertEqual(result["status"], "failed")
+        sleep.assert_not_called()
+
+    def test_team_merge_surfaces_a_conflict(self):
+        with patch.dict(os.environ, {"AUTONOM_RUN_TOKEN": "private"}), \
+             patch.object(orchestrate, "call", return_value={
+                 "status": "conflict",
+                 "files": ["app.txt"],
+                 "merge": {"room": "merge-builder-tester"},
+             }):
+            result = orchestrate.dispatch("team_merge", {
+                "session_id": "orchestrator",
+                "target": "builder",
+                "source": "tester",
+            })
+
+        self.assertEqual(result["status"], "conflict")
+        self.assertEqual(result["merge"]["room"], "merge-builder-tester")
+
 
 if __name__ == "__main__":
     unittest.main()
