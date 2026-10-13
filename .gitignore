@@ -7,13 +7,10 @@ test-workspace
 .playwright-mcp/
 __pycache__
 
-# Workspace coordination files stay private; only the Command Center example is shared.
+# Workspace coordination files stay private.
 .devin/
 !/.devin/
 /.devin/*
-!/.devin/commandCenter.json
-!/.devin/hello.html
-!/.devin/notes.html
 
 # Documentation is private except the Command Center contract and validation method.
 docs/*
@@ -21,14 +18,6 @@ docs/*
 !/docs/COMMAND_CENTER.md
 !/docs/COMMAND_CENTER_VALIDATION.md
 
-extension/node_modules/
-extension/dist/
-extension/LICENSE.txt
-
-# Build, packaging, and reverse-engineering harness are part of the extension contract.
-/extension/.devin/*
-!/extension/.devin/
-!/extension/.devin/build.mjs
-!/extension/.devin/packageignore
-!/extension/.devin/cdp.mjs
-!/extension/.devin/analyze.mjs
+# Launcher build output and dependencies.
+source/launcher/node_modules/
+source/launcher/dist/

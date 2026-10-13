@@ -162,8 +162,8 @@ A good teammate prompt has five parts:
 
 Example:
 
-> Goal: make the extension's settings dialog survive a reload without losing unsaved input.
-> Scope: `extension/source/webview/` only. Deliverable: a commit on your branch plus a short
+> Goal: make the Command Center settings page keep unsaved input across a hot reload.
+> Scope: `assets/pages/settings.html` only. Deliverable: a commit on your branch plus a short
 > report. Constraints: do not change the daemon API. When done, DM `orchestrator` with the commit
 > hash, the files changed, and the commands you ran.
 
