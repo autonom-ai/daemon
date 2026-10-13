@@ -104,6 +104,10 @@ function escapeHtml(value: string): string {
  * inserted, and the title is HTML-escaped so it cannot break out of `<title>`.
  */
 export function pageHtml(page: CenterPage): string {
+    const raw = (page.html || "").trim();
+    if (raw.startsWith("<!DOCTYPE") || raw.startsWith("<html")) {
+        return page.html;
+    }
     const title = escapeHtml(page.title);
     return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; connect-src 'none';
@@ -112,7 +116,7 @@ style-src 'unsafe-inline'; img-src data:; font-src 'none'; frame-src 'none'; for
 html,body{margin:0;min-height:100%;background:var(--vscode-editor-background);color:var(--vscode-foreground);}
 body{padding:32px;box-sizing:border-box;font:var(--vscode-font-size) var(--vscode-font-family);}
 h1{font-size:28px;font-weight:500;}p{line-height:1.6;}
-</style></head><body>${page.html}</body></html>`;
+</style></head><body>${page.html || ""}</body></html>`;
 }
 
 /**

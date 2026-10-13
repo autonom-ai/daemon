@@ -19,6 +19,7 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onStartupFinished",
+    "workspaceContains:.devin/commandCenter.json",
     "onCommand:autonomCenter.attach",
     "onCommand:autonomCenter.reload",
     "onCommand:autonomCenter.hotReload",
@@ -72,7 +73,57 @@
         "title": "Set Provider Mode",
         "category": "Autonom Command Center"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Autonom",
+      "properties": {
+        "autonom.rootDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Autonom repository root."
+        },
+        "autonom.configFile": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the daemon configuration YAML file."
+        },
+        "autonom.port": {
+          "type": "integer",
+          "default": 8080,
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Loopback port on which the Autonom daemon runs."
+        },
+        "autonom.defaultModel": {
+          "type": "string",
+          "default": "swe-2-medium",
+          "description": "Default model used when launching teammate sessions."
+        },
+        "autonom.permissionMode": {
+          "type": "string",
+          "default": "bypass",
+          "enum": [
+            "auto",
+            "accept-edits",
+            "smart",
+            "bypass"
+          ],
+          "description": "Permission enforcement mode for newly launched teammate sessions."
+        },
+        "autonom.pollIntervalMs": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 500,
+          "maximum": 10000,
+          "description": "Polling interval in milliseconds for coordination updates."
+        },
+        "autonom.notifyPings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show desktop notifications on agent pings."
+        }
+      }
+    }
   },
   "scripts": {
     "check": "tsc --noEmit",
