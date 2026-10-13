@@ -592,6 +592,22 @@ export function activate(context: vscode.ExtensionContext): void
             },
         },
     );
+
+    // Auto-attach on startup when a workspace folder is open.
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
+    {
+        void Promise.resolve().then(async () =>
+        {
+            try
+            {
+                await attach();
+            }
+            catch (error: unknown)
+            {
+                log(`Auto-attach skipped or failed: ${sanitizedError(error)}`);
+            }
+        });
+    }
 }
 
 export async function deactivate(): Promise<void>
