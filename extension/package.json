@@ -25,7 +25,9 @@
     "onCommand:autonomCenter.status",
     "onCommand:autonomCenter.openTab",
     "onCommand:autonomCenter.editConfig",
-    "onCommand:autonomCenter.bridgeIdentity"
+    "onCommand:autonomCenter.bridgeIdentity",
+    "onCommand:autonomCenter.daemonRequest",
+    "onCommand:autonomCenter.setMode"
   ],
   "contributes": {
     "commands": [
@@ -62,6 +64,11 @@
       {
         "command": "autonomCenter.editConfig",
         "title": "Edit Configuration",
+        "category": "Autonom Command Center"
+      },
+      {
+        "command": "autonomCenter.setMode",
+        "title": "Set Provider Mode",
         "category": "Autonom Command Center"
       }
     ]

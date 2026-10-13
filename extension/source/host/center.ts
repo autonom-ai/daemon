@@ -44,19 +44,36 @@ export async function loadCenter(configPath: string): Promise<CenterContent> {
     const directory = await realpath(dirname(configPath));
     let total = 0;
     for (const [id, page] of Object.entries(config.tabs)) {
-        if (!identifier(id) || !object(page) || typeof page.title !== "string" || page.title.length > 200
-            || typeof page.file !== "string" || isAbsolute(page.file))
+        if (!identifier(id) || !object(page) || typeof page.title !== "string" || page.title.length > 200)
             throw new Error(`Invalid tab: ${id}`);
-        const file = resolve(directory, page.file);
-        const child = relative(directory, file);
-        if (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)
-            || await realpath(dirname(file)) !== directory)
-            throw new Error("Tab files must stay inside the configuration directory.");
-        const html = await readPrivateFile(file, 262144);
-        total += Buffer.byteLength(html);
-        if (total > 1048576)
-            throw new Error("Command Center content exceeds 1 MiB.");
-        ret.tabs[id] = { title: page.title, html };
+        const isAutonom = page.autonom === true;
+        let html = "";
+        if (!isAutonom) {
+            if (typeof page.file !== "string" || isAbsolute(page.file))
+                throw new Error(`Invalid tab: ${id}`);
+            const file = resolve(directory, page.file);
+            const child = relative(directory, file);
+            if (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)
+                || await realpath(dirname(file)) !== directory)
+                throw new Error("Tab files must stay inside the configuration directory.");
+            html = await readPrivateFile(file, 262144);
+            total += Buffer.byteLength(html);
+            if (total > 1048576)
+                throw new Error("Command Center content exceeds 1 MiB.");
+        } else if (typeof page.file === "string") {
+            if (isAbsolute(page.file))
+                throw new Error(`Invalid tab: ${id}`);
+            const file = resolve(directory, page.file);
+            const child = relative(directory, file);
+            if (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)
+                || await realpath(dirname(file)) !== directory)
+                throw new Error("Tab files must stay inside the configuration directory.");
+            html = await readPrivateFile(file, 262144);
+            total += Buffer.byteLength(html);
+            if (total > 1048576)
+                throw new Error("Command Center content exceeds 1 MiB.");
+        }
+        ret.tabs[id] = { title: page.title, html, ...(isAutonom ? { autonom: true } : {}) };
     }
     const ids = new Set<string>();
     for (const item of config.items) {

@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
-const [action = "targets", target = "workbench", input = ""] = process.argv.slice(2);
+const [action = "targets", target = "workbench", rawInput = ""] = process.argv.slice(2);
+const input = rawInput.startsWith("@") ? await readFile(rawInput.slice(1), "utf8") : rawInput;
 const port = process.env.CDP_PORT || "9882";
 const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
 if (action === "targets") {
@@ -87,7 +88,7 @@ try {
         const nativeCode = await readFile(new URL("../dist/commandCenter/native.js", import.meta.url), "utf8");
         await send("Debugger.enable");
         await send("Runtime.evaluate", {
-            expression: `${nativeCode};globalThis.__autonomProbe=AutonomNative.probe();Boolean(globalThis.__autonomProbe)`,
+            expression: `${nativeCode};globalThis.AutonomNative=AutonomNative;globalThis.__autonomProbe=AutonomNative.probe();Boolean(globalThis.__autonomProbe)`,
             returnByValue: true,
         });
         const capture = async (expression, assignments) => {
@@ -123,9 +124,10 @@ try {
         if (action === "hot") {
             const result = await send("Runtime.evaluate", {
                 expression: "globalThis.__autonomCenter?.dispose();"
+                    + `${nativeCode};globalThis.AutonomNative=AutonomNative;`
                     + "globalThis.__autonomServices.windowId=window.vscodeWindowId;"
                     + "globalThis.__autonomServices.api=globalThis.__autonomProbe.api;"
-                    + `AutonomNative.install(globalThis.__autonomServices,"live-proof",false)`
+                    + `globalThis.AutonomNative.install(globalThis.__autonomServices,"live-proof",false)`
                     + `.update(${input},false)`,
                 returnByValue: true,
                 awaitPromise: true,

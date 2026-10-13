@@ -3,8 +3,8 @@
     "items": [
         {
             "id": "automations",
-            "label": "Jared",
-            "tab": "hello"
+            "label": "Command Center",
+            "tab": "autonom"
         },
         {
             "id": "notes",
@@ -14,14 +14,14 @@
         }
     ],
     "tabs": {
-        "hello": {
-            "title": "Hello world",
-            "file": "hello.html"
+        "autonom": {
+            "title": "Autonom Command Center",
+            "autonom": true
         },
         "notes": {
             "title": "Custom notes",
             "file": "notes.html"
         }
     },
-    "activeTab": "hello"
+    "activeTab": "autonom"
 }

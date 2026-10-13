@@ -34,8 +34,16 @@ await Promise.all([
         format: "iife",
         globalName: "AutonomNative",
     }),
+    build({
+        ...common,
+        entryPoints: ["source/webview/index.ts"],
+        outfile: "dist/commandCenter/ui.js",
+        platform: "browser",
+        format: "iife",
+    }),
 ]);
 await copyFile("media/commandCenter.css", "dist/commandCenter/autonom.sessions.css");
+await copyFile("media/autonom.ui.css", "dist/commandCenter/ui.css");
 const tests = (await readdir("tests/unit")).filter((name) => name.endsWith(".ts"));
 if (tests.length)
     await build({ ...common, entryPoints: tests.map((name) => "tests/unit/" + name), outdir: "dist/tests", platform: "node" });

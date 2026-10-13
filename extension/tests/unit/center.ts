@@ -73,7 +73,35 @@ test("file-backed configuration reloads content and validates the entire replace
         await symlink("hello.html", join(configDirectory, "linked.html"));
         await writeFile(config, text.replace("hello.html", "linked.html"));
         await assert.rejects(loadCenter(config));
+
+        // Test autonom tab without file
+        const autonomConfig = JSON.stringify({
+            enabled: true,
+            items: [{ id: "automations", label: "Command Center", tab: "autonom" }],
+            tabs: { autonom: { title: "Command Center", autonom: true } },
+            activeTab: "autonom",
+        });
+        await writeFile(config, autonomConfig);
+        const loadedAutonom = await loadCenter(config);
+        assert.equal(loadedAutonom.tabs.autonom?.title, "Command Center");
+        assert.equal(loadedAutonom.tabs.autonom?.autonom, true);
+        assert.equal(loadedAutonom.tabs.autonom?.html, "");
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+});
+
+test("autonomPageHtml wraps UI bundle with script-src inline, connect-src none and escapes title", async () => {
+    const { autonomPageHtml } = await import("../../source/commandCenter/content.js");
+    const html = autonomPageHtml(
+        { title: "Autonom <Center>", html: "<div class=\"test\">Hello</div>" },
+        "console.log('bundle');",
+        ".test { color: red; }",
+    );
+    assert.ok(html.includes("<title>Autonom &lt;Center&gt;</title>"));
+    assert.ok(html.includes("script-src 'unsafe-inline'"));
+    assert.ok(html.includes("connect-src 'none'"));
+    assert.ok(html.includes("console.log('bundle');"));
+    assert.ok(html.includes(".test { color: red; }"));
+    assert.ok(html.includes("<div id=\"app\"><div class=\"test\">Hello</div></div>"));
 });

@@ -10,6 +10,9 @@
  */
 import { RuntimeCenter } from "./host/cdp";
 import { CenterContent, loadCenter } from "./host/center";
+import { autonomPageHtml } from "./commandCenter/content";
+import { DaemonClient } from "./host/client";
+import { configurationState, readSettings, saveDaemon, savePolicy, validateSettings } from "./host/config";
 
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -86,6 +89,17 @@ export function activate(context: vscode.ExtensionContext): void
     let pending: Promise<void> = Promise.resolve();
     let stopping = false;
     let detachPending: Promise<void> | undefined;
+    let daemonClient: DaemonClient | undefined;
+
+    function getDaemonClient(): DaemonClient
+    {
+        if (!daemonClient)
+        {
+            const settings = readSettings(vscode.workspace.getConfiguration("autonom"), context.extensionPath);
+            daemonClient = new DaemonClient(settings);
+        }
+        return daemonClient;
+    }
 
     function log(message: string): void
     {
@@ -171,6 +185,38 @@ export function activate(context: vscode.ExtensionContext): void
                     + "Fix the configured file before running Attach or Reload; no changes were applied.");
         }
 
+        let uiJs: string | undefined;
+        let uiCss: string | undefined;
+        for (const [, tab] of Object.entries(content.tabs))
+        {
+            if (tab.autonom)
+            {
+                if (uiJs === undefined)
+                {
+                    try
+                    {
+                        uiJs = await readFile(context.asAbsolutePath("dist/commandCenter/ui.js"), "utf8");
+                    }
+                    catch
+                    {
+                        uiJs = "";
+                    }
+                }
+                if (uiCss === undefined)
+                {
+                    try
+                    {
+                        uiCss = await readFile(context.asAbsolutePath("dist/commandCenter/ui.css"), "utf8");
+                    }
+                    catch
+                    {
+                        uiCss = "";
+                    }
+                }
+                tab.html = autonomPageHtml(tab, uiJs, uiCss);
+            }
+        }
+
         const center = await getRuntime();
         if (!(await center.status()).connected)
             await vscode.commands.executeCommand("workbench.action.commandCenter.goToAllSessions");
@@ -202,6 +248,39 @@ export function activate(context: vscode.ExtensionContext): void
         {
             throw new CommandError("The rebuilt native runtime bundle is missing or unreadable.");
         }
+
+        let uiJs: string | undefined;
+        let uiCss: string | undefined;
+        for (const [, tab] of Object.entries(lastContent.tabs))
+        {
+            if (tab.autonom)
+            {
+                if (uiJs === undefined)
+                {
+                    try
+                    {
+                        uiJs = await readFile(context.asAbsolutePath("dist/commandCenter/ui.js"), "utf8");
+                    }
+                    catch
+                    {
+                        uiJs = "";
+                    }
+                }
+                if (uiCss === undefined)
+                {
+                    try
+                    {
+                        uiCss = await readFile(context.asAbsolutePath("dist/commandCenter/ui.css"), "utf8");
+                    }
+                    catch
+                    {
+                        uiCss = "";
+                    }
+                }
+                tab.html = autonomPageHtml(tab, uiJs, uiCss);
+            }
+        }
+
         const ret = await (await getRuntime()).reloadRuntime(runtimeCode, lastContent);
         log(`Native runtime hot-reloaded: ${sanitizedStatus(ret)}`);
         return ret;
@@ -271,6 +350,172 @@ export function activate(context: vscode.ExtensionContext): void
         }
     }
 
+    async function setMode(argument?: unknown): Promise<unknown>
+    {
+        requireTrustedWorkspace();
+        const mode = argument as "autonom" | "devin-cloud";
+        if (mode !== "autonom" && mode !== "devin-cloud")
+            throw new CommandError("Mode must be autonom or devin-cloud.");
+        const center = await getRuntime();
+        const ret = await center.setMode(mode);
+        log(`Native status: ${sanitizedStatus(ret)}`);
+        return ret;
+    }
+
+    async function daemonRequest(argument?: unknown): Promise<unknown>
+    {
+        if (!argument || typeof argument !== "object")
+            throw new Error("Invalid request payload.");
+        const raw = argument as Record<string, unknown>;
+        const message = (raw.params && typeof raw.params === "object" ? { ...raw, ...(raw.params as object) } : raw) as Record<string, unknown>;
+        const action = String(raw.action || message.action || "");
+        const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const client = getDaemonClient();
+
+        switch (action)
+        {
+            case "getState":
+                return await client.getState(folder);
+
+            case "getModels":
+                return await client.getModels();
+
+            case "getMessages": {
+                const source = message.source as "room" | "dm" | "pings";
+                const target = String(message.target || "");
+                return await client.getMessages(source, target);
+            }
+
+            case "postMessage": {
+                const room = String(message.room || message.target || "");
+                const text = String(message.text || "");
+                const ping = Array.isArray(message.ping)
+                    ? message.ping.map(String)
+                    : (Array.isArray(message.pings) ? message.pings.map(String) : undefined);
+                return await client.postMessage(room, text, ping);
+            }
+
+            case "getEvents": {
+                const profile = String(message.profile || "");
+                return await client.getEvents(profile);
+            }
+
+            case "getTranscript": {
+                const id = String(message.id || "");
+                return await client.getTranscript(id);
+            }
+
+            case "createProfile": {
+                const name = String(message.name || "");
+                return await client.createProfile(name);
+            }
+
+            case "removeProfile": {
+                const name = String(message.name || "");
+                return await client.removeProfile(name);
+            }
+
+            case "startSession": {
+                const prompt = String(message.prompt || "");
+                const model = String(message.model || "swe-2-medium");
+                const mode = String(message.mode || "bypass");
+                const directory = String(message.directory || folder || "");
+                const profile = message.profile ? String(message.profile) : undefined;
+                return await client.startSession({
+                    prompt,
+                    model,
+                    mode,
+                    directory,
+                    ...(profile ? { profile } : {}),
+                });
+            }
+
+            case "resumeSession": {
+                const id = String(message.id || "");
+                const prompt = String(message.prompt || "");
+                return await client.resumeSession(id, prompt);
+            }
+
+            case "stopExecution": {
+                const id = String(message.id || "");
+                return await client.stopExecution(id);
+            }
+
+            case "removeSession": {
+                const id = String(message.id || "");
+                return await client.removeSession(id);
+            }
+
+            case "registerSession":
+            case "manageSession": {
+                const id = String(message.id || "");
+                if (!id)
+                    throw new Error("Session ID is required.");
+                return await client.manageSession(id);
+            }
+
+            case "getExecution": {
+                const id = String(message.id || "");
+                return await client.getExecution(id);
+            }
+
+            case "getPolicy": {
+                const settings = readSettings(vscode.workspace.getConfiguration("autonom"), context.extensionPath);
+                return await configurationState(folder || "", settings.configFile);
+            }
+
+            case "getSettings": {
+                return readSettings(vscode.workspace.getConfiguration("autonom"), context.extensionPath);
+            }
+
+            case "saveSettings": {
+                const validated = validateSettings(message.settings);
+                const config = vscode.workspace.getConfiguration("autonom");
+                await config.update("port", validated.port, vscode.ConfigurationTarget.Global);
+                await config.update("defaultModel", validated.defaultModel, vscode.ConfigurationTarget.Global);
+                await config.update("permissionMode", validated.permissionMode, vscode.ConfigurationTarget.Global);
+                await config.update("pollIntervalMs", validated.pollIntervalMs, vscode.ConfigurationTarget.Global);
+                await config.update("notifyPings", validated.notifyPings, vscode.ConfigurationTarget.Global);
+                if (validated.rootDirectory)
+                    await config.update("rootDirectory", validated.rootDirectory, vscode.ConfigurationTarget.Global);
+                if (validated.configFile)
+                    await config.update("configFile", validated.configFile, vscode.ConfigurationTarget.Global);
+                client.configure(validated);
+                return { ok: true };
+            }
+
+            case "savePolicy": {
+                if (!folder)
+                    throw new Error("No workspace folder open.");
+                const content = String(message.content || "");
+                const version = String(message.version || "");
+                await savePolicy(folder, content, version);
+                return { ok: true };
+            }
+
+            case "saveDaemon": {
+                const settings = readSettings(vscode.workspace.getConfiguration("autonom"), context.extensionPath);
+                const values = message.values as Record<string, unknown>;
+                await saveDaemon(settings.configFile, values);
+                return { ok: true };
+            }
+
+            case "editConfig": {
+                await vscode.commands.executeCommand("autonomCenter.editConfig");
+                return { ok: true };
+            }
+
+            case "setMode": {
+                const nextMode = message.mode as "autonom" | "devin-cloud";
+                const center = await getRuntime();
+                return await center.setMode(nextMode);
+            }
+
+            default:
+                throw new Error(`Unknown daemon action: ${action}`);
+        }
+    }
+
     /**
      * Registers a command that serializes with the others and never rejects.
      *
@@ -334,6 +579,8 @@ export function activate(context: vscode.ExtensionContext): void
         register("autonomCenter.status", status),
         register("autonomCenter.openTab", openTab),
         register("autonomCenter.editConfig", editConfig),
+        register("autonomCenter.setMode", setMode),
+        vscode.commands.registerCommand("autonomCenter.daemonRequest", daemonRequest),
         vscode.commands.registerCommand("autonomCenter.bridgeIdentity", () =>
         {
             return identity;

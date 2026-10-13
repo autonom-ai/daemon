@@ -680,6 +680,24 @@ export class RuntimeCenter
         });
     }
 
+    setMode(mode: "autonom" | "devin-cloud"): Promise<RuntimeStatus>
+    {
+        return this.serialize(async () =>
+        {
+            if (!this.client?.connected)
+                throw new Error("Attach the native Command Center before changing mode.");
+            const ret = await this.evaluate(this.client, statusExpression(
+                `globalThis.__autonomCenter?.owner===${JSON.stringify(this.identity)}`
+                + `?globalThis.__autonomCenter.setMode(${JSON.stringify(mode)}):null`));
+            if (ret === null)
+            {
+                this.disconnect();
+                throw new Error("The native Command Center runtime is gone. Attach again before changing mode.");
+            }
+            return validateStatus(ret);
+        });
+    }
+
     private serialize<Value>(action: () => Promise<Value>): Promise<Value>
     {
         const ret = this.pending.then(action);
