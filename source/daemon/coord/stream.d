@@ -1,6 +1,6 @@
-module autonom.coord.stream;
+module daemon.coord.stream;
 
-import autonom.storage;
+import daemon.storage;
 
 import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_RDONLY, O_RDWR;
 import std.array : join;

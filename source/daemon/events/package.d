@@ -1,5 +1,5 @@
-module autonom.events;
+module daemon.events;
 
-public import autonom.events.event : Event, EventStore, EventType;
-public import autonom.events.schedule : Match, Schedule, ScheduleStore;
-public import autonom.events.scheduler : Scheduler;
+public import daemon.events.event : Event, EventStore, EventType;
+public import daemon.events.schedule : Match, Schedule, ScheduleStore;
+public import daemon.events.scheduler : Scheduler;

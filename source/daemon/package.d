@@ -1,7 +1,7 @@
-module autonom;
+module daemon;
 
-public import autonom.agent : Profile, ProfileStore;
-public import autonom.config;
-public import autonom.exception;
-public import autonom.interop;
-public import autonom.policy;
+public import daemon.agent : Profile, ProfileStore;
+public import daemon.config;
+public import daemon.exception;
+public import daemon.interop;
+public import daemon.policy;

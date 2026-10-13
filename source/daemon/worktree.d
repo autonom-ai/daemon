@@ -1,13 +1,13 @@
-module autonom.worktree;
+module daemon.worktree;
 
-import autonom.agent;
-import autonom.config;
-import autonom.coord;
-import autonom.events.event : Event, EventType;
-import autonom.exception;
-import autonom.interop.execution : childEnvironment, signalExecution;
-import autonom.server;
-import autonom.storage;
+import daemon.agent;
+import daemon.config;
+import daemon.coord;
+import daemon.events.event : Event, EventType;
+import daemon.exception;
+import daemon.interop.execution : childEnvironment, signalExecution;
+import daemon.server;
+import daemon.storage;
 import serverino;
 
 import core.sync.mutex;

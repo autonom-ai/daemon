@@ -1,6 +1,6 @@
 module tests.bridge;
 
-import autonom.interop;
+import daemon.interop;
 import tests.common;
 import unit_threaded : Name, should, shouldThrow;
 

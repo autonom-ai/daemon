@@ -1,3 +1,3 @@
-module autonom.policy;
+module daemon.policy;
 
-public import autonom.policy.access : Policy, PolicyResult;
+public import daemon.policy.access : Policy, PolicyResult;

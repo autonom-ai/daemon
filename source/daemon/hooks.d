@@ -1,12 +1,12 @@
-module autonom.hooks;
+module daemon.hooks;
 
-import autonom.agent;
-import autonom.events.event : Event, EventType;
-import autonom.exception;
-import autonom.interop.execution;
-import autonom.interop.session;
-import autonom.policy;
-import autonom.server;
+import daemon.agent;
+import daemon.events.event : Event, EventType;
+import daemon.exception;
+import daemon.interop.execution;
+import daemon.interop.session;
+import daemon.policy;
+import daemon.server;
 import serverino;
 
 import std.algorithm.searching : startsWith;

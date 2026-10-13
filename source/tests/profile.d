@@ -1,9 +1,9 @@
 module tests.profile;
 
-import autonom.agent;
-import autonom.agent.profile;
-import autonom.agent.store;
-import autonom.interop;
+import daemon.agent;
+import daemon.agent.profile;
+import daemon.agent.store;
+import daemon.interop;
 import tests.common;
 import serverino : endpoint, route;
 import unit_threaded : Name, should, shouldThrow;

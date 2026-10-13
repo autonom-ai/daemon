@@ -1,7 +1,7 @@
-module autonom.interop.permission;
+module daemon.interop.permission;
 
-import autonom.exception;
-import autonom.server;
+import daemon.exception;
+import daemon.server;
 import serverino;
 
 import std.datetime : Clock, UTC;

@@ -1,4 +1,4 @@
-module autonom.interop.devin;
+module daemon.interop.devin;
 
-public import autonom.interop.devin.bridge : Devin;
-public import autonom.interop.devin.session : DevinSession;
+public import daemon.interop.devin.bridge : Devin;
+public import daemon.interop.devin.session : DevinSession;

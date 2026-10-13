@@ -1,11 +1,11 @@
-module autonom.router;
+module daemon.router;
 
 import intuit.router : IRouter, OpenRouter;
 import mir.algebraic_alias.yaml;
 
 import std.algorithm.searching : canFind, startsWith;
 
-package(autonom):
+package(daemon):
 
 IRouter createRouter(YamlAlgebraic settings)
 {

@@ -1,14 +1,14 @@
-module autonom.server;
+module daemon.server;
 
-import autonom.agent;
-import autonom.config;
-import autonom.coord;
-import autonom.events;
-import autonom.exception;
-import autonom.policy;
-import autonom.interop.devin;
-import autonom.interop.permission : PermissionStore;
-import autonom.worktree;
+import daemon.agent;
+import daemon.config;
+import daemon.coord;
+import daemon.events;
+import daemon.exception;
+import daemon.policy;
+import daemon.interop.devin;
+import daemon.interop.permission : PermissionStore;
+import daemon.worktree;
 import serverino;
 
 import core.sys.posix.signal : kill, SIGTERM;
@@ -25,7 +25,7 @@ private:
 
 bool stopping;
 
-package(autonom):
+package(daemon):
 
 Config configuration;
 Devin bridge;

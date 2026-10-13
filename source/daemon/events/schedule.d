@@ -1,14 +1,14 @@
-module autonom.events.schedule;
+module daemon.events.schedule;
 
-import autonom.agent;
-import autonom.config;
-import autonom.coord;
-import autonom.coord.access : caller, onlyFields;
-import autonom.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
-import autonom.events.event : EventType, parseEventType;
-import autonom.exception;
-import autonom.server;
-import autonom.storage;
+import daemon.agent;
+import daemon.config;
+import daemon.coord;
+import daemon.coord.access : caller, onlyFields;
+import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
+import daemon.events.event : EventType, parseEventType;
+import daemon.exception;
+import daemon.server;
+import daemon.storage;
 import serverino;
 
 import std.conv : to;

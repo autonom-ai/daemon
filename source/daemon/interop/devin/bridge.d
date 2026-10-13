@@ -1,15 +1,15 @@
-module autonom.interop.devin.bridge;
+module daemon.interop.devin.bridge;
 
-import autonom.agent : Profile, validName;
-import autonom.config;
-import autonom.exception;
-import autonom.interop.bridge;
-import autonom.interop.devin.db : SessionMetadata, readSessionMetadata;
-import autonom.interop.devin.session;
-import autonom.interop.execution;
-import autonom.interop.session;
-import autonom.server : acceptMethod, bridge, profileStore, readLaunch, respond;
-import autonom.storage;
+import daemon.agent : Profile, validName;
+import daemon.config;
+import daemon.exception;
+import daemon.interop.bridge;
+import daemon.interop.devin.db : SessionMetadata, readSessionMetadata;
+import daemon.interop.devin.session;
+import daemon.interop.execution;
+import daemon.interop.session;
+import daemon.server : acceptMethod, bridge, profileStore, readLaunch, respond;
+import daemon.storage;
 import serverino;
 
 import core.stdc.errno : errno, EWOULDBLOCK;

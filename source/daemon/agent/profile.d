@@ -1,7 +1,7 @@
-module autonom.agent.profile;
+module daemon.agent.profile;
 
-import autonom.interop.session;
-import autonom.server;
+import daemon.interop.session;
+import daemon.server;
 import serverino;
 
 import std.json : JSONValue;
@@ -26,7 +26,7 @@ class Profile
 private:
     Session _session;
 
-package(autonom.agent):
+package(daemon.agent):
     void bind(Session session)
     {
         _session = session;

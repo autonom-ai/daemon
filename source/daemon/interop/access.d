@@ -1,8 +1,8 @@
-module autonom.interop.access;
+module daemon.interop.access;
 
-import autonom.interop.execution;
-import autonom.interop.session;
-import autonom.storage;
+import daemon.interop.execution;
+import daemon.interop.session;
+import daemon.storage;
 
 import std.conv : octal;
 import std.file;

@@ -1,6 +1,6 @@
 module tests.database;
 
-import autonom.interop.devin.db;
+import daemon.interop.devin.db;
 import tests.common;
 import arsd.sqlite;
 import unit_threaded : Name, should;
