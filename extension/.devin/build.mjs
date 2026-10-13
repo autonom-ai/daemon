@@ -21,13 +21,6 @@ await Promise.all([
     }),
     build({
         ...common,
-        entryPoints: ["source/commandCenter/index.ts"],
-        outfile: "dist/commandCenter/autonom.bundle.js",
-        platform: "browser",
-        format: "esm",
-    }),
-    build({
-        ...common,
         entryPoints: ["source/commandCenter/native.ts"],
         outfile: "dist/commandCenter/native.js",
         platform: "browser",
@@ -42,7 +35,6 @@ await Promise.all([
         format: "iife",
     }),
 ]);
-await copyFile("media/commandCenter.css", "dist/commandCenter/autonom.sessions.css");
 await copyFile("media/autonom.ui.css", "dist/commandCenter/ui.css");
 const tests = (await readdir("tests/unit")).filter((name) => name.endsWith(".ts"));
 if (tests.length)
