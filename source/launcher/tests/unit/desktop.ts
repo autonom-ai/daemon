@@ -10,15 +10,18 @@ import {
 } from "../../desktop";
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { promisify } from "node:util";
 
 const REAL_APP_ROOT = "/usr/share/devin-desktop/resources/app";
+const execute = promisify(execFile);
 
 function transport(): { transport: PipeTransport; readable: PassThrough; writable: PassThrough }
 {
@@ -147,7 +150,7 @@ test("debug mode refuses an occupied port before spawning Desktop", async () =>
     assert.ok(address && typeof address !== "string");
     try
     {
-        await assert.rejects(launchDesktop({ binary: "/not-an-executable", workspace: tmpdir(), debugPort: address.port }),
+        await assert.rejects(launchDesktop({ binary: "/not-an-executable", debugPort: address.port }),
             { code: "EADDRINUSE" });
     }
     finally
@@ -159,4 +162,16 @@ test("debug mode refuses an occupied port before spawning Desktop", async () =>
 test("the installed Desktop build satisfies the pin", { skip: !existsSync(REAL_APP_ROOT) }, async () =>
 {
     await verifyDesktopBuild(REAL_APP_ROOT);
+});
+
+test("the launcher rejects an invalid --debug port before touching Desktop", async () =>
+{
+    const launcher = resolve(__dirname, "../../launcher.js");
+    for (const argument of ["--debug=", "--debug=0", "--debug=65536", "--debug=abc"])
+    {
+        const failure = await execute("node", [launcher, argument])
+            .catch((error: unknown) => error) as { code?: number; stdout?: string };
+        assert.equal(failure.code, 1);
+        assert.match(String(failure.stdout), /must be an integer/);
+    }
 });

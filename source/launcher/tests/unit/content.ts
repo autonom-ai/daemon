@@ -36,6 +36,16 @@ test("section and item order defines the navigation without changing native obje
     assert.equal(native.length, 2);
 });
 
+test("flat items are not nested under empty sections", () =>
+{
+    const ret = overlayItems(native, {
+        enabled: true,
+        items: [item("events", "Events"), item("automations", "Schedules")],
+        sections: [{ id: "rooms", label: "Rooms", items: [] }, { id: "profiles", label: "Profiles", items: [] }],
+    });
+    assert.deepEqual(ret.map((entry) => entry.id), ["events", "automations"]);
+});
+
 test("new items require an action; existing native items can retain their navigation", () =>
 {
     assert.throws(() => overlayItems(native, {

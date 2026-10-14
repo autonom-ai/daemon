@@ -4,9 +4,11 @@ import { startBridge } from "./bridge";
 import { DaemonClient } from "./client";
 import type { ActionCache, LauncherSettings } from "./config";
 import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, loadAction, loadCenter, readSettings } from "./config";
+import { startAcpHost } from "./acp/host";
+import { installAutonomAgent } from "./acp/registry";
 import { visibleItems } from "./center";
 import { defaultSocketPath, isLauncherRunning, startControlSocket } from "./control";
-import { appRootFor, attachDebugTransport, launchDesktop, openInDesktop, resolveDesktopBinary, verifyDesktopBuild, workbenchUrl } from "./desktop";
+import { appRootFor, launchDesktop, openInDesktop, resolveDesktopBinary, verifyDesktopBuild, workbenchUrl } from "./desktop";
 import type { RuntimeStatus } from "./runtime";
 
 import { watch } from "node:fs";
@@ -17,74 +19,23 @@ import { dirname, extname, join, resolve } from "node:path";
 const HEARTBEAT_INTERVAL = 5000;
 const ATTACH_TIMEOUT = 60000;
 
-const USAGE = `Usage: autonom-launcher [workspace] [options]
-
-Launches Devin Desktop with --remote-debugging-pipe and attaches the Autonom Command Center.
-
-Options:
-  --desktop <command>      Devin Desktop command (default: devin-desktop)
-  --config <file>          Command Center definition (default: <repository>/assets/ui.yml)
-  --daemon-config <file>   Daemon configuration (default: ~/.config/autonom/config.yml)
-  --port <port>            Daemon loopback port (default: 8080 or AUTONOM_PORT)
-  --socket <path>          Control socket (default: $XDG_RUNTIME_DIR/autonom/launcher.sock)
-  --debug                  Use loopback CDP port instead of the private pipe (development only)
-  --debug-port <port>      Debug port (default: 9222; requires --debug)
-  --attach <target-id>     Debug only: manage exactly one existing test window without launching Desktop
-  --help                   Show this help
-`;
-
 type Options = {
-    workspace: string;
-    desktop: string;
-    config: string | undefined;
-    daemonConfig: string | undefined;
-    port: number | undefined;
-    socket: string;
-    desktopArguments: string[] | undefined;
-    help: boolean;
-    debug: boolean;
-    debugPort: number;
-    waitForPid: number | undefined;
-    attach: string | undefined;
+    arguments: string[];
+    debugPort: number | undefined;
 };
 
 async function main(): Promise<void>
 {
     const options = parseArguments(process.argv.slice(2));
-    if (options.help)
+    const binary = resolveDesktopBinary("devin-desktop");
+    const socketPath = defaultSocketPath();
+    if (await isLauncherRunning(socketPath))
     {
-        process.stdout.write(USAGE);
-        return;
-    }
+        if (options.debugPort !== undefined)
+            log("A managed Desktop is already running; --debug cannot open a port on it. "
+                + "Quit Desktop and the launcher, then relaunch.");
 
-    if (options.waitForPid !== undefined)
-    {
-        const deadline = Date.now() + 15000;
-        while (true)
-        {
-            try
-            {
-                process.kill(options.waitForPid, 0);
-            }
-            catch (error)
-            {
-                if ((error as NodeJS.ErrnoException).code === "ESRCH")
-                    break;
-
-                throw error;
-            }
-
-            if (Date.now() > deadline)
-                throw new Error("The Desktop bootstrap did not exit; refusing to launch against its locked profile.");
-
-            await new Promise((resolve_) => setTimeout(resolve_, 50));
-        }
-    }
-
-    const binary = resolveDesktopBinary(options.desktop);
-    if (await isLauncherRunning(options.socket))
-    {
-        openInDesktop(binary, options.desktopArguments ?? [options.workspace]);
+        openInDesktop(binary, options.arguments);
         return;
     }
 
@@ -98,11 +49,9 @@ async function main(): Promise<void>
         return {} as Partial<LauncherSettings>;
     });
     const settings: LauncherSettings = {
-        port: options.port ?? environmentPort() ?? stored.port ?? 8080,
-        configFile: expandPath(options.daemonConfig ?? process.env.AUTONOM_CONFIG
-            ?? stored.configFile ?? defaultDaemonConfigPath()),
-        commandCenterConfig: expandPath(options.config ?? stored.commandCenterConfig
-            ?? join(repository, "assets", "ui.yml")),
+        port: environmentPort() ?? stored.port ?? 8080,
+        configFile: expandPath(process.env.AUTONOM_CONFIG ?? stored.configFile ?? defaultDaemonConfigPath()),
+        commandCenterConfig: expandPath(stored.commandCenterConfig ?? join(repository, "assets", "ui.yml")),
     };
     const appRoot = appRootFor(binary);
     await verifyDesktopBuild(appRoot);
@@ -112,8 +61,11 @@ async function main(): Promise<void>
     const runtimePath = join(__dirname, "runtime.js");
     let runtimeSource = await readFile(runtimePath, "utf8");
     const client = new DaemonClient({ port: settings.port, configFile: settings.configFile, rootDirectory: repository });
+    await client.connect();
+    const acpHost = await startAcpHost(client, join(dirname(socketPath), "acp.sock"));
+    await installAutonomAgent(repository, acpHost.socketPath);
     const bridge = await startBridge({
-        workspace: options.workspace,
+        workspace: process.cwd(),
         repository,
         settingsPath,
         settings,
@@ -123,16 +75,14 @@ async function main(): Promise<void>
         runScript,
         reloadUi: hot,
     });
-    const { child, transport } = options.attach
-        ? { child: undefined, transport: await attachDebugTransport(options.debugPort) }
-        : await launchDesktop({
-            binary,
-            workspace: options.workspace,
-            ...(options.desktopArguments ? { arguments: options.desktopArguments } : {}),
-            ...(options.debug ? { debugPort: options.debugPort } : {}),
-        });
+    const { child, transport } = await launchDesktop({
+        binary,
+        arguments: options.arguments,
+        ...(options.debugPort === undefined ? {} : { debugPort: options.debugPort }),
+    });
     const cdp = new CdpClient(transport);
     const sessions = new Map<string, CdpSession>();
+    const installed = new Set<string>();
     const windows = new Map<number, CdpSession>();
     const warnings = new Map<string, string>();
     let control: { close(): Promise<void> } | undefined;
@@ -180,7 +130,10 @@ async function main(): Promise<void>
             })()`, 45000);
             const current = await status(session);
             if (current)
+            {
                 windows.set(current.windowId, session);
+                installed.add(session.targetId);
+            }
 
             log(`Attached ${session.targetId}: ${current?.mode}, active ${current?.activeItem ?? "none"}`);
         }
@@ -200,7 +153,7 @@ async function main(): Promise<void>
             `vscode-file://vscode-app${join(appRoot, "out/vs/sessions/electron-browser/sessions.html")}`,
         ];
         const targets = (await cdp.targets()).filter((target) => target.type === "page"
-            && urls.includes(target.url.split(/[?#]/)[0]!) && (!options.attach || target.id === options.attach));
+            && urls.includes(target.url.split(/[?#]/)[0]!));
         if (targets.length)
             foundWindow = true;
 
@@ -223,7 +176,6 @@ async function main(): Promise<void>
             try
             {
                 let session = sessions.get(target.id);
-                const fresh = !session;
                 if (!session)
                 {
                     session = await cdp.attach(target.id);
@@ -236,7 +188,7 @@ async function main(): Promise<void>
                         AutonomRuntime.prepareShell(${JSON.stringify(content.css)});
                     } else globalThis.__autonomShell.heartbeat();
                 })()`);
-                if (fresh && options.attach || !await status(session))
+                if (!await status(session))
                     await install(session);
 
                 warnings.delete(target.id);
@@ -398,6 +350,7 @@ async function main(): Promise<void>
         await reloading?.catch(() => undefined);
         await detach();
         await control?.close();
+        await acpHost.close();
         await bridge.close();
         cdp.close();
         transport.close();
@@ -439,7 +392,7 @@ async function main(): Promise<void>
     });
     try
     {
-        if (options.debug)
+        if (options.debugPort !== undefined)
         {
             const info = await cdp.request("SystemInfo.getProcessInfo");
             const processes = Array.isArray(info.processInfo) ? info.processInfo : [];
@@ -449,7 +402,7 @@ async function main(): Promise<void>
             log(`DEBUG: CDP listens on 127.0.0.1:${options.debugPort}; quit Desktop to close this endpoint.`);
         }
 
-        control = await startControlSocket(options.socket, {
+        control = await startControlSocket(socketPath, {
             cdp,
             workbenchUrl: workbenchUrl(appRoot),
             status: report,
@@ -457,8 +410,8 @@ async function main(): Promise<void>
             detach,
         });
         watchAssets();
-        log(`Workspace ${options.workspace}`);
-        log(`Control socket ${options.socket}`);
+        log(`Workspace ${process.cwd()}`);
+        log(`Control socket ${socketPath}`);
         const deadline = Date.now() + ATTACH_TIMEOUT;
         while (!foundWindow && !stopping)
         {
@@ -481,89 +434,16 @@ async function main(): Promise<void>
 
 function parseArguments(argv: string[]): Options
 {
-    const ret: Options = {
-        workspace: process.cwd(),
-        desktop: "devin-desktop",
-        config: undefined,
-        daemonConfig: undefined,
-        port: undefined,
-        socket: defaultSocketPath(),
-        desktopArguments: undefined,
-        help: false,
-        debug: false,
-        debugPort: 9222,
-        waitForPid: undefined,
-        attach: undefined,
-    };
-    for (let index = 0; index < argv.length; index++)
+    const ret: Options = { arguments: [], debugPort: undefined };
+    for (const argument of argv)
     {
-        const argument = argv[index]!;
-        if (argument === "--desktop-args")
-        {
-            ret.desktopArguments = argv.slice(index + 1);
-            break;
-        }
-
         if (argument === "--debug")
-        {
-            ret.debug = true;
-            continue;
-        }
-
-        if (argument === "--help" || argument === "-h")
-        {
-            ret.help = true;
-            continue;
-        }
-
-        if (!argument.startsWith("-"))
-        {
-            ret.workspace = resolve(argument);
-            continue;
-        }
-
-        const value = argv[++index];
-        if (value === undefined)
-            throw new Error(`Missing value for ${argument}.`);
-
-        switch (argument)
-        {
-            case "--attach":
-                ret.attach = value;
-                break;
-            case "--debug-port":
-                ret.debugPort = port(value);
-                break;
-            case "--wait-for-pid":
-                ret.waitForPid = Number(value);
-                if (!Number.isSafeInteger(ret.waitForPid) || ret.waitForPid < 2)
-                    throw new Error("The bootstrap process id must be a positive integer.");
-                break;
-            case "--desktop":
-                ret.desktop = value;
-                break;
-            case "--config":
-                ret.config = value;
-                break;
-            case "--daemon-config":
-                ret.daemonConfig = value;
-                break;
-            case "--port":
-                ret.port = port(value);
-                break;
-            case "--socket":
-                ret.socket = expandPath(value);
-                break;
-            default:
-                throw new Error(`Unknown option: ${argument}`);
-        }
+            ret.debugPort = 9222;
+        else if (argument.startsWith("--debug="))
+            ret.debugPort = port(argument.slice("--debug=".length));
+        else
+            ret.arguments.push(argument);
     }
-
-    if (ret.attach && !ret.debug)
-        throw new Error("--attach requires --debug.");
-
-    if (!ret.debug && ret.debugPort !== 9222)
-        throw new Error("--debug-port requires --debug.");
 
     return ret;
 }
@@ -572,7 +452,7 @@ function port(value: string): number
 {
     const ret = Number(value);
     if (!Number.isInteger(ret) || ret < 1 || ret > 65535)
-        throw new Error("The daemon port must be an integer between 1 and 65535.");
+        throw new Error("The port must be an integer between 1 and 65535.");
 
     return ret;
 }

@@ -87,7 +87,8 @@ public:
             return null;
 
         Execution ret = *found;
-        bool started = ret.kind == ExecutionKind.Start || ret.kind == ExecutionKind.Print;
+        bool started = ret.kind == ExecutionKind.Start || ret.kind == ExecutionKind.Print ||
+            ret.kind == ExecutionKind.Acp;
         if (!started && !managed(session))
             return null;
         if (!ret.sessionId.length)

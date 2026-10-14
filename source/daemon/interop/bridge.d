@@ -198,7 +198,8 @@ public:
                 }
                 else if (id !in removed)
                 {
-                    if (execution.kind == ExecutionKind.Start || execution.kind == ExecutionKind.Print)
+                    if (execution.kind == ExecutionKind.Start || execution.kind == ExecutionKind.Print ||
+                        execution.kind == ExecutionKind.Acp)
                         access.remember(id, execution.trusted);
 
                     Session session = this.session(id);
