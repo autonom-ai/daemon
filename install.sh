@@ -113,7 +113,6 @@ else:
         "dist/launcher.js",
         "dist/runtime.js",
         "source/launcher/cdp.mjs",
-        "source/launcher/acp/server.py",
         "source/mcp/hook.py",
         "source/mcp/orchestrate.py",
         "source/mcp/server.py",

@@ -112,30 +112,6 @@ unittest
     fixture.bridge.run(["slow"], fixture.root, 100.msecs).shouldThrow!Exception();
 }
 
-@Name("Daemon ACP transport forwards frames and releases its child on stop")
-unittest
-{
-    Fixture fixture = Fixture.create();
-    scope(exit)
-        fixture.close();
-
-    write(fixture.config.devinCommand, "#!/bin/sh\n[ \"$1\" = acp ] || exit 3\nexec cat\n");
-    setAttributes(fixture.config.devinCommand, octal!"700");
-    Execution execution = fixture.bridge.acp(fixture.root, "swe-2-medium");
-    scope(exit)
-        execution.stop();
-
-    execution.sendFrame(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`);
-    waitUntil(delegate bool()
-    {
-        return exists(execution.outputPath) && getSize(execution.outputPath) > 0;
-    });
-    readText(execution.outputPath).strip.should == `{"jsonrpc":"2.0","id":1,"method":"initialize"}`;
-    execution.stop();
-    execution.running.should == false;
-    execution.sendFrame(`{}`).shouldThrow!Exception();
-}
-
 @Name("Session removal deletes the CLI session and its log")
 unittest
 {
