@@ -27,7 +27,7 @@ async function context(): Promise<Context>
     const settings: LauncherSettings = {
         port: 8080,
         configFile: join(root, "config.yml"),
-        commandCenterConfig: join(root, "commandCenter.json"),
+        commandCenterConfig: join(root, "ui.yml"),
     };
     await writeFile(settings.configFile, "dataDir: ~/.local/share/autonom\ndevinCommand: devin\n");
     const opened: string[] = [];
@@ -36,10 +36,6 @@ async function context(): Promise<Context>
         async getState(directory?: string): Promise<unknown>
         {
             return { directory };
-        },
-        async manageSession(id: string): Promise<unknown>
-        {
-            return { id, managed: true };
         },
         configure(next: unknown): void
         {
@@ -56,6 +52,9 @@ async function context(): Promise<Context>
         {
             opened.push(path);
         },
+        getAction: async (id, revision) => ({ type: "html", source: `<h1>${id}</h1>`, revision }),
+        runScript: async (id, revision, windowId) => ({ id, revision, windowId }),
+        reloadUi: async () => ({ reloaded: true }),
     });
     return {
         bridge,
@@ -144,8 +143,26 @@ test("the bridge serves daemon state and launcher paths", async () =>
         });
         const daemon = await request(environment.bridge, { action: "getDaemon" });
         assert.deepEqual(daemon.body.result.daemon, { dataDir: "~/.local/share/autonom", devinCommand: "devin" });
-        const session = await request(environment.bridge, { action: "registerSession", id: "abc" });
-        assert.deepEqual(session.body.result, { id: "abc", managed: true });
+    }
+    finally
+    {
+        await environment.close();
+    }
+});
+
+test("UI action requests stay authenticated and carry the renderer window and revision", async () =>
+{
+    const environment = await context();
+    try
+    {
+        const source = await request(environment.bridge, { action: "getAction", id: "page", revision: "one" });
+        assert.deepEqual(source.body.result, { type: "html", source: "<h1>page</h1>", revision: "one" });
+        const script = await request(environment.bridge, { action: "runScript", id: "run", revision: "one", windowId: 2 });
+        assert.deepEqual(script.body.result, { id: "run", revision: "one", windowId: 2 });
+        assert.equal((await request(environment.bridge, { action: "runScript", id: "run", revision: "one" })).status, 400);
+        assert.equal((await request(environment.bridge, { action: "runScript", windowId: "2" })).status, 400);
+        assert.equal((await request(environment.bridge, { action: "runScript", windowId: 2 }, "wrong")).status, 403);
+        assert.deepEqual((await request(environment.bridge, { action: "reloadUi" })).body.result, { reloaded: true });
     }
     finally
     {
@@ -160,6 +177,7 @@ test("the bridge saves launcher settings, daemon settings, and opens configurati
     {
         const saved = await request(environment.bridge, { action: "saveSettings", settings: { port: 9090 } });
         assert.equal(saved.status, 200);
+        assert.equal(environment.settings.port, 9090);
         assert.deepEqual(await readSettings(environment.settingsPath), {
             port: 9090,
             configFile: environment.settings.configFile,

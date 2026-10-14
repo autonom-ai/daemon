@@ -2,15 +2,15 @@ import type { CdpClient } from "../../cdp";
 import { startControlSocket } from "../../control";
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 const WORKBENCH = "vscode-file://vscode-app/opt/devin/resources/app/out/vs/code/electron-browser/workbench/workbench.html";
 
-function fakeCdp(): CdpClient
+function fakeCdp(detached: string[] = []): CdpClient
 {
     return {
         async targets(): Promise<unknown>
@@ -26,6 +26,10 @@ function fakeCdp(): CdpClient
                 targetId,
                 evaluate: async (expression: string) => `evaluated: ${expression}`,
                 request: async () => ({ data: Buffer.from("png").toString("base64") }),
+                detach: async () =>
+                {
+                    detached.push(targetId);
+                },
             };
         },
     } as unknown as CdpClient;
@@ -63,8 +67,9 @@ async function socketPath(): Promise<string>
 test("the control socket serves status, targets, and eval for a live launcher", async () =>
 {
     const path = await socketPath();
+    const detached: string[] = [];
     const control = await startControlSocket(path, {
-        cdp: fakeCdp(),
+        cdp: fakeCdp(detached),
         workbenchUrl: WORKBENCH,
         status: async () => ({ windows: [] }),
         hot: async () => ({ ok: true }),
@@ -77,11 +82,33 @@ test("the control socket serves status, targets, and eval for a live launcher", 
         assert.equal((await exchange(path, { action: "targets" })).result.length, 2);
         assert.deepEqual(await exchange(path, { action: "eval", target: "page-1", expression: "1+1" }),
             { result: "evaluated: 1+1" });
+        assert.deepEqual(detached, ["page-1"]);
         assert.deepEqual(await exchange(path, { action: "nonsense" }), { error: "Unknown control action: nonsense" });
     }
     finally
     {
         await control.close();
+    }
+});
+
+test("a non-socket control path is never overwritten", async () =>
+{
+    const path = await socketPath();
+    try
+    {
+        await writeFile(path, "unrelated file");
+        await assert.rejects(startControlSocket(path, {
+            cdp: fakeCdp(),
+            workbenchUrl: WORKBENCH,
+            status: async () => ({}),
+            hot: async () => ({}),
+            detach: async () => ({}),
+        }), /non-socket file/);
+        assert.equal(await readFile(path, "utf8"), "unrelated file");
+    }
+    finally
+    {
+        await rm(dirname(path), { recursive: true, force: true });
     }
 });
 

@@ -92,6 +92,7 @@ test("targets and sessions are scoped to the flattened session id", async () =>
     assert.equal(last.sessionId, "session-1");
     await session.detach();
     assert.equal(browser.requests.at(-1)!.method, "Target.detachFromTarget");
+    assert.equal(browser.requests.at(-1)!.sessionId, undefined);
 });
 
 test("session events are filtered by session id", async () =>
