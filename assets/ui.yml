@@ -3,36 +3,32 @@ active_item: schedules
 devin_cloud:
     - wiki
 
+items:
+    - id: schedules
+      label: Schedules
+      icon: automations
+      actions:
+          left_click: pages/schedules.html
+    - id: events
+      label: Events
+      icon: oncall
+      actions:
+          left_click: pages/events.html
+    - id: policy
+      label: Policy
+      icon: security
+      actions:
+          left_click: pages/policy.html
+    - id: settings
+      label: Settings
+      icon: settings
+      actions:
+          left_click: pages/settings.html
+
 sections:
-    - id: coordination
-      label: Coordination
-      items:
-          - id: schedules
-            label: Schedules
-            icon: automations
-            actions:
-                left_click: pages/schedules.html
-          - id: events
-            label: Events
-            icon: oncall
-            actions:
-                left_click: pages/events.html
-
-    - id: knowledge
-      label: Knowledge
-      items:
-          - id: wiki
-
-    - id: configuration
-      label: Configuration
-      items:
-          - id: policy
-            label: Policy
-            icon: security
-            actions:
-                left_click: pages/policy.html
-          - id: settings
-            label: Settings
-            icon: settings
-            actions:
-                left_click: pages/settings.html
+    - id: rooms
+      label: Rooms
+      items: []
+    - id: profiles
+      label: Profiles
+      items: []
