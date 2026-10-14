@@ -8,8 +8,7 @@ import daemon.interop.devin.db : SessionMetadata, readSessionMetadata;
 import daemon.interop.devin.session;
 import daemon.interop.execution;
 import daemon.interop.session;
-import daemon.server : acceptMethod, bridge, matchesPath, profileStore, readBody, readField, readLaunch,
-    respond, routeParameter;
+import daemon.server : acceptMethod, bridge, profileStore, readBody, readLaunch, respond, routeParameter;
 import daemon.storage;
 import serverino;
 
@@ -17,8 +16,6 @@ import core.stdc.errno : errno, EWOULDBLOCK;
 import core.sys.linux.sys.file : flock, LOCK_EX, LOCK_NB;
 import core.sys.posix.fcntl : O_RDONLY;
 import std.algorithm : canFind;
-import std.base64 : Base64;
-import std.conv : to;
 import std.exception : ErrnoException;
 import std.file;
 import std.json : JSONType, JSONValue, parseJSON;
@@ -75,101 +72,6 @@ void printSession(Request request, Output output)
 
     JSONValue data = readLaunch(request);
     respond(output, bridge.print(data["prompt"].str, data["directory"].str, data["model"].str).toJSON(), 202);
-}
-
-@endpoint @route!"/api/acp"
-void startAcp(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Post]))
-        return;
-
-    JSONValue data = readBody(request);
-    foreach (field; ["directory", "model"])
-    {
-        if (field !in data.object || data[field].type != JSONType.string)
-            throw new InvalidInputException("Expected ACP directory and model");
-    }
-
-    string session;
-    if ("sessionId" in data.object)
-    {
-        if (data["sessionId"].type != JSONType.string)
-            throw new InvalidInputException("Invalid ACP session ID");
-
-        session = data["sessionId"].str;
-    }
-
-    respond(output, bridge.acp(data["directory"].str, data["model"].str, session).toJSON(), 202);
-}
-
-@endpoint @route!(matchesPath!"/api/acp/<id>")
-void acpFrames(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
-        return;
-
-    Execution execution = bridge.execution(routeParameter!"/api/acp/<id>"(request));
-    if (execution is null || execution.kind != ExecutionKind.Acp)
-        throw new InvalidInputException("Unknown ACP execution");
-    if (request.method == Request.Method.Post)
-    {
-        JSONValue frame = readBody(request, 16 * 1024 * 1024);
-        if ("jsonrpc" !in frame.object || frame["jsonrpc"] != JSONValue("2.0"))
-            throw new InvalidInputException("Expected a JSON-RPC frame");
-
-        execution.sendFrame(frame.toString());
-        respond(output, JSONValue.emptyObject, 202);
-        return;
-    }
-
-    execution.renewAcp();
-    ulong offset;
-    try
-        offset = request.get.read("offset", "0").to!ulong;
-    catch (Exception)
-        throw new InvalidInputException("Invalid ACP output offset");
-
-    ubyte[] data;
-    if (exists(execution.outputPath))
-    {
-        File file = openFile(execution.outputPath, O_RDONLY);
-        scope(exit)
-            file.close();
-
-        if (offset > file.size)
-            throw new InvalidInputException("ACP output offset is past the end");
-
-        file.seek(offset);
-        ubyte[65536] buffer;
-        data = file.rawRead(buffer).dup;
-    }
-
-    respond(output, JSONValue([
-        "offset": JSONValue(offset + data.length),
-        "data": JSONValue(Base64.encode(data)),
-        "execution": execution.toJSON()
-    ]));
-}
-
-@endpoint @route!(matchesPath!"/api/acp/<id>/bind")
-void bindAcp(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Post]))
-        return;
-
-    Execution execution = bridge.execution(routeParameter!"/api/acp/<id>/bind"(request));
-    if (execution is null || execution.kind != ExecutionKind.Acp || !execution.running)
-        throw new InvalidInputException("Unknown active ACP execution");
-
-    string session = readField!"sessionId"(request);
-    Session.validateId(session);
-    execution.identify(session);
-    bridge.access.remember(session, execution.trusted);
-    bridge.session(session).bindExecution(execution);
-    if (!profileStore.assigned(session))
-        profileStore.register(execution.profileName, session);
-
-    respond(output, execution.toJSON());
 }
 
 class Devin : Bridge
@@ -281,23 +183,6 @@ public:
 
     Execution print(string prompt, string directory, string model = null)
         => submit(ExecutionKind.Print, prompt, directory, model);
-
-    Execution acp(string directory, string model, string id = null)
-    {
-        if (!directory.length || !exists(directory) || !isDir(directory) || model.canFind('\0'))
-            throw new InvalidInputException("Invalid ACP working directory or model");
-        if (id.length && (!access.managed(id) || session(id).isRunning() || online(id)))
-            throw new ConflictException("ACP session is unmanaged or already active");
-
-        Execution ret = newExecution(ExecutionKind.Acp, directory, model, id);
-        ret.trusted = id.length && access.trusted(id);
-        ret.profileName = "autonom-"~ret.id[0..8];
-        launch(ret, model.length ? ["acp", "--model", model] : ["acp"]);
-        if (id.length)
-            session(id).bindExecution(ret);
-
-        return ret;
-    }
 
     string[] list(string directory = null)
     {

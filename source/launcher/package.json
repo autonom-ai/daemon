@@ -8,7 +8,7 @@
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
     "build": "node build.mjs",
-    "test": "npm run build && node --test ../../dist/tests/unit/*.js && python3 tests/unit/acp.py",
+    "test": "npm run build && node --test ../../dist/tests/unit/*.js",
     "launch": "npm run build && node ../../dist/launcher.js"
   },
   "dependencies": {

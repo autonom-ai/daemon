@@ -4,8 +4,6 @@ import { startBridge } from "./bridge";
 import { DaemonClient } from "./client";
 import type { ActionCache, LauncherSettings } from "./config";
 import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, loadAction, loadCenter, readSettings } from "./config";
-import { startAcpHost } from "./acp/host";
-import { installAutonomAgent } from "./acp/registry";
 import { visibleItems } from "./center";
 import { defaultSocketPath, isLauncherRunning, startControlSocket } from "./control";
 import { appRootFor, launchDesktop, openInDesktop, resolveDesktopBinary, verifyDesktopBuild, workbenchUrl } from "./desktop";
@@ -62,8 +60,6 @@ async function main(): Promise<void>
     let runtimeSource = await readFile(runtimePath, "utf8");
     const client = new DaemonClient({ port: settings.port, configFile: settings.configFile, rootDirectory: repository });
     await client.connect();
-    const acpHost = await startAcpHost(client, join(dirname(socketPath), "acp.sock"));
-    await installAutonomAgent(repository, acpHost.socketPath);
     const bridge = await startBridge({
         workspace: process.cwd(),
         repository,
@@ -350,7 +346,6 @@ async function main(): Promise<void>
         await reloading?.catch(() => undefined);
         await detach();
         await control?.close();
-        await acpHost.close();
         await bridge.close();
         cdp.close();
         transport.close();
