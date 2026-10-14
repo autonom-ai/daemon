@@ -1,26 +1,21 @@
-import { probe, SERVICE_CAPTURE } from "./boundary";
-import type { Bridge } from "./bridge";
-import { startBridge } from "./bridge";
-import { captureInvocation, CdpClient } from "./cdp";
+import { captureServices, CdpClient } from "./cdp";
 import type { CdpSession } from "./cdp";
-import { loadCenter } from "./center";
+import { startBridge } from "./bridge";
 import { DaemonClient } from "./client";
-import type { LauncherSettings } from "./config";
-import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, readSettings } from "./config";
-import type { CenterContent } from "./content";
-import { defaultSocketPath, startControlSocket } from "./control";
-import { appRootFor, launchDesktop, openInDesktop, resolveDesktopBinary, verifyDesktopBuild, workbenchUrl } from "./desktop";
-import { object, text } from "./parse";
+import type { ActionCache, LauncherSettings } from "./config";
+import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, loadAction, loadCenter, readSettings } from "./config";
+import { visibleItems } from "./center";
+import { defaultSocketPath, isLauncherRunning, startControlSocket } from "./control";
+import { appRootFor, attachDebugTransport, launchDesktop, openInDesktop, resolveDesktopBinary, verifyDesktopBuild, workbenchUrl } from "./desktop";
 import type { RuntimeStatus } from "./runtime";
 
-import type { ChildProcess } from "node:child_process";
+import { watch } from "node:fs";
+import type { FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 
 const HEARTBEAT_INTERVAL = 5000;
-const ATTACH_INTERVAL = 1000;
 const ATTACH_TIMEOUT = 60000;
-const DEFAULT_PORT = 8080;
 
 const USAGE = `Usage: autonom-launcher [workspace] [options]
 
@@ -28,10 +23,13 @@ Launches Devin Desktop with --remote-debugging-pipe and attaches the Autonom Com
 
 Options:
   --desktop <command>      Devin Desktop command (default: devin-desktop)
-  --config <file>          Command Center definition (default: <repository>/assets/commandCenter.json)
+  --config <file>          Command Center definition (default: <repository>/assets/ui.yml)
   --daemon-config <file>   Daemon configuration (default: ~/.config/autonom/config.yml)
   --port <port>            Daemon loopback port (default: 8080 or AUTONOM_PORT)
   --socket <path>          Control socket (default: $XDG_RUNTIME_DIR/autonom/launcher.sock)
+  --debug                  Use loopback CDP port instead of the private pipe (development only)
+  --debug-port <port>      Debug port (default: 9222; requires --debug)
+  --attach <target-id>     Debug only: manage exactly one existing test window without launching Desktop
   --help                   Show this help
 `;
 
@@ -42,163 +40,13 @@ type Options = {
     daemonConfig: string | undefined;
     port: number | undefined;
     socket: string;
+    desktopArguments: string[] | undefined;
     help: boolean;
+    debug: boolean;
+    debugPort: number;
+    waitForPid: number | undefined;
+    attach: string | undefined;
 };
-
-class DesktopCenter
-{
-    private readonly sessions = new Map<string, CdpSession>();
-    private readonly statuses = new Map<string, RuntimeStatus>();
-    private content: CenterContent;
-    private runtimeSource: string;
-    private lastWarning = "";
-    private disabled = false;
-
-    constructor(private readonly options: {
-        cdp: CdpClient;
-        appRoot: string;
-        configPath: string;
-        runtimePath: string;
-        runtimeSource: string;
-        bridge: Bridge;
-        content: CenterContent;
-    })
-    {
-        this.content = options.content;
-        this.runtimeSource = options.runtimeSource;
-    }
-
-    async refresh(): Promise<void>
-    {
-        if (this.disabled)
-            return;
-        const url = workbenchUrl(this.options.appRoot);
-        const targets = (await this.options.cdp.targets())
-            .filter((target) => target.type === "page" && target.url === url);
-        for (const target of targets)
-        {
-            try
-            {
-                const session = await this.session(target.id);
-                if (await this.status(session) === null)
-                    log(`Attached the Command Center: ${summarize(await this.install(session))}`);
-            }
-            catch (error)
-            {
-                this.warn(error);
-            }
-        }
-        for (const [id, session] of [...this.sessions])
-        {
-            if (targets.some((target) => target.id === id))
-                continue;
-            this.sessions.delete(id);
-            this.statuses.delete(id);
-            await session.detach();
-        }
-    }
-
-    async hot(): Promise<unknown>
-    {
-        this.content = await loadCenter(this.options.configPath);
-        this.runtimeSource = await readFile(this.options.runtimePath, "utf8");
-        const ret = [];
-        for (const [targetId, session] of this.sessions)
-            ret.push({ targetId, status: summarize(await this.install(session)) });
-        return ret;
-    }
-
-    async detach(): Promise<unknown>
-    {
-        this.disabled = true;
-        for (const session of this.sessions.values())
-        {
-            await session.evaluate("globalThis.__autonomCenter?.dispose()").catch(() => undefined);
-            await session.detach();
-        }
-        this.sessions.clear();
-        this.statuses.clear();
-        return { ok: true };
-    }
-
-    async report(): Promise<unknown>
-    {
-        const windows = [];
-        for (const [targetId, session] of this.sessions)
-        {
-            windows.push({
-                targetId,
-                status: this.statuses.get(targetId) ?? await this.status(session).catch(() => null),
-            });
-        }
-        return { windows };
-    }
-
-    private async session(targetId: string): Promise<CdpSession>
-    {
-        let session = this.sessions.get(targetId);
-        if (!session)
-        {
-            session = await this.options.cdp.attach(targetId);
-            this.sessions.set(targetId, session);
-        }
-        return session;
-    }
-
-    private async status(session: CdpSession): Promise<RuntimeStatus | null>
-    {
-        const value = await session.evaluate(statusProjection("(function(){const runtime=globalThis.__autonomCenter;"
-            + "if(!runtime)return null;runtime.heartbeat();return runtime.status();})()"));
-        if (value === null || value === undefined)
-            return null;
-        const status = validateStatus(value);
-        this.statuses.set(session.targetId, status);
-        return status;
-    }
-
-    private async install(session: CdpSession): Promise<RuntimeStatus>
-    {
-        const found = await session.evaluate(`globalThis.__autonomAttachProbe=(${probe.toString()})();`
-            + "Boolean(globalThis.__autonomAttachProbe)");
-        if (found !== true)
-            throw new Error("The Devin agent window is not showing. Open it in Devin Desktop (Ctrl+') and the Command Center attaches automatically.");
-        try
-        {
-            await session.request("Debugger.enable", { maxScriptsCacheSize: 0 });
-            try
-            {
-                for (const capture of SERVICE_CAPTURE)
-                    await captureInvocation(session, `globalThis.__autonomAttachProbe.props.${capture.name}`, capture.assignments);
-            }
-            finally
-            {
-                await session.request("Debugger.disable").catch(() => undefined);
-            }
-            const config = { content: this.content, bridge: { url: this.options.bridge.url, token: this.options.bridge.token } };
-            const value = await session.evaluate(statusProjection(`${this.runtimeSource};`
-                + `AutonomRuntime.install(globalThis.__autonomServices,${JSON.stringify(config)}).update(${JSON.stringify(config)})`));
-            if (value === null || value === undefined)
-                throw new Error("The Command Center runtime did not report a status.");
-            const status = validateStatus(value);
-            this.statuses.set(session.targetId, status);
-            return status;
-        }
-        finally
-        {
-            await session.evaluate("delete globalThis.__autonomAttachProbe;delete globalThis.__autonomServices;")
-                .catch(() => undefined);
-        }
-    }
-
-    private warn(error: unknown): void
-    {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message === this.lastWarning)
-            return;
-        this.lastWarning = message;
-        log(message);
-    }
-}
 
 async function main(): Promise<void>
 {
@@ -208,18 +56,61 @@ async function main(): Promise<void>
         process.stdout.write(USAGE);
         return;
     }
-    const repository = resolve(__dirname, "..", "..", "..");
-    const settingsPath = defaultSettingsPath();
-    const stored = await loadSettings(settingsPath);
-    const settings: LauncherSettings = {
-        port: options.port ?? environmentPort() ?? stored.port ?? DEFAULT_PORT,
-        configFile: expandPath(options.daemonConfig ?? process.env.AUTONOM_CONFIG ?? stored.configFile ?? defaultDaemonConfigPath()),
-        commandCenterConfig: expandPath(options.config ?? stored.commandCenterConfig ?? join(repository, "assets", "commandCenter.json")),
-    };
+
+    if (options.waitForPid !== undefined)
+    {
+        const deadline = Date.now() + 15000;
+        while (true)
+        {
+            try
+            {
+                process.kill(options.waitForPid, 0);
+            }
+            catch (error)
+            {
+                if ((error as NodeJS.ErrnoException).code === "ESRCH")
+                    break;
+
+                throw error;
+            }
+
+            if (Date.now() > deadline)
+                throw new Error("The Desktop bootstrap did not exit; refusing to launch against its locked profile.");
+
+            await new Promise((resolve_) => setTimeout(resolve_, 50));
+        }
+    }
+
     const binary = resolveDesktopBinary(options.desktop);
+    if (await isLauncherRunning(options.socket))
+    {
+        openInDesktop(binary, options.desktopArguments ?? [options.workspace]);
+        return;
+    }
+
+    const repository = resolve(__dirname, "..");
+    const settingsPath = defaultSettingsPath();
+    const stored = await readSettings(settingsPath).catch((error) =>
+    {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+            throw error;
+
+        return {} as Partial<LauncherSettings>;
+    });
+    const settings: LauncherSettings = {
+        port: options.port ?? environmentPort() ?? stored.port ?? 8080,
+        configFile: expandPath(options.daemonConfig ?? process.env.AUTONOM_CONFIG
+            ?? stored.configFile ?? defaultDaemonConfigPath()),
+        commandCenterConfig: expandPath(options.config ?? stored.commandCenterConfig
+            ?? join(repository, "assets", "ui.yml")),
+    };
     const appRoot = appRootFor(binary);
     await verifyDesktopBuild(appRoot);
-    const content = await loadCenter(settings.commandCenterConfig);
+    let contentPath = settings.commandCenterConfig;
+    let content = await loadCenter(contentPath);
+    const actionCache: ActionCache = new Map();
+    const runtimePath = join(__dirname, "runtime.js");
+    let runtimeSource = await readFile(runtimePath, "utf8");
     const client = new DaemonClient({ port: settings.port, configFile: settings.configFile, rootDirectory: repository });
     const bridge = await startBridge({
         workspace: options.workspace,
@@ -227,103 +118,365 @@ async function main(): Promise<void>
         settingsPath,
         settings,
         client,
-        openPath: (path) => openInDesktop(options.desktop, path),
+        openPath: (path) => openInDesktop(binary, [path]),
+        getAction: (id, revision) => loadAction(contentPath, content, id, revision, actionCache),
+        runScript,
+        reloadUi: hot,
     });
-    const runtimePath = join(__dirname, "runtime.js");
-    const { child, transport } = launchDesktop({ binary, workspace: options.workspace });
+    const { child, transport } = options.attach
+        ? { child: undefined, transport: await attachDebugTransport(options.debugPort) }
+        : await launchDesktop({
+            binary,
+            workspace: options.workspace,
+            ...(options.desktopArguments ? { arguments: options.desktopArguments } : {}),
+            ...(options.debug ? { debugPort: options.debugPort } : {}),
+        });
     const cdp = new CdpClient(transport);
-    const center = new DesktopCenter({
-        cdp,
-        appRoot,
-        configPath: settings.commandCenterConfig,
-        runtimePath,
-        runtimeSource: await readFile(runtimePath, "utf8"),
-        bridge,
-        content,
-    });
-    log(`Workspace ${options.workspace}`);
-    log(`Daemon port ${settings.port}, configuration ${settings.configFile}`);
-    log(`Command Center ${settings.commandCenterConfig}`);
-    let heartbeat: ReturnType<typeof setInterval> | undefined;
-    let control: { close: () => Promise<void> } | undefined;
+    const sessions = new Map<string, CdpSession>();
+    const windows = new Map<number, CdpSession>();
+    const warnings = new Map<string, string>();
+    let control: { close(): Promise<void> } | undefined;
+    let heartbeat: ReturnType<typeof setTimeout> | undefined;
+    let disabled = false;
     let stopping = false;
-    const shutdown = async (code: number): Promise<void> =>
+    let refreshing: Promise<void> | undefined;
+    let foundWindow = false;
+    let watcher: FSWatcher | undefined;
+    let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+    let reloading: Promise<unknown> | undefined;
+
+    async function status(session: CdpSession): Promise<RuntimeStatus | null>
+    {
+        return await session.evaluate(`(() => {
+            const runtime = globalThis.__autonomCenter;
+            if (!runtime) return null;
+            runtime.heartbeat();
+            const status = runtime.status();
+            return {
+                connected: status.connected, mode: status.mode, enabled: status.enabled,
+                revision: status.revision, activeItem: status.activeItem, windowId: status.windowId,
+                editorActive: status.editorActive,
+                items: status.items.slice(0, 100).map(({id, label, path}) => ({id, label, path})),
+                sections: status.sections,
+                loadedActions: status.loadedActions, compiledScripts: status.compiledScripts
+            };
+        })()`) as RuntimeStatus | null;
+    }
+
+    async function install(session: CdpSession): Promise<void>
+    {
+        if (!await captureServices(session))
+            throw new Error("The agent sidebar is not mounted. Open the agent window (Ctrl+').");
+
+        try
+        {
+            const config = JSON.stringify({ content, bridge: { url: bridge.url, token: bridge.token } });
+            await session.evaluate(`(async () => {
+                ${runtimeSource}
+                const config = ${config};
+                const runtime = AutonomRuntime.install(globalThis.__autonomServices, config);
+                try { await runtime.update(config); }
+                catch (error) { runtime.dispose(); throw error; }
+            })()`, 45000);
+            const current = await status(session);
+            if (current)
+                windows.set(current.windowId, session);
+
+            log(`Attached ${session.targetId}: ${current?.mode}, active ${current?.activeItem ?? "none"}`);
+        }
+        finally
+        {
+            await session.evaluate("delete globalThis.__autonomServices").catch(() => undefined);
+        }
+    }
+
+    async function refreshWindows(): Promise<void>
+    {
+        if (disabled || stopping)
+            return;
+
+        const urls = [
+            workbenchUrl(appRoot),
+            `vscode-file://vscode-app${join(appRoot, "out/vs/sessions/electron-browser/sessions.html")}`,
+        ];
+        const targets = (await cdp.targets()).filter((target) => target.type === "page"
+            && urls.includes(target.url.split(/[?#]/)[0]!) && (!options.attach || target.id === options.attach));
+        if (targets.length)
+            foundWindow = true;
+
+        for (const [id, session] of sessions)
+        {
+            if (targets.some((target) => target.id === id))
+                continue;
+
+            sessions.delete(id);
+            warnings.delete(id);
+            for (const [windowId, current] of windows)
+                if (current === session)
+                    windows.delete(windowId);
+
+            await session.detach();
+        }
+
+        for (const target of targets)
+        {
+            try
+            {
+                let session = sessions.get(target.id);
+                const fresh = !session;
+                if (!session)
+                {
+                    session = await cdp.attach(target.id);
+                    sessions.set(target.id, session);
+                }
+
+                await session.evaluate(`(() => {
+                    if (!globalThis.__autonomShell) {
+                        ${runtimeSource}
+                        AutonomRuntime.prepareShell(${JSON.stringify(content.css)});
+                    } else globalThis.__autonomShell.heartbeat();
+                })()`);
+                if (fresh && options.attach || !await status(session))
+                    await install(session);
+
+                warnings.delete(target.id);
+            }
+            catch (error)
+            {
+                const message = error instanceof Error ? error.message : String(error);
+                if (warnings.get(target.id) !== message)
+                    log(`${target.id}: ${message}`);
+
+                warnings.set(target.id, message);
+            }
+        }
+    }
+
+    function refresh(): Promise<void>
+    {
+        refreshing ??= refreshWindows().finally(() =>
+        {
+            refreshing = undefined;
+        });
+        return refreshing;
+    }
+
+    async function detach(): Promise<unknown>
+    {
+        disabled = true;
+        await refreshing?.catch(() => undefined);
+        for (const session of sessions.values())
+        {
+            await session.evaluate("globalThis.__autonomCenter?.dispose();globalThis.__autonomShell?.dispose()").catch(() => undefined);
+            await session.detach();
+        }
+
+        sessions.clear();
+        windows.clear();
+        warnings.clear();
+        return { ok: true };
+    }
+
+    async function runScript(id: string, revision: string, windowId: number): Promise<unknown>
+    {
+        const session = windows.get(windowId);
+        if (!session || disabled)
+            throw new Error("The Desktop window is not attached.");
+
+        const source = await loadAction(contentPath, content, id, revision, actionCache);
+        const action = visibleItems(content).find((item) => item.id === id)?.actions?.left_click;
+        if (source.type !== "js" || !action)
+            throw new Error("The selected item is not a JS action.");
+
+        const key = JSON.stringify(id);
+        const version = JSON.stringify(action.version);
+        if (!await session.evaluate(`globalThis.__autonomCenter?.hasScript(${key},${version})`))
+            await session.evaluate(`globalThis.__autonomCenter.setScript(${key},${version},async (context) => {\n`
+                + `${source.source}\n});`);
+
+        await session.evaluate(`globalThis.__autonomCenter.runScript(${key},${version})`, 45000);
+        return null;
+    }
+
+    function hot(): Promise<unknown>
+    {
+        if (stopping)
+            return Promise.reject(new Error("The launcher is stopping."));
+
+        reloading ??= reloadUi().finally(() =>
+        {
+            reloading = undefined;
+        });
+        return reloading;
+    }
+
+    async function reloadUi(): Promise<unknown>
+    {
+        const path = settings.commandCenterConfig;
+        const next = await loadCenter(path);
+        const source = await readFile(runtimePath, "utf8");
+        await refreshing?.catch(() => undefined);
+        if (stopping)
+            throw new Error("The launcher is stopping.");
+
+        for (const session of sessions.values())
+        {
+            const current = await status(session);
+            const selected = visibleItems(next).find((item) => item.id === current?.activeItem);
+            if (current?.mode === "autonom" && selected?.actions?.left_click.type === "html")
+                await loadAction(path, next, selected.id, next.revision!, actionCache);
+        }
+
+        const replaced = source !== runtimeSource;
+        contentPath = path;
+        content = next;
+        runtimeSource = source;
+        disabled = false;
+        const versions = new Map(visibleItems(content).filter((item) => item.actions)
+            .map((item) => [resolve(dirname(contentPath), item.actions!.left_click.file), item.actions!.left_click.version]));
+        for (const [file, cached] of actionCache)
+            if (versions.get(file) !== cached.version)
+                actionCache.delete(file);
+
+        for (const session of sessions.values())
+        {
+            if (replaced)
+                await install(session);
+            else
+                await session.evaluate(`globalThis.__autonomCenter.update(${JSON.stringify({
+                    content, bridge: { url: bridge.url, token: bridge.token },
+                })})`, 45000);
+        }
+
+        watchAssets();
+        await refresh();
+        return report();
+    }
+
+    function watchAssets(): void
     {
         if (stopping)
             return;
+
+        watcher?.close();
+        watcher = watch(dirname(contentPath), { recursive: true }, (_event, filename) =>
+        {
+            if (stopping || disabled)
+                return;
+
+            if (filename && ![".yml", ".html", ".js", ".css"].includes(extname(String(filename))))
+                return;
+
+            clearTimeout(reloadTimer);
+            reloadTimer = setTimeout(() =>
+            {
+                if (!stopping && !disabled)
+                    void hot().catch((error) => log(`UI reload rejected: ${error.message}`));
+            }, 75);
+        });
+        watcher.on("error", (error) => log(`UI watcher: ${error.message}`));
+    }
+
+    async function report(): Promise<unknown>
+    {
+        const ret = [];
+        for (const [targetId, session] of sessions)
+            ret.push({ targetId, status: await status(session), error: warnings.get(targetId) ?? null });
+
+        return { windows: ret };
+    }
+
+    async function shutdown(code: number): Promise<void>
+    {
+        if (stopping)
+            return;
+
         stopping = true;
-        clearInterval(heartbeat);
-        await center.detach().catch(() => undefined);
-        await control?.close().catch(() => undefined);
-        await bridge.close().catch(() => undefined);
+        clearTimeout(heartbeat);
+        clearTimeout(reloadTimer);
+        watcher?.close();
+        await reloading?.catch(() => undefined);
+        await detach();
+        await control?.close();
+        await bridge.close();
         cdp.close();
+        transport.close();
+        if (code && child?.exitCode === null)
+            child.kill();
+
         process.exit(code);
-    };
-    process.on("SIGINT", () =>
+    }
+
+    async function tick(): Promise<void>
     {
-        void shutdown(0);
+        try
+        {
+            await refresh();
+        }
+        catch (error)
+        {
+            log(error instanceof Error ? error.message : String(error));
+        }
+
+        if (!stopping)
+            heartbeat = setTimeout(() => void tick(), HEARTBEAT_INTERVAL);
+    }
+
+    process.on("SIGINT", () => void shutdown(0));
+    process.on("SIGTERM", () => void shutdown(0));
+    child?.on("error", (error) =>
+    {
+        log(error.message);
+        void shutdown(1);
     });
-    process.on("SIGTERM", () =>
+    child?.on("exit", (code) =>
     {
-        void shutdown(0);
-    });
-    child.on("exit", (code) =>
-    {
-        log("Devin Desktop exited.");
-        void shutdown(code ?? 0);
+        if (!foundWindow)
+            log("Desktop forwarded this launch to an existing process without a debugging pipe. "
+                + "Restart your normal Desktop profile through the launcher.");
+
+        void shutdown(foundWindow ? (code ?? 0) : 1);
     });
     try
     {
-        await waitForWindow(child, cdp, appRoot);
-        await center.refresh();
-        heartbeat = setInterval(() =>
+        if (options.debug)
         {
-            void center.refresh().catch((error) =>
-            {
-                log(error instanceof Error ? error.message : String(error));
-            });
-        }, HEARTBEAT_INTERVAL);
+            const info = await cdp.request("SystemInfo.getProcessInfo");
+            const processes = Array.isArray(info.processInfo) ? info.processInfo : [];
+            if (child && !processes.some((entry) => entry.type === "browser" && entry.id === child.pid))
+                throw new Error("The debug endpoint belongs to a different Desktop process; refusing to attach.");
+
+            log(`DEBUG: CDP listens on 127.0.0.1:${options.debugPort}; quit Desktop to close this endpoint.`);
+        }
+
         control = await startControlSocket(options.socket, {
             cdp,
             workbenchUrl: workbenchUrl(appRoot),
-            status: () => center.report(),
-            hot: () => center.hot(),
-            detach: () => center.detach(),
+            status: report,
+            hot,
+            detach,
         });
+        watchAssets();
+        log(`Workspace ${options.workspace}`);
         log(`Control socket ${options.socket}`);
+        const deadline = Date.now() + ATTACH_TIMEOUT;
+        while (!foundWindow && !stopping)
+        {
+            if (Date.now() > deadline)
+                throw new Error("Timed out waiting for a Desktop window. Inspect targets through the control socket.");
+
+            await refresh();
+            if (!foundWindow)
+                await new Promise((resolve_) => setTimeout(resolve_, 1000));
+        }
+
+        void tick();
     }
     catch (error)
     {
-        process.stderr.write(`[autonom] ${error instanceof Error ? error.message : String(error)}\n`);
+        log(error instanceof Error ? error.message : String(error));
         await shutdown(1);
     }
-}
-
-async function waitForWindow(child: ChildProcess, cdp: CdpClient, appRoot: string): Promise<void>
-{
-    const url = workbenchUrl(appRoot);
-    const deadline = Date.now() + ATTACH_TIMEOUT;
-    let exited = false;
-    child.once("exit", () =>
-    {
-        exited = true;
-    });
-    while (Date.now() < deadline)
-    {
-        if (exited)
-            throw new Error("Devin Desktop exited before the Command Center attached. Quit any running Devin Desktop window and launch again.");
-        try
-        {
-            const targets = await cdp.targets();
-            if (targets.some((target) => target.type === "page" && target.url === url))
-                return;
-        }
-        catch
-        {
-        }
-        await delay(ATTACH_INTERVAL);
-    }
-    throw new Error("Timed out waiting for the Devin Desktop workbench window.");
 }
 
 function parseArguments(argv: string[]): Options
@@ -335,112 +488,99 @@ function parseArguments(argv: string[]): Options
         daemonConfig: undefined,
         port: undefined,
         socket: defaultSocketPath(),
+        desktopArguments: undefined,
         help: false,
+        debug: false,
+        debugPort: 9222,
+        waitForPid: undefined,
+        attach: undefined,
     };
     for (let index = 0; index < argv.length; index++)
     {
         const argument = argv[index]!;
-        const value = (): string =>
+        if (argument === "--desktop-args")
         {
-            const next = argv[++index];
-            if (next === undefined)
-                throw new Error(`Missing value for ${argument}.`);
-            return next;
-        };
+            ret.desktopArguments = argv.slice(index + 1);
+            break;
+        }
+
+        if (argument === "--debug")
+        {
+            ret.debug = true;
+            continue;
+        }
+
+        if (argument === "--help" || argument === "-h")
+        {
+            ret.help = true;
+            continue;
+        }
+
+        if (!argument.startsWith("-"))
+        {
+            ret.workspace = resolve(argument);
+            continue;
+        }
+
+        const value = argv[++index];
+        if (value === undefined)
+            throw new Error(`Missing value for ${argument}.`);
+
         switch (argument)
         {
-            case "--help":
-            case "-h":
-                ret.help = true;
+            case "--attach":
+                ret.attach = value;
+                break;
+            case "--debug-port":
+                ret.debugPort = port(value);
+                break;
+            case "--wait-for-pid":
+                ret.waitForPid = Number(value);
+                if (!Number.isSafeInteger(ret.waitForPid) || ret.waitForPid < 2)
+                    throw new Error("The bootstrap process id must be a positive integer.");
                 break;
             case "--desktop":
-                ret.desktop = value();
+                ret.desktop = value;
                 break;
             case "--config":
-                ret.config = value();
+                ret.config = value;
                 break;
             case "--daemon-config":
-                ret.daemonConfig = value();
+                ret.daemonConfig = value;
                 break;
             case "--port":
-                ret.port = port(value(), argument);
+                ret.port = port(value);
                 break;
             case "--socket":
-                ret.socket = expandPath(value());
+                ret.socket = expandPath(value);
                 break;
             default:
-                if (argument.startsWith("-"))
-                    throw new Error(`Unknown option: ${argument}`);
-                ret.workspace = resolve(argument);
-                break;
+                throw new Error(`Unknown option: ${argument}`);
         }
     }
+
+    if (ret.attach && !ret.debug)
+        throw new Error("--attach requires --debug.");
+
+    if (!ret.debug && ret.debugPort !== 9222)
+        throw new Error("--debug-port requires --debug.");
+
     return ret;
 }
 
-function port(value: string, source: string): number
+function port(value: string): number
 {
     const ret = Number(value);
     if (!Number.isInteger(ret) || ret < 1 || ret > 65535)
-        throw new Error(`${source} requires an integer between 1 and 65535.`);
+        throw new Error("The daemon port must be an integer between 1 and 65535.");
+
     return ret;
 }
 
 function environmentPort(): number | undefined
 {
     const value = process.env.AUTONOM_PORT;
-    return value === undefined || !value.trim() ? undefined : port(value, "AUTONOM_PORT");
-}
-
-async function loadSettings(path: string): Promise<Partial<LauncherSettings>>
-{
-    try
-    {
-        return await readSettings(path);
-    }
-    catch (error)
-    {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT")
-            return {};
-        throw error;
-    }
-}
-
-function statusProjection(expression: string): string
-{
-    return `(async()=>{const ret=await (${expression});if(!ret)return null;return {connected:ret.connected,`
-        + "mode:ret.mode,enabled:ret.enabled,revision:ret.revision,activeTab:ret.activeTab,windowId:ret.windowId,"
-        + "items:ret.items.map((item)=>({id:item.id,label:item.label,path:item.path}))};})()";
-}
-
-function validateStatus(value: unknown): RuntimeStatus
-{
-    const ret = object(value);
-    if (ret === undefined || typeof ret.connected !== "boolean" || typeof ret.enabled !== "boolean"
-        || (ret.mode !== "autonom" && ret.mode !== "devin-cloud")
-        || (ret.revision !== null && typeof ret.revision !== "string")
-        || (ret.activeTab !== null && typeof ret.activeTab !== "string")
-        || !Number.isSafeInteger(ret.windowId) || !Array.isArray(ret.items) || ret.items.length > 512)
-        throw new Error("The Command Center runtime returned an invalid status.");
-    return {
-        connected: ret.connected,
-        mode: ret.mode,
-        enabled: ret.enabled,
-        revision: typeof ret.revision === "string" ? ret.revision : null,
-        activeTab: typeof ret.activeTab === "string" ? ret.activeTab : null,
-        windowId: ret.windowId as number,
-        items: ret.items.map((item) =>
-        {
-            const entry = object(item) ?? {};
-            return { id: text(entry.id), label: text(entry.label), path: text(entry.path) };
-        }),
-    };
-}
-
-function summarize(status: RuntimeStatus): string
-{
-    return `${status.mode}, revision ${status.revision?.slice(0, 12) ?? "none"}, active ${status.activeTab ?? "none"}, `
-        + `${status.items.length} items`;
+    return value?.trim() ? port(value) : undefined;
 }
 
 function log(message: string): void
@@ -448,16 +588,8 @@ function log(message: string): void
     process.stdout.write(`[autonom] ${message}\n`);
 }
 
-function delay(milliseconds: number): Promise<void>
-{
-    return new Promise((resolve_) =>
-    {
-        setTimeout(resolve_, milliseconds);
-    });
-}
-
 void main().catch((error: unknown) =>
 {
-    process.stderr.write(`[autonom] ${error instanceof Error ? error.message : String(error)}\n`);
+    log(error instanceof Error ? error.message : String(error));
     process.exit(1);
 });

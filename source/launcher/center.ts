@@ -1,78 +1,108 @@
-import type { CenterContent, SidebarItem } from "./content";
-import { readPrivateFile, revision } from "./files";
+export type ItemAction = {
+    type: "html" | "js";
+    file: string;
+    version: string;
+};
 
-import { realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+export type SidebarItem = {
+    id: string;
+    label?: string;
+    icon?: string;
+    hidden?: boolean;
+    actions?: { left_click: ItemAction };
+};
 
-function object(value: unknown): value is Record<string, unknown>
+export type SidebarSection = {
+    id: string;
+    label?: string;
+    items: SidebarItem[];
+};
+
+export type NativeItem = {
+    id: string;
+    label: string;
+    icon: string;
+    path: string;
+    [key: string]: unknown;
+};
+
+export type CenterContent = {
+    enabled: boolean;
+    sections: SidebarSection[];
+    devinCloud?: string[];
+    css?: string;
+    activeItem?: string;
+    revision?: string;
+};
+
+export type ActionSource = {
+    type: "html" | "js";
+    source: string;
+};
+
+export function visibleItems(content: CenterContent): SidebarItem[]
 {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+    return content.sections.flatMap((section) => section.items).filter((item) => !item.hidden);
 }
 
-function identifier(value: unknown): value is string
+export function overlayItems(native: NativeItem[], content: CenterContent): NativeItem[]
 {
-    return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(value);
-}
+    if (!content.enabled)
+        return native;
 
-async function pageFile(directory: string, file: unknown): Promise<string>
-{
-    if (typeof file !== "string" || isAbsolute(file))
-        throw new Error("Tab files must be relative paths inside the configuration directory.");
-    const path = resolve(directory, file);
-    const child = relative(directory, path);
-    if (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child))
-        throw new Error("Tab files must stay inside the configuration directory.");
-    const real = await realpath(path).catch(() => undefined);
-    const contained = real === undefined ? "" : relative(directory, real);
-    if (contained === "" || contained === ".." || contained.startsWith(`..${sep}`) || isAbsolute(contained))
-        throw new Error("Tab files must stay inside the configuration directory.");
-    return readPrivateFile(path, 262144);
-}
+    const originals = new Map(native.map((item) => [item.id, item]));
+    const imported = new Set(content.devinCloud ?? []);
+    for (const id of imported)
+        if (!originals.has(id))
+            throw new Error(`Unknown Devin Cloud element: ${id}`);
+    const ret = visibleItems(content).map((item) =>
+    {
+        const original = originals.get(item.id);
+        if (!item.actions?.left_click && (!original || !imported.has(item.id)))
+            throw new Error(`New sidebar item needs a left_click action: ${item.id}`);
 
-export async function loadCenter(configPath: string): Promise<CenterContent>
-{
-    const config: unknown = JSON.parse(await readPrivateFile(configPath));
-    if (!object(config) || typeof config.enabled !== "boolean" || !Array.isArray(config.items)
-        || !object(config.tabs) || config.items.length > 100 || Object.keys(config.tabs).length > 100)
-        throw new Error("Command Center needs enabled, items (at most 100), and tabs (at most 100).");
-    const ret: CenterContent = { enabled: config.enabled, items: [], tabs: {} };
-    const directory = await realpath(dirname(configPath));
-    let total = 0;
-    for (const [id, page] of Object.entries(config.tabs))
-    {
-        if (!identifier(id) || !object(page) || typeof page.title !== "string" || page.title.length > 200)
-            throw new Error(`Invalid tab: ${id}`);
-        const html = await pageFile(directory, page.file);
-        total += Buffer.byteLength(html);
-        if (total > 1048576)
-            throw new Error("Command Center content exceeds 1 MiB.");
-        ret.tabs[id] = { title: page.title, html };
-    }
-    const ids = new Set<string>();
-    for (const item of config.items)
-    {
-        if (!object(item) || !identifier(item.id)
-            || item.label !== undefined && (typeof item.label !== "string" || item.label.length > 200)
-            || item.icon !== undefined && (typeof item.icon !== "string"
-                || !/^(?:[a-z][a-z0-9-]{0,63}|Icon[A-Za-z0-9]+)$/.test(item.icon))
-            || item.hidden !== undefined && typeof item.hidden !== "boolean"
-            || item.tab !== undefined && !identifier(item.tab))
-            throw new Error("Invalid sidebar item.");
-        if (ids.has(item.id))
-            throw new Error(`Duplicate sidebar item: ${item.id}`);
-        ids.add(item.id);
-        if (typeof item.tab === "string" && !Object.hasOwn(ret.tabs, item.tab))
-            throw new Error(`Unknown tab: ${item.tab}`);
-        ret.items.push(item as unknown as SidebarItem);
-    }
-    if (config.activeTab !== undefined)
-    {
-        if (!identifier(config.activeTab) || !Object.hasOwn(ret.tabs, config.activeTab))
-            throw new Error(`Unknown active tab: ${String(config.activeTab)}`);
-        if (!ret.items.some((item) => item.tab === config.activeTab && !item.hidden))
-            throw new Error("The active tab must have a visible sidebar item.");
-        ret.activeTab = config.activeTab;
-    }
-    ret.revision = revision(JSON.stringify(ret));
+        return {
+            ...original,
+            id: item.id,
+            label: item.label ?? original?.label ?? item.id,
+            icon: item.icon ?? original?.icon ?? "file",
+            path: item.actions?.left_click ? `/autonom/${item.id}` : original!.path,
+        };
+    });
+    const placed = new Set(content.sections.flatMap((section) => section.items).map((item) => item.id));
+    for (const id of imported)
+        if (!placed.has(id))
+            ret.push({ ...originals.get(id)! });
+
     return ret;
+}
+
+export function isFullDocument(html: string): boolean
+{
+    const head = html.trimStart().slice(0, 16).toLowerCase();
+    return head.startsWith("<!doctype") || head.startsWith("<html");
+}
+
+function escapeHtml(value: string): string
+{
+    return value.replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+    })[character]!);
+}
+
+export function pageHtml(page: { title: string; html: string }): string
+{
+    const title = escapeHtml(page.title);
+    return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; connect-src 'none';
+style-src 'unsafe-inline'; img-src data:; font-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none';">
+<title>${title}</title><style>
+html,body{margin:0;min-height:100%;background:var(--vscode-editor-background);color:var(--vscode-foreground);}
+body{padding:32px;box-sizing:border-box;font:var(--vscode-font-size) var(--vscode-font-family);}
+h1{font-size:28px;font-weight:500;}p{line-height:1.6;}
+</style></head><body>${page.html}</body></html>`;
 }

@@ -1,7 +1,7 @@
 import type { DaemonClient } from "./client";
 import type { LauncherSettings } from "./config";
 import { ensureDefaultConfig, readDaemonConfig, readDataDir, saveDaemon, saveSettings, validateSettings } from "./config";
-import { object, text } from "./parse";
+import { object, text } from "./config";
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
@@ -22,6 +22,9 @@ export type BridgeContext = {
     settings: LauncherSettings;
     client: DaemonClient;
     openPath: (path: string) => void;
+    getAction: (id: string, revision: string) => Promise<unknown>;
+    runScript: (id: string, revision: string, windowId: number) => Promise<unknown>;
+    reloadUi: () => Promise<unknown>;
 };
 
 export type Bridge = {
@@ -93,6 +96,18 @@ async function dispatch(context: BridgeContext, message: Record<string, unknown>
 {
     switch (text(message.action))
     {
+        case "getAction":
+            return context.getAction(text(message.id), text(message.revision));
+
+        case "runScript":
+            if (!Number.isSafeInteger(message.windowId))
+                throw new Error("A valid Desktop window id is required for JS actions.");
+
+            return context.runScript(text(message.id), text(message.revision), message.windowId as number);
+
+        case "reloadUi":
+            return context.reloadUi();
+
         case "getState":
             return await context.client.getState(context.workspace);
 
@@ -109,7 +124,7 @@ async function dispatch(context: BridgeContext, message: Record<string, unknown>
         case "saveSettings": {
             const settings = { ...context.settings, ...validateSettings(message.settings) };
             await saveSettings(context.settingsPath, settings);
-            context.settings = settings;
+            Object.assign(context.settings, settings);
             context.client.configure({
                 port: settings.port,
                 configFile: settings.configFile,
@@ -133,9 +148,6 @@ async function dispatch(context: BridgeContext, message: Record<string, unknown>
         case "editPolicy":
             context.openPath(join(context.workspace, ".devin", "policy.yml"));
             return { ok: true };
-
-        case "registerSession":
-            return await context.client.manageSession(text(message.id));
 
         default:
             throw new Error(`Unknown bridge action: ${text(message.action)}`);

@@ -1,7 +1,7 @@
 import type { CdpClient, CdpSession } from "./cdp";
-import { object, text } from "./parse";
+import { object, text } from "./config";
 
-import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer, createConnection } from "node:net";
 import type { Socket } from "node:net";
 import { dirname, join } from "node:path";
@@ -20,14 +20,25 @@ export type ControlContext = {
 export function defaultSocketPath(): string
 {
     const directory = process.env.XDG_RUNTIME_DIR || join(process.env.HOME || "/tmp", ".cache");
-    return join(directory, "autonom", "launcher.sock");
+    return process.env.AUTONOM_LAUNCHER_SOCKET || join(directory, "autonom", "launcher.sock");
 }
 
 export async function startControlSocket(path: string, context: ControlContext): Promise<{ close: () => Promise<void> }>
 {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-    if (await isLive(path))
+    if (await isLauncherRunning(path))
         throw new Error(`Another Autonom launcher is already listening on ${path}.`);
+
+    const previous = await lstat(path).catch((error) =>
+    {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+            throw error;
+
+        return undefined;
+    });
+    if (previous && !previous.isSocket())
+        throw new Error("The control socket path is occupied by a non-socket file.");
+
     await rm(path, { force: true });
     const server = createServer((socket) =>
     {
@@ -109,7 +120,14 @@ async function action(context: ControlContext, message: Record<string, unknown>)
 
         case "eval": {
             const session = await selectSession(context, message.target);
-            return await session.evaluate(text(message.expression));
+            try
+            {
+                return await session.evaluate(text(message.expression));
+            }
+            finally
+            {
+                await session.detach();
+            }
         }
 
         case "screenshot": {
@@ -117,15 +135,24 @@ async function action(context: ControlContext, message: Record<string, unknown>)
             if (!path)
                 throw new Error("A screenshot path is required.");
             const session = await selectSession(context, message.target);
-            const ret = await session.request("Page.captureScreenshot", { format: "png" });
-            const data = text(ret.data);
-            if (!data)
-                throw new Error("The renderer did not return a screenshot.");
-            const png = Buffer.from(data, "base64");
-            if (png.length > MAX_SCREENSHOT_BYTES)
-                throw new Error("The screenshot exceeds the size limit.");
-            await writeFile(path, png);
-            return { path, bytes: png.length };
+            try
+            {
+                const ret = await session.request("Page.captureScreenshot", { format: "png" });
+                const data = text(ret.data);
+                if (!data)
+                    throw new Error("The renderer did not return a screenshot.");
+
+                const png = Buffer.from(data, "base64");
+                if (png.length > MAX_SCREENSHOT_BYTES)
+                    throw new Error("The screenshot exceeds the size limit.");
+
+                await writeFile(path, png, { flag: "wx", mode: 0o600 });
+                return { path, bytes: png.length };
+            }
+            finally
+            {
+                await session.detach();
+            }
         }
 
         case "hot":
@@ -143,7 +170,8 @@ async function selectSession(context: ControlContext, selector: unknown): Promis
 {
     const match = text(selector);
     const targets = (await context.cdp.targets())
-        .filter((target) => target.type === "page" && target.url === context.workbenchUrl);
+        .filter((target) => target.type === "page" && target.url.split(/[?#]/)[0] === context.workbenchUrl
+            || ["page", "iframe"].includes(target.type) && target.id === match);
     const target = match
         ? targets.find((item) => item.id.includes(match) || item.url.includes(match))
         : targets[0];
@@ -158,7 +186,7 @@ function reply(socket: Socket, message: unknown): void
         socket.write(`${JSON.stringify(message)}\n`);
 }
 
-function isLive(path: string): Promise<boolean>
+export function isLauncherRunning(path: string): Promise<boolean>
 {
     return new Promise((resolve_) =>
     {
@@ -169,6 +197,11 @@ function isLive(path: string): Promise<boolean>
             resolve_(true);
         });
         socket.on("error", () =>
+        {
+            socket.destroy();
+            resolve_(false);
+        });
+        socket.setTimeout(1000, () =>
         {
             socket.destroy();
             resolve_(false);
