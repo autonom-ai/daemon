@@ -4,11 +4,26 @@
 
 The adapter is `source/launcher/`, a launcher that starts Devin Desktop with `--remote-debugging-pipe` and attaches the Command Center to the workbench renderer. It is pinned to Devin Desktop **1.126.0** and refuses to attach to any other build.
 
-The debugging pipe is created by the launcher process and inherited as file descriptors 3 and 4 of the browser process, so the Chrome DevTools Protocol endpoint never listens on a loopback port. No local web page or unrelated process can reach the renderer, and there is no `--remote-debugging-port` to leave behind. The launcher also passes `--disable-extension cet.autonom` and `--disable-extension cet.autonom-command-center`, because the legacy `cet.autonom` 0.4.0 extension edits installed bundles and would contaminate both the build pin and the runtime.
+The debugging pipe is created by the launcher process and inherited as file descriptors 3 and 4 of the browser process, so the Chrome DevTools Protocol endpoint never listens on a loopback port. No local web page or unrelated process can reach the renderer, and there is no `--remote-debugging-port` to leave behind. The launcher strips inherited `ACP_*`, `ELECTRON_*`, `VSCODE_*`, and `WINDSURF_*` variables from the child environment so launching from a terminal inside Devin Desktop does not leak host state (such as `ELECTRON_RUN_AS_NODE` or the parent's IPC hook) into the new instance.
 
-Nothing is written to Desktop's installation or profile data. The adapter wraps the native navigation manifest getter and the native surface controller in memory, keeps a cached overlay snapshot for React's external store, and restores every captured property descriptor on dispose. Because it never patches a file, there is no checksum residue and no integrity warning to dismiss: Devin's native integrity check stays authoritative and untouched.
+`install.sh` changes only the package's `main` field to an installed bootstrap, retaining a byte-for-byte original backup. The original main and workbench bundles, `product.json`, and profile data are untouched. The bootstrap hands normal GUI startup to the launcher, which starts the real application with its pipe; managed children import the original main module. The adapter wraps the native navigation manifest getter and surface controller in memory and restores every descriptor on dispose. There is no checksum rewriting or integrity-warning suppression.
 
-Devin Desktop must not already be running when the launcher starts. Electron's single-instance lock would forward the launch request to the running window, the freshly spawned process would exit, and the pipe would never reach a browser process.
+An already-running unmanaged Desktop must be restarted once: additional windows in that process cannot inherit a new debugging pipe. Once managed, further launches delegate their window requests to it.
+
+## Installation
+
+Build and test as your normal user, then install with the permissions required by the Desktop directory:
+
+```bash
+npm --prefix source/launcher ci
+npm --prefix source/launcher run check
+npm --prefix source/launcher test
+sudo bash install.sh --no-build
+```
+
+Quit Desktop once and launch it normally. Your existing profile and login remain in use. The bootstrap waits for its own process to exit before launching again, avoiding the profile lock race. Logs go to `$XDG_CACHE_HOME/autonom/launcher.log` or `~/.cache/autonom/launcher.log`. The install record retains the actual Node and Python executable paths so GUI startup does not depend on shell version-manager shims.
+
+`bash install.sh --check` verifies status. `sudo bash install.sh --uninstall` restores `package.json` byte-for-byte; backups and inert bootstrap files remain for auditing. `--app <resources/app>` selects a non-default installation. External edits or unknown versions fail closed. The installer references this checkout, so keep it in place. Desktop upgrades replace the patch and require reinstallation after rechecking compatibility. Windows and macOS startup/packaging have not been validated.
 
 ## Verified native boundaries
 
@@ -23,7 +38,7 @@ The adapter temporarily wraps the in-memory manifest getter and the current wind
 
 Custom HTML is placed in a separate native Electron webview over that controller's existing page mount. The existing remote webview stays mounted and is hidden only while a custom page is active; no native sidebar siblings, chat, composer, or other native page are hidden. Custom webviews have no local resource roots, and a page that is a full HTML document supplies its own CSP; fragments are wrapped with `default-src 'none'` and no scripts. A 30-second lease removes the runtime wrappers if the launcher disappears.
 
-The attach flow captures the private native references with two brief CDP debugger pauses; every breakpoint is removed and the renderer is resumed in a `finally`, and the debugger domain is disabled afterwards. Config reloads (`hot`) reuse the already-captured references and do not pause the renderer again.
+The attach flow captures the private native references with two brief CDP debugger pauses; every breakpoint is removed and the renderer is resumed in a `finally`, and the debugger domain is disabled afterwards. Runtime reloads (`hot`) recapture those references before replacing the runtime; failed captures leave the existing runtime installed.
 
 The sidebar React context is the only source of those services, so the agent window must be mounted before the runtime can attach. The workbench mode is persisted per workspace; if the window opens in editor mode, the launcher logs the hint and retries every five seconds until the agent window appears.
 
@@ -48,7 +63,7 @@ The sidebar uses native structural roles:
 - The primary page list has `aria-label="Pages"`; visible rows carry an accessible `aria-label` matching the page label.
 - `data-slot="sidebar-button-content"` / `data-slot="sidebar-menu-button-content"` style the icon-and-label interior.
 
-The toggle intentionally reuses Devin's inspected `.agent-editor-switch`, `.switch-container`, `.switch-segment`, `.segment-label`, and `.active` classes. These native rules supply the 24px height, 12px/500 font, 10px horizontal padding, 7px radius, title-bar foreground, tint-secondary track, active elevated background, and dark/high-contrast border. Both segments explicitly use `flex: 1 1 0` and `min-width: 0`, yielding equal widths. The selected segment overlays the native active fill with `rgb(var(--bg-accent-primary))` and uses `--vscode-button-foreground`; the unselected segment remains transparent. Devin 1.126 resolves the accent to `0 120 212` in the inspected dark theme. Use `classList.toggle("active", isActive)`, `aria-pressed`, and an accessible name; don't draw replacement icons or inject broad CSS. The row inherits the native menu-item class and is inserted immediately before New session. Its small mutation observer watches for React replacing that one menu item and restores only the toggle row.
+The toggle is one accessible provider row immediately before New session. Its styles live in `assets/commandCenter.css`, scoped to Autonom-owned elements and using native theme tokens. `aria-pressed` identifies the active provider. A mutation observer restores only that row after React remounts it; it never hides or rewrites native sidebar containers, groups, sessions, agent-picker buttons, or labels.
 
 Useful pinned theme tokens include `--text-primary`, `--text-secondary`, `--tint-secondary`, `--bg-elevated-transparent`, `--border-secondary`, and `--vscode-titleBar-activeForeground`. Prefer Devin's existing Bootstrap icon names and design-token rules over hard-coded colors or a second icon library. Native theme values and CSS rules are generated in the installed `out` assets; treat them as version-pinned observations, not a stable public API.
 
@@ -60,7 +75,8 @@ The definition and its content live in the repository's `assets/` directory:
 
 - `commandCenter.json` describes the visible pages and provider mode.
 - `pages/*.html` are the page documents; `events.html`, `policy.html`, `schedules.html`, and `settings.html` ship by default.
-- `icons/*.svg` are the Autonom line and fill marks, inlined into the runtime at build time.
+- `icons/*.svg` are the Autonom marks.
+- `commandCenter.css` defines scoped provider and custom-page styles. Runtime UI assets are inlined at build time.
 
 Example:
 
@@ -91,7 +107,7 @@ Config rules:
 
 Pages talk to the daemon through a token-authenticated loopback HTTP endpoint that the launcher owns. The injected runtime receives the endpoint URL and a random token, and forwards each `acquireVsCodeApi()` message to it; the launcher holds the daemon client capability (`dataDir/client.token`) and performs every file write. Capabilities never reach a page, a webview, or a log.
 
-Bridge actions: `getState` (daemon `/api/client/state` for the workspace), `getSettings`/`saveSettings` (launcher settings), `getDaemon`/`saveDaemon` (daemon YAML), `editConfig` (open the daemon configuration in Desktop), `editPolicy` (open the workspace policy), and `registerSession` (adopt a focused ACP session). Unknown actions fail with HTTP 400.
+Bridge actions: `getState` (daemon `/api/client/state` for the workspace), `getSettings`/`saveSettings` (launcher settings), `getDaemon`/`saveDaemon` (daemon YAML), `editConfig` (open the daemon configuration in Desktop), and `editPolicy` (open the workspace policy). Unknown actions fail with HTTP 400.
 
 ## Launcher settings
 
@@ -116,7 +132,7 @@ node source/launcher/cdp.mjs hot
 node source/launcher/cdp.mjs detach
 ```
 
-`hot` re-reads `commandCenter.json` and the rebuilt runtime bundle and re-attaches every window without restarting Desktop. `detach` disposes the runtime, restores native Devin, and stops managing until the launcher restarts.
+`hot` re-reads `commandCenter.json` and the rebuilt runtime bundle and re-attaches every window without restarting Desktop. `detach` disposes the runtime and restores native Devin; `hot` resumes attachment after a detach. Control evaluations and screenshots release their temporary CDP sessions, and status reads the live renderer rather than cached state.
 
 ## Build and verification
 
@@ -126,10 +142,15 @@ From `source/launcher/`:
 npm ci
 npm run check   # tsc --noEmit
 npm test        # build + unit tests
-npm run build   # dist/launcher.js and dist/runtime.js
-node dist/launcher.js /path/to/workspace
+npm run build   # <repository>/dist/launcher.js and <repository>/dist/runtime.js
+```
+
+Then run the launcher from anywhere; it rebuilds `dist/` when sources or assets are newer:
+
+```bash
+python3 source/launcher/run.py /path/to/workspace
 ```
 
 Unit tests cover configuration validation and path confinement, overlay immutability and descriptor rollback, provider-mode restoration, pipe framing, CDP session scoping and capture, bridge authorization, launcher settings, and the control socket. They never close a live gate.
 
-A genuine live acceptance run quits Devin Desktop, starts the launcher, and observes through the control socket: `globalThis.__autonomCenter.status()` must report the configured mode, revision, active tab, and items; the Pages list must show the renamed rows and exclude hidden ones; the custom page webview must be present with the native content hidden; both providers must toggle on screen; and `hot` must pick up edited page content without a restart. Do not patch Desktop, weaken Electron flags, or use isolated/mutated profile data to obtain a green run. See `docs/COMMAND_CENTER_VALIDATION.md`.
+A genuine live acceptance run quits Devin Desktop, starts the launcher, and observes through the control socket: `globalThis.__autonomCenter.status()` must report the configured mode, revision, active tab, and items; the Pages list must show the renamed rows and exclude hidden ones; the custom page webview must be present with the native content hidden; both providers must toggle on screen; and `hot` must pick up edited page content without a restart. Validate the shipped startup bootstrap, never add test-only vendor patches, weaken Electron flags, or use isolated/mutated profile data to obtain a green run. See `docs/COMMAND_CENTER_VALIDATION.md`.
