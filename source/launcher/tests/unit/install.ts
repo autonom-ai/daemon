@@ -21,9 +21,7 @@ async function fixture(): Promise<string>
     await mkdir(join(ret, "bin"));
     await mkdir(join(ret, "usr/bin"), { recursive: true });
     await symlink("../../bin/devin-desktop", join(ret, "usr/bin/devin-desktop"));
-    const metadata = JSON.parse(await readFile(join(installedApp, "package.json"), "utf8"));
-    const packageFile = metadata.main === "./out/autonom-bootstrap.mjs" ? "package.json.autonom.orig" : "package.json";
-    await copyFile(join(installedApp, packageFile), join(app, "package.json"));
+    await copyFile(join(installedApp, "package.json"), join(app, "package.json"));
     for (const file of ["product.json", "out/main.js", "out/vs/workbench/workbench.desktop.main.js"])
         await copyFile(join(installedApp, file), join(app, file));
 
@@ -88,28 +86,6 @@ test("installed entrypoints preserve argv, cwd, stdout, stderr, and exit status 
             assert.equal(installed.stderr, direct.stderr);
             assert.equal("code" in installed && installed.code, 7);
         }
-    }
-    finally
-    {
-        await rm(root, { recursive: true, force: true });
-    }
-});
-
-test("installer migrates the package bootstrap back to pristine app startup", async () =>
-{
-    const root = await fixture();
-    const app = join(root, "resources/app");
-    try
-    {
-        const original = await readFile(join(app, "package.json"));
-        await copyFile(join(installedApp, "package.json.autonom.orig"), join(app, "package.json.autonom.orig"));
-        await copyFile(join(installedApp, "package.json"), join(app, "package.json"));
-        await copyFile(join(installedApp, "out/autonom-bootstrap.mjs"), join(app, "out/autonom-bootstrap.mjs"));
-        await copyFile(join(installedApp, "out/autonom-install.json"), join(app, "out/autonom-install.json"));
-        assert.match((await execute("bash", [installer, "--check", "--app", app])).stdout,
-            /CLI launcher upgrade required/);
-        await execute("bash", [installer, "--no-build", "--app", app]);
-        assert.deepEqual(await readFile(join(app, "package.json")), original);
     }
     finally
     {
