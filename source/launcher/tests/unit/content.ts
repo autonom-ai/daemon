@@ -1,43 +1,68 @@
-import { isFullDocument, overlayItems, pageHtml } from "../../content";
+import { isFullDocument, overlayItems, pageHtml } from "../../center";
+import type { SidebarItem } from "../../center";
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 const native = [
-    { id: "automations", label: "Automations", path: "/automations", icon: "IconClock" },
-    { id: "security", label: "Security", path: "/security", icon: "IconShield" },
+    { id: "automations", label: "Automations", path: "/automations", icon: "IconClock", native: true },
+    { id: "security", label: "Security", path: "/security", icon: "IconShield", native: true },
 ];
 
-test("native navigation is preserved without an enabled overlay", () =>
+function item(id: string, label: string): SidebarItem
 {
-    assert.equal(overlayItems(native, { enabled: false, items: [], tabs: {} }), native);
+    return { id, label, actions: { left_click: { type: "html", file: `pages/${id}.html`, version: "unit" } } };
+}
+
+test("disabled UI preserves the original native navigation", () =>
+{
+    assert.equal(overlayItems(native, { enabled: false, sections: [] }), native);
 });
 
-test("sidebar overlay renames, removes and adds without changing native inputs", () =>
+test("section and item order defines the navigation without changing native objects", () =>
 {
     const ret = overlayItems(native, {
         enabled: true,
-        items: [
-            { id: "automations", label: "Schedules", tab: "schedules" },
-            { id: "security", hidden: true },
-            { id: "events", label: "Events", tab: "events", icon: "IconBell" },
+        sections: [
+            { id: "first", items: [item("events", "Events"), { id: "hidden", hidden: true }] },
+            { id: "second", items: [item("automations", "Schedules")] },
         ],
-        tabs: { schedules: { title: "Schedules", html: "" }, events: { title: "Events", html: "" } },
     });
-    assert.deepEqual(ret.map((item) => item.label), ["Schedules", "Events"]);
-    assert.equal(ret[0]?.path, "/autonom/schedules");
-    assert.equal(ret[1]?.icon, "IconBell");
+    assert.deepEqual(ret.map((entry) => entry.label), ["Events", "Schedules"]);
+    assert.equal(ret[0]?.path, "/autonom/events");
+    assert.equal(ret[1]?.path, "/autonom/automations");
+    assert.equal(ret[1]?.native, true);
     assert.equal(native[0]?.label, "Automations");
     assert.equal(native.length, 2);
 });
 
-test("a new sidebar item without a tab is rejected", () =>
+test("new items require an action; existing native items can retain their navigation", () =>
 {
     assert.throws(() => overlayItems(native, {
         enabled: true,
-        items: [{ id: "orphan", label: "Orphan" }],
-        tabs: {},
-    }), /needs a tab/);
+        sections: [{ id: "group", items: [{ id: "orphan", label: "Orphan" }] }],
+    }), /needs a left_click/);
+    assert.equal(overlayItems(native, {
+        enabled: true,
+        devinCloud: ["security"],
+        sections: [{ id: "group", items: [{ id: "security", label: "Policy" }] }],
+    })[0]?.path, "/security");
+});
+
+test("native Cloud imports are YAML-selected, retain their routes, and never appear implicitly", () =>
+{
+    const nativeItems = [...native, { id: "wiki", label: "Wiki", icon: "wiki", path: "/wiki", native: true }];
+    assert.deepEqual(overlayItems(nativeItems, { enabled: true, sections: [] }), []);
+    assert.deepEqual(overlayItems(nativeItems, { enabled: true, sections: [], devinCloud: ["wiki"] }), [nativeItems[2]]);
+    const imported = overlayItems(nativeItems, {
+        enabled: true,
+        devinCloud: ["security", "wiki"],
+        sections: [{ id: "knowledge", items: [{ id: "wiki" }] }],
+    });
+    assert.deepEqual(imported.map((item) => item.path), ["/wiki", "/security"]);
+    assert.throws(() => overlayItems(nativeItems, {
+        enabled: true, sections: [], devinCloud: ["missing"],
+    }), /Unknown Devin Cloud/);
 });
 
 test("fragment pages receive a restrictive CSP and no host capability", () =>
@@ -50,7 +75,7 @@ test("fragment pages receive a restrictive CSP and no host capability", () =>
     assert.ok(!ret.includes("acquireVsCodeApi"));
 });
 
-test("full documents are recognized so their own CSP applies", () =>
+test("full documents keep their own CSP", () =>
 {
     assert.equal(isFullDocument("<!DOCTYPE html><html></html>"), true);
     assert.equal(isFullDocument("  <html lang=\"en\">"), true);

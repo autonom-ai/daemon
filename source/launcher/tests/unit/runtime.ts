@@ -1,8 +1,26 @@
-import { config, fixture } from "../support";
+import { config, CONTENT, fixture } from "../support";
 import { install } from "../../runtime";
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { after, beforeEach, test } from "node:test";
+
+const originalFetch = globalThis.fetch;
+let messages: Record<string, unknown>[] = [];
+beforeEach(() =>
+{
+    messages = [];
+    globalThis.fetch = async (_url, options) =>
+    {
+        const message = JSON.parse(String(options?.body));
+        messages.push(message);
+        return Response.json({ result: message.action === "getAction"
+            ? { type: "html", source: "<h1>Hello world</h1>" } : null });
+    };
+});
+after(() =>
+{
+    globalThis.fetch = originalFetch;
+});
 
 test("runtime caches immutable manifest overlays and restores exact descriptors", async () =>
 {
@@ -47,20 +65,19 @@ test("runtime reload is atomic and open tab uses native navigation", async () =>
         await runtime.update(config());
         await assert.rejects(runtime.update(config({
             enabled: true,
-            items: [{ id: "unknown", label: "Broken" }],
-            tabs: {},
-        })), /needs a tab/);
+            sections: [{ id: "broken", items: [{ id: "unknown", label: "Broken" }] }],
+        })), /needs a left_click/);
         assert.equal(runtime.status().items[0].label, "Jared");
-        await runtime.open("hello");
-        assert.equal(runtime.status().activeTab, "hello");
+        await runtime.open("automations");
+        assert.equal(runtime.status().activeItem, "automations");
         assert.deepEqual(environment.commands, [{
             command: "devin.desktopNav.openSurface",
-            surface: { id: "automations", path: "/autonom/hello" },
+            surface: { id: "automations", path: "/autonom/automations" },
         }]);
-        await assert.rejects(runtime.open("missing"), /Unknown or hidden/);
-        await runtime.update(config({ enabled: false, items: [], tabs: {} }));
+        await assert.rejects(runtime.open("missing"), /Unknown, hidden/);
+        await runtime.update(config({ enabled: false, sections: [] }));
         assert.equal(runtime.status().enabled, false);
-        assert.equal(runtime.status().activeTab, null);
+        assert.equal(runtime.status().activeItem, null);
         assert.equal(environment.services.groups.getActiveNavSurface().path, "/automations");
         assert.equal(environment.services.manifest.getManifest(), environment.base);
     }
@@ -77,7 +94,7 @@ test("provider mode returns to native Devin navigation and switches back without
     try
     {
         await runtime.update(config());
-        await runtime.open("hello");
+        await runtime.open("automations");
         const cloud = await runtime.setMode("devin-cloud");
         assert.equal(cloud.mode, "devin-cloud");
         assert.equal(cloud.enabled, false);
@@ -86,10 +103,8 @@ test("provider mode returns to native Devin navigation and switches back without
         const autonom = await runtime.setMode("autonom");
         assert.equal(autonom.mode, "autonom");
         assert.equal(autonom.enabled, true);
-        assert.equal(autonom.activeTab, null);
-        await runtime.open("hello");
-        assert.equal(runtime.status().activeTab, "hello");
-        assert.equal(environment.commands.length, 2);
+        assert.equal(autonom.activeItem, "automations");
+        assert.equal(environment.commands.length, 3);
     }
     finally
     {
@@ -105,6 +120,122 @@ test("runtime refuses unsupported native service shapes and invalid configuratio
     assert.throws(() => install(environment.services, {} as any), /bridge endpoint/);
     assert.equal(environment.services.manifest.getManifest, original);
     assert.equal(environment.listeners.size, 0);
+});
+
+test("a rejected replacement leaves the working runtime installed", async () =>
+{
+    const environment = fixture();
+    const runtime = install(environment.services, config());
+    try
+    {
+        await runtime.update(config());
+        assert.throws(() => install({ ...environment.services, controller: {} }, config()), /Unsupported native/);
+        assert.equal((globalThis as any).__autonomCenter, runtime);
+        assert.equal(environment.services.manifest.getManifest().items[0].label, "Jared");
+    }
+    finally
+    {
+        runtime.dispose();
+    }
+});
+
+test("HTML actions are lazy and repeated opens reuse the same source", async () =>
+{
+    const environment = fixture();
+    const runtime = install(environment.services, config());
+    try
+    {
+        await runtime.update(config());
+        assert.equal(runtime.status().loadedActions, 0);
+        assert.equal(messages.length, 0);
+        await runtime.open("automations");
+        await runtime.open("automations");
+        assert.equal(messages.length, 1);
+        assert.deepEqual(messages[0], { action: "getAction", id: "automations", revision: "demo", windowId: 2 });
+        assert.equal(runtime.status().loadedActions, 1);
+    }
+    finally
+    {
+        runtime.dispose();
+    }
+});
+
+test("JS actions do not navigate to a page and run with the scoped UI context", async () =>
+{
+    const environment = fixture();
+    const content = { ...CONTENT, sections: [{ id: "tools", items: [{
+        id: "run",
+        actions: { left_click: { type: "js" as const, file: "run.js", version: "script-one" } },
+    }] }] };
+    const runtime = install(environment.services, config(content));
+    try
+    {
+        await runtime.update(config(content));
+        await runtime.activate("run");
+        assert.equal(environment.commands.length, 0);
+        assert.deepEqual(messages[0], { action: "runScript", id: "run", revision: "demo", windowId: 2 });
+        let executions = 0;
+        runtime.setScript("run", "script-one", async (context: any) =>
+        {
+            assert.ok(Object.isFrozen(context));
+            assert.equal(context.item.id, "run");
+            executions++;
+            await context.executeCommand("native.action", { id: "native", path: "/native" });
+        });
+        assert.equal(runtime.hasScript("run", "script-one"), true);
+        await runtime.runScript("run", "script-one");
+        await runtime.runScript("run", "script-one");
+        assert.equal(executions, 2);
+        assert.equal(runtime.status().compiledScripts, 1);
+        assert.equal(runtime.status().loadedActions, 1);
+        assert.equal(environment.commands.length, 2);
+        await runtime.update(config({ ...content, sections: [] }));
+        assert.equal(runtime.status().compiledScripts, 0);
+        await assert.rejects(runtime.runScript("run", "script-one"), /not available/);
+    }
+    finally
+    {
+        runtime.dispose();
+    }
+});
+
+test("disposed runtimes reject late updates and cannot restore the overlay", async () =>
+{
+    const environment = fixture();
+    const runtime = install(environment.services, config());
+    await runtime.update(config());
+    runtime.dispose();
+    await assert.rejects(runtime.update(config()), /disposed/);
+    await assert.rejects(runtime.open("automations"), /disposed/);
+    assert.equal(environment.services.manifest.getManifest(), environment.base);
+    assert.equal(environment.listeners.size, 0);
+});
+
+test("a failed lazy page refresh keeps the previous snapshot active", async () =>
+{
+    const environment = fixture();
+    const runtime = install(environment.services, config());
+    try
+    {
+        await runtime.update(config());
+        await runtime.open("automations");
+        globalThis.fetch = async () =>
+        {
+            throw new Error("unavailable");
+        };
+        const content = { ...CONTENT, revision: "next", sections: [{ id: "pages", items: [{
+            id: "automations",
+            label: "Changed",
+            actions: { left_click: { type: "html" as const, file: "pages/welcome.html", version: "next" } },
+        }] }] };
+        await assert.rejects(runtime.update(config(content)), /unavailable/);
+        assert.equal(runtime.status().revision, "demo");
+        assert.equal(runtime.status().items[0].label, "Jared");
+    }
+    finally
+    {
+        runtime.dispose();
+    }
 });
 
 test("installing again replaces the previous runtime without leaving descriptors", () =>

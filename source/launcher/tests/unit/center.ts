@@ -1,130 +1,191 @@
-import { loadCenter } from "../../center";
+import { loadAction, loadCenter } from "../../config";
+import type { ActionCache } from "../../config";
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { stringify } from "yaml";
 
 async function center(files: Record<string, string>, config: unknown): Promise<string>
 {
     const directory = await mkdtemp(join(tmpdir(), "autonom-center-"));
     for (const [name, content] of Object.entries(files))
     {
-        await mkdir(join(directory, name, ".."), { recursive: true });
+        await mkdir(dirname(join(directory, name)), { recursive: true });
         await writeFile(join(directory, name), content);
     }
-    await writeFile(join(directory, "commandCenter.json"), JSON.stringify(config));
-    return join(directory, "commandCenter.json");
+
+    await writeFile(join(directory, "ui.yml"), stringify(config));
+    return join(directory, "ui.yml");
 }
 
-test("a file-backed configuration loads every page and reports a revision", async () =>
+function definition(file = "pages/events.html"): unknown
 {
-    const path = await center({ "pages/events.html": "<h1>Events</h1>" }, {
+    return {
         enabled: true,
-        items: [{ id: "events", label: "Events", tab: "events" }],
-        tabs: { events: { title: "Events", file: "pages/events.html" } },
-        activeTab: "events",
-    });
+        sections: [{ id: "coordination", label: "Coordination", items: [
+            { id: "events", label: "Events", actions: { left_click: file } },
+        ] }],
+    };
+}
+
+test("YAML sections load metadata only, then read an action once on demand", async () =>
+{
+    const path = await center({ "pages/events.html": "<h1>Events</h1>", "ui.css": "h2{color:red}" }, definition());
     try
     {
         const content = await loadCenter(path);
         assert.equal(content.enabled, true);
-        assert.equal(content.activeTab, "events");
-        assert.equal(content.tabs.events?.html, "<h1>Events</h1>");
-        assert.match(content.revision ?? "", /^[a-f0-9]{64}$/);
+        assert.equal(content.sections[0]?.label, "Coordination");
+        const action = content.sections[0]?.items[0]?.actions?.left_click;
+        assert.equal(action?.type, "html");
+        assert.equal(action?.file, "pages/events.html");
+        assert.ok(!JSON.stringify(content).includes("<h1>Events</h1>"));
+        assert.equal(content.css, "h2{color:red}");
         assert.equal((await loadCenter(path)).revision, content.revision);
+        const cache: ActionCache = new Map();
+        const source = await loadAction(path, content, "events", content.revision!, cache);
+        assert.deepEqual(source, { type: "html", source: "<h1>Events</h1>" });
+        assert.equal(await loadAction(path, content, "events", content.revision!, cache), source);
+        assert.equal(cache.size, 1);
+        await assert.rejects(loadAction(path, content, "events", "stale", cache), /definition changed/);
+        await assert.rejects(loadAction(path, content, "missing", content.revision!, cache), /Unknown or hidden/);
     }
     finally
     {
-        await rm(path, { force: true, recursive: true });
+        await rm(dirname(path), { recursive: true, force: true });
     }
 });
 
-test("invalid configurations are rejected as a whole", async () =>
+test("JS actions and empty sections are accepted without eagerly executing or reading scripts", async () =>
 {
-    const cases: Record<string, unknown> = {
-        "unknown tab reference": {
-            enabled: true,
-            items: [{ id: "events", tab: "missing" }],
-            tabs: { events: { title: "Events", file: "pages/events.html" } },
-        },
-        "duplicate sidebar item": {
-            enabled: true,
-            items: [{ id: "events", tab: "events" }, { id: "events", tab: "events" }],
-            tabs: { events: { title: "Events", file: "pages/events.html" } },
-        },
-        "hidden active tab": {
-            enabled: true,
-            items: [{ id: "events", tab: "events", hidden: true }],
-            tabs: { events: { title: "Events", file: "pages/events.html" } },
-            activeTab: "events",
-        },
-        "unsupported icon": {
-            enabled: true,
-            items: [{ id: "events", tab: "events", icon: "Icon Bad" }],
-            tabs: { events: { title: "Events", file: "pages/events.html" } },
-        },
-    };
-    for (const [name, config] of Object.entries(cases))
+    const path = await center({ "run.js": "await context.open('events');" }, {
+        sections: [
+            { id: "empty", label: "Empty", items: [] },
+            { id: "tools", items: [{ id: "run", actions: { left_click: "run.js" } }] },
+        ],
+    });
+    try
+    {
+        const content = await loadCenter(path);
+        assert.equal(content.sections.length, 2);
+        assert.equal(content.sections[1]?.items[0]?.actions?.left_click.type, "js");
+        assert.ok(!JSON.stringify(content).includes("context.open"));
+        assert.equal((await loadAction(path, content, "run", content.revision!, new Map())).source,
+            "await context.open('events');");
+    }
+    finally
+    {
+        await rm(dirname(path), { recursive: true, force: true });
+    }
+});
+
+test("invalid YAML layouts and unsupported actions reject the entire definition", async () =>
+{
+    const item = { id: "events", actions: { left_click: "pages/events.html" } };
+    const cases = [
+        { sections: [{ id: "group", items: [item, item] }] },
+        { sections: [{ id: "group", items: [] }, { id: "group", items: [] }] },
+        { sections: [{ id: "group", items: [{ ...item, icon: "Icon Bad" }] }] },
+        { sections: [{ id: "group", items: [{ ...item, actions: { right_click: "pages/events.html" } }] }] },
+        { sections: [{ id: "group", items: [{ ...item, actions: { left_click: "page.txt" } }] }] },
+        { sections: [{ id: "group", items: [{ ...item, actions: { left_click: "pages/events.html", right_click: "run.js" } }] }] },
+        { sections: [{ id: "group", items: [{ ...item, hidden: true }] }], active_item: "events" },
+        { sections: [{ id: "group", items: [item] }], active_item: "missing" },
+        { sections: [{ id: "group", items: [{ ...item, tab: "old" }] }] },
+        { sections: [], tabs: {} },
+        { sections: [], items: [] },
+        { sections: [], enabled: "yes" },
+        { sections: [{ id: "group", items: [{ id: "missing" }] }] },
+    ];
+    for (const config of cases)
     {
         const path = await center({ "pages/events.html": "<h1>Events</h1>" }, config);
-        await assert.rejects(loadCenter(path), Error, name);
-        await rm(path, { force: true, recursive: true });
+        try
+        {
+            await assert.rejects(loadCenter(path));
+        }
+        finally
+        {
+            await rm(dirname(path), { recursive: true, force: true });
+        }
     }
-});
 
-test("page files must stay inside the configuration directory", async () =>
-{
-    const outside = await mkdtemp(join(tmpdir(), "autonom-outside-"));
-    await writeFile(join(outside, "outside.html"), "<h1>Outside</h1>");
-    const path = await center({ "pages/events.html": "<h1>Events</h1>" }, {
-        enabled: true,
-        items: [{ id: "events", tab: "events" }],
-        tabs: { events: { title: "Events", file: "../outside.html" } },
-    });
+    const path = await center({}, { sections: [] });
     try
     {
-        await assert.rejects(loadCenter(path), /stay inside the configuration directory/);
+        await writeFile(path, "sections: [broken\n");
+        await assert.rejects(loadCenter(path), /invalid YAML/);
     }
     finally
     {
-        await rm(path, { force: true, recursive: true });
-        await rm(outside, { force: true, recursive: true });
+        await rm(dirname(path), { recursive: true, force: true });
     }
 });
 
-test("symlinked page files are rejected", async () =>
+test("native Cloud import ids are validated and may be placed without custom actions", async () =>
 {
-    const path = await center({ "real.html": "<h1>Real</h1>" }, {
-        enabled: true,
-        items: [{ id: "events", tab: "events" }],
-        tabs: { events: { title: "Events", file: "linked.html" } },
+    const path = await center({}, {
+        devin_cloud: ["wiki", "review"],
+        sections: [{ id: "native", items: [{ id: "wiki" }] }],
     });
     try
     {
+        const content = await loadCenter(path);
+        assert.deepEqual(content.devinCloud, ["wiki", "review"]);
+        assert.equal(content.sections[0]?.items[0]?.actions, undefined);
+        for (const devin_cloud of [["wiki", "wiki"], ["Bad Id"], "wiki"])
+        {
+            await writeFile(path, stringify({ devin_cloud, sections: [] }));
+            await assert.rejects(loadCenter(path), /unique native/);
+        }
+    }
+    finally
+    {
+        await rm(dirname(path), { recursive: true, force: true });
+    }
+});
+
+test("action paths are confined, no-follow, bounded, and must exist", async () =>
+{
+    const path = await center({ "real.html": "<h1>Real</h1>", "large.html": "x".repeat(262145) }, definition());
+    try
+    {
+        for (const file of ["../outside.html", "/tmp/outside.html", "missing.html", "large.html"])
+        {
+            await writeFile(path, stringify(definition(file)));
+            await assert.rejects(loadCenter(path));
+        }
+
         await symlink(join(dirname(path), "real.html"), join(dirname(path), "linked.html"));
-        await assert.rejects(loadCenter(path), /ELOOP|symbolic|bounded regular file/);
+        await writeFile(path, stringify(definition("linked.html")));
+        await assert.rejects(loadCenter(path), /ELOOP|symbolic/);
     }
     finally
     {
-        await rm(path, { force: true, recursive: true });
+        await rm(dirname(path), { recursive: true, force: true });
     }
 });
 
-test("oversized page files are rejected", async () =>
+test("editing an action changes its revision and invalidates only that cached file", async () =>
 {
-    const path = await center({ "pages/events.html": "x".repeat(262145) }, {
-        enabled: true,
-        items: [{ id: "events", tab: "events" }],
-        tabs: { events: { title: "Events", file: "pages/events.html" } },
-    });
+    const path = await center({ "pages/events.html": "<h1>Before</h1>" }, definition());
     try
     {
-        await assert.rejects(loadCenter(path), /bounded regular file/);
+        const first = await loadCenter(path);
+        const cache: ActionCache = new Map();
+        await loadAction(path, first, "events", first.revision!, cache);
+        await writeFile(join(dirname(path), "pages/events.html"), "<h1>After and longer</h1>");
+        const next = await loadCenter(path);
+        assert.notEqual(next.revision, first.revision);
+        assert.equal((await loadAction(path, next, "events", next.revision!, cache)).source, "<h1>After and longer</h1>");
+        assert.equal(cache.size, 1);
+        await assert.rejects(loadAction(path, first, "events", first.revision!, new Map()), /file changed/);
     }
     finally
     {
-        await rm(path, { force: true, recursive: true });
+        await rm(dirname(path), { recursive: true, force: true });
     }
 });
