@@ -42,7 +42,6 @@ record = payload / "install.json"
 entrypoint = desktop / "bin/devin-desktop"
 backup = Path(str(entrypoint) + ".autonom.orig")
 package = app / "package.json"
-legacy_backup = app / "package.json.autonom.orig"
 
 
 def read(path):
@@ -75,9 +74,7 @@ def write(path, content, mode=0o644):
             os.unlink(temporary)
 
 
-current = read(package)
-original = read(legacy_backup) if legacy_backup.exists() else current
-metadata = json.loads(original)
+metadata = json.loads(read(package))
 if metadata.get("version") != "1.126.0" or metadata.get("main") != "./out/main.js":
     raise SystemExit("Unsupported Desktop entrypoint or version; no installation files changed.")
 product = json.loads(read(app / "product.json"))
@@ -87,18 +84,7 @@ if digest(read(app / "out/vs/workbench/workbench.desktop.main.js")) != (
     "da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d"
 ):
     raise SystemExit("Desktop's workbench is not pristine; no installation files changed.")
-legacy_patched = original.replace(b'"main": "./out/main.js"', b'"main": "./out/autonom-bootstrap.mjs"', 1)
-if current not in (original, legacy_patched):
-    raise SystemExit("package.json was changed outside Autonom; refusing to overwrite it.")
-if current != original:
-    legacy_record = json.loads(read(app / "out/autonom-install.json"))
-    if legacy_record.get("packageHash") != digest(original) or legacy_record.get("bootstrapHash") != digest(
-        read(app / "out/autonom-bootstrap.mjs")
-    ):
-        raise SystemExit("Autonom's previous bootstrap was changed externally; refusing to overwrite it.")
-
 saved = json.loads(read(record)) if record.exists() else None
-legacy_installed = current != original
 installed = False
 if backup.exists():
     original_entrypoint = read(backup)
@@ -114,15 +100,11 @@ else:
 if args.check:
     if installed:
         print("Autonom launcher installed.")
-    elif legacy_installed:
-        print("Previous Autonom package bootstrap installed; CLI launcher upgrade required.")
     else:
         print("Pristine Devin Desktop CLI; Autonom launcher not installed.")
 elif args.uninstall:
     if backup.exists():
         write(entrypoint, read(backup), backup.stat().st_mode & 0o777)
-    if current != original:
-        write(package, original, package.stat().st_mode & 0o777)
     print("Restored the Devin Desktop CLI byte-for-byte. Original backups and inert launcher files retained.")
 else:
     repository = args.repository.resolve(strict=True)
@@ -151,8 +133,6 @@ else:
             source = repository / file
             write(payload / file, read(source), source.stat().st_mode & 0o777)
         write(record, json.dumps(next_record, indent=2).encode() + b"\n")
-        if current != original:
-            write(package, original, package.stat().st_mode & 0o777)
         if not backup.exists():
             entrypoint.rename(backup)
         write(entrypoint, stub, 0o755)
