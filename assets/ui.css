@@ -1,4 +1,5 @@
 [data-autonom-mode-switch] {
+    -webkit-app-region: no-drag;
     display: inline-flex;
     align-items: center;
     gap: 2px;
@@ -9,6 +10,7 @@
     background: var(--windsurf-switch-background, rgba(230, 230, 230, 0.05));
 }
 [data-autonom-mode-switch] button {
+    -webkit-app-region: no-drag;
     display: flex;
     align-items: center;
     justify-content: center;
