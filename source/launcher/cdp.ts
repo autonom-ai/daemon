@@ -1,5 +1,5 @@
-import type { PipeTransport } from "./desktop";
-import { object, text } from "./parse";
+import type { CdpTransport } from "./desktop";
+import { object, text } from "./config";
 
 import { randomUUID } from "node:crypto";
 
@@ -26,7 +26,7 @@ export class CdpClient
     private sequence = 0;
     private closed = false;
 
-    constructor(private readonly transport: PipeTransport)
+    constructor(private readonly transport: CdpTransport)
     {
         transport.onMessage((message) =>
         {
@@ -39,7 +39,7 @@ export class CdpClient
     }
 
     request(method: string, parameters: Record<string, unknown> = {},
-        sessionId?: string): Promise<Record<string, unknown>>
+        sessionId?: string, timeout = REQUEST_TIMEOUT): Promise<Record<string, unknown>>
     {
         if (this.closed)
             return Promise.reject(new Error("The Desktop debugging pipe is closed."));
@@ -50,7 +50,7 @@ export class CdpClient
             {
                 this.requests.delete(id);
                 reject(new Error(`Timed out waiting for ${method}.`));
-            }, REQUEST_TIMEOUT);
+            }, timeout);
             this.requests.set(id, { resolve: resolve_, reject, timer });
             try
             {
@@ -161,9 +161,10 @@ export class CdpSession
     {
     }
 
-    request(method: string, parameters: Record<string, unknown> = {}): Promise<Record<string, unknown>>
+    request(method: string, parameters: Record<string, unknown> = {},
+        timeout = REQUEST_TIMEOUT): Promise<Record<string, unknown>>
     {
-        return this.client.request(method, parameters, this.id);
+        return this.client.request(method, parameters, this.id, timeout);
     }
 
     on(method: string, listener: (parameters: Record<string, unknown>) => void): () => void
@@ -175,7 +176,7 @@ export class CdpSession
         });
     }
 
-    async evaluate(expression: string): Promise<unknown>
+    async evaluate(expression: string, timeout = REQUEST_TIMEOUT): Promise<unknown>
     {
         const group = `autonom-evaluate-${randomUUID()}`;
         try
@@ -185,7 +186,7 @@ export class CdpSession
                 objectGroup: group,
                 returnByValue: true,
                 awaitPromise: true,
-            });
+            }, timeout);
             if (ret.exceptionDetails || !ret.result)
                 throw new Error(exceptionText(ret) ?? "The renderer evaluation failed.");
             return object(ret.result)?.value;
@@ -198,7 +199,55 @@ export class CdpSession
 
     async detach(): Promise<void>
     {
-        await this.request("Target.detachFromTarget", { sessionId: this.id }).catch(() => undefined);
+        await this.client.request("Target.detachFromTarget", { sessionId: this.id }).catch(() => undefined);
+    }
+}
+
+function probe(): any
+{
+    for (const element of document.querySelectorAll("[data-slot=sidebar-menu], [data-slot=sidebar]"))
+    {
+        const key = Object.keys(element).find((name) => name.startsWith("__reactFiber$"));
+        let fiber = key ? (element as any)[key] : null;
+        for (let index = 0; fiber && index < 128; index++, fiber = fiber.return)
+        {
+            const props = fiber.memoizedProps;
+            if (typeof props?.getDesktopNavSurfacesSnapshot === "function"
+                && typeof props?.getActiveDesktopNavSurfaceSnapshot === "function" && props.vscodeAPI?.executeCommand)
+                return { props, api: props.vscodeAPI };
+        }
+    }
+
+    return null;
+}
+
+export async function captureServices(session: CdpSession): Promise<boolean>
+{
+    const found = await session.evaluate(`globalThis.__autonomAttachProbe=(${probe.toString()})();`
+        + "Boolean(globalThis.__autonomAttachProbe)");
+    if (found !== true)
+        return false;
+
+    await session.request("Debugger.enable", { maxScriptsCacheSize: 0 });
+    try
+    {
+        await captureInvocation(
+            session,
+            "globalThis.__autonomAttachProbe.props.getDesktopNavSurfacesSnapshot",
+            "globalThis.__autonomServices={manifest:this._manifestService,controller:yAe.prototype};true",
+        );
+        await captureInvocation(
+            session,
+            "globalThis.__autonomAttachProbe.props.getActiveDesktopNavSurfaceSnapshot",
+            "globalThis.__autonomServices.groups=o;globalThis.__autonomServices.windowId=e.vscodeWindowId;"
+                + "globalThis.__autonomServices.api=globalThis.__autonomAttachProbe.api;true",
+        );
+        return true;
+    }
+    finally
+    {
+        await session.request("Debugger.disable").catch(() => undefined);
+        await session.evaluate("delete globalThis.__autonomAttachProbe").catch(() => undefined);
     }
 }
 
@@ -228,19 +277,20 @@ export async function captureInvocation(session: CdpSession, expression: string,
         }
     })();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let removeListener: (() => void) | undefined;
     const captured = new Promise<void>((resolve_, reject) =>
     {
         timer = setTimeout(() =>
         {
             reject(new Error("Timed out capturing the native Command Center services."));
         }, REQUEST_TIMEOUT);
-        const remove = session.on("Debugger.paused", (parameters) =>
+        removeListener = session.on("Debugger.paused", (parameters) =>
         {
             const hit = Array.isArray(parameters.hitBreakpoints) && parameters.hitBreakpoints.includes(breakpointId);
             if (paused || !hit)
                 return;
             paused = true;
-            remove();
+            removeListener?.();
             void (async () =>
             {
                 try
@@ -256,7 +306,7 @@ export async function captureInvocation(session: CdpSession, expression: string,
                         returnByValue: true,
                     });
                     if (ret.exceptionDetails)
-                        throw new Error("The native Command Center service capture failed.");
+                        throw new Error(exceptionText(ret) ?? "The native Command Center service capture failed.");
                     await finish();
                     resolve_();
                 }
@@ -275,6 +325,7 @@ export async function captureInvocation(session: CdpSession, expression: string,
     finally
     {
         clearTimeout(timer);
+        removeListener?.();
         await finish();
         await session.request("Runtime.releaseObjectGroup", { objectGroup: group }).catch(() => undefined);
     }

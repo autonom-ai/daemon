@@ -1,5 +1,5 @@
 import { ensureDefaultConfig, readRouterKey } from "./config";
-import { object, text } from "./parse";
+import { object, text } from "./config";
 
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
@@ -98,11 +98,6 @@ export class DaemonClient
     {
         const query = directory ? `?directory=${encodeURIComponent(directory)}` : "";
         return this.request(`/api/client/state${query}`);
-    }
-
-    async manageSession(id: string): Promise<unknown>
-    {
-        return this.request(`/api/sessions/${encodeURIComponent(id)}/manage`, "POST", {});
     }
 
     private get base(): string

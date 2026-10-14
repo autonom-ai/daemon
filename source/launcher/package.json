@@ -4,11 +4,12 @@
   "version": "0.1.0",
   "private": true,
   "license": "AGPL-3.0-only",
+  "engines": { "node": ">=22.0.0" },
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
     "build": "node build.mjs",
-    "test": "npm run build && node --test dist/tests/unit/*.js",
-    "launch": "node dist/launcher.js"
+    "test": "npm run build && node --test ../../dist/tests/unit/*.js",
+    "launch": "npm run build && node ../../dist/launcher.js"
   },
   "dependencies": {
     "yaml": "2.9.1"
