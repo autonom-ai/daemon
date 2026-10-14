@@ -73,19 +73,7 @@ export function prepareShell(css = uiCss): any
     }
 
     const style = document.createElement("style");
-    const agentCss = `
-        .codicon-acp-agent-autonom::before,
-        [class*="codicon-acp-agent-autonom-"]::before,
-        .codicon-acp-agent-devin-autonom::before {
-            content: "" !important;
-            display: inline-block;
-            width: 1em;
-            height: 1em;
-            background-color: currentColor;
-            mask: url("data:image/svg+xml,${encodeURIComponent(autonomFillMarkup)}") center / contain no-repeat !important;
-            -webkit-mask: url("data:image/svg+xml,${encodeURIComponent(autonomFillMarkup)}") center / contain no-repeat !important;
-        }`;
-    style.textContent = css + agentCss;
+    style.textContent = css;
     document.head.appendChild(style);
     const switches = new Map<HTMLElement, {
         host: HTMLElement;
@@ -236,8 +224,8 @@ export function prepareShell(css = uiCss): any
         },
         update(nextCss: string): void
         {
-            if (style.textContent !== nextCss + agentCss)
-                style.textContent = nextCss + agentCss;
+            if (style.textContent !== nextCss)
+                style.textContent = nextCss;
 
             render();
         },
@@ -320,34 +308,6 @@ export function install(services: any, config: RuntimeConfig): any
     const running = new Set<string>();
     let observerFrame: ReturnType<typeof setTimeout> | undefined;
     let navigation = 0;
-    let acpStoreUnsubscribe: (() => void) | undefined;
-    const registeredSessionIds = new Set<string>();
-
-    function attachSessionWatcher(): void
-    {
-        if (acpStoreUnsubscribe)
-            return;
-
-        const store = (globalThis as any).__acpStore;
-        if (!store || typeof store.subscribe !== "function" || typeof store.getState !== "function")
-            return;
-
-        acpStoreUnsubscribe = store.subscribe(() =>
-        {
-            if (disposed || mode !== "autonom")
-                return;
-
-            const focused = store.getState()?.acp?.focusedSessionId;
-            const sessionId = typeof focused === "string" && focused.includes("/")
-                ? focused.split("/").pop()! : focused;
-            if (typeof sessionId !== "string" || !/^[a-z0-9_.-]{1,128}$/i.test(sessionId)
-                || registeredSessionIds.has(sessionId))
-                return;
-
-            registeredSessionIds.add(sessionId);
-            void bridgeRequest({ action: "registerSession", id: sessionId }).catch(() => undefined);
-        });
-    }
 
     function effectiveManifest(): any
     {
@@ -619,7 +579,6 @@ export function install(services: any, config: RuntimeConfig): any
 
     function renderLayout(): void
     {
-        attachSessionWatcher();
         if (!globalThis.document?.body || disposed)
             return;
 
@@ -1046,9 +1005,6 @@ export function install(services: any, config: RuntimeConfig): any
             if (observerFrame !== undefined)
                 clearTimeout(observerFrame);
 
-            acpStoreUnsubscribe?.();
-            acpStoreUnsubscribe = undefined;
-            registeredSessionIds.clear();
             globalThis.document?.removeEventListener("click", onClick, true);
             target.__autonomShell?.dispose();
             for (const sectionHeaders of headers.values())

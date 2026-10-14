@@ -10,9 +10,9 @@ import serverino;
 import core.stdc.errno : errno, ESRCH, EAGAIN, EINTR;
 import core.sync.mutex;
 import core.sys.linux.sys.prctl : prctl, PR_SET_PDEATHSIG;
-import core.sys.posix.fcntl : fcntl, F_GETFL, F_SETFL, O_APPEND, O_CREAT, O_EXCL, O_NONBLOCK, O_RDWR;
+import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_EXCL, O_RDWR;
 import core.sys.posix.signal : kill, SIGKILL, SIGTERM;
-import core.sys.posix.unistd : setpgid, writeInput = write;
+import core.sys.posix.unistd : setpgid;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
 import std.conv : octal, to;
@@ -84,8 +84,7 @@ enum ExecutionKind : string
     Print = "print",
     Resume = "resume",
     Compact = "compact",
-    Remove = "remove",
-    Acp = "acp"
+    Remove = "remove"
 }
 
 enum ExecutionStatus : string
@@ -118,8 +117,6 @@ private:
     State _state;
     bool stopRequested;
     bool joined;
-    string pendingInput;
-    MonoTime lastRead;
 
     State snapshot()
     {
@@ -141,8 +138,6 @@ private:
             return ExecutionKind.Compact;
         case "remove":
             return ExecutionKind.Remove;
-        case "acp":
-            return ExecutionKind.Acp;
         default:
             throw new Exception("Invalid execution kind");
         }
@@ -277,23 +272,9 @@ private:
                 }
             }
 
-            Pipe input;
             File source = File("/dev/null", "r");
-            if (kind == ExecutionKind.Acp)
-            {
-                input = pipe();
-                source = input.readEnd;
-                int descriptor = input.writeEnd.fileno;
-                if (fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK) == -1)
-                    throw new ErrnoException("Could not configure ACP input");
-            }
-
             scope(exit)
-            {
                 source.close();
-                if (input.writeEnd.isOpen)
-                    input.writeEnd.close();
-            }
 
             Config options = Config.newEnv | Config.retainStdin | Config.retainStdout | Config.retainStderr;
             options.preExecFunction = &createProcessGroup;
@@ -306,47 +287,13 @@ private:
                 options,
                 workspace.length ? workspace : null
             );
-            if (kind == ExecutionKind.Acp)
-                source.close();
 
-            string buffered;
             MonoTime deadline = MonoTime.currTime + timeout;
             while (!(result = tryWait(process)).terminated)
             {
-                if (kind == ExecutionKind.Acp)
-                {
-                    if (output.size > 32 * 1024 * 1024 || errors.size > 1024 * 1024)
-                        throw new Exception("ACP output exceeded its size limit");
-                    if (!buffered.length)
-                    {
-                        synchronized (mutex)
-                        {
-                            buffered = pendingInput;
-                            pendingInput = null;
-                        }
-                    }
-
-                    if (buffered.length)
-                    {
-                        ptrdiff_t written = writeInput(
-                            input.writeEnd.fileno,
-                            buffered.ptr,
-                            buffered.length
-                        );
-                        if (written > 0)
-                            buffered = buffered[written..$];
-                        else if (written < 0 && errno != EAGAIN && errno != EINTR)
-                            throw new ErrnoException("Could not write ACP input");
-                    }
-                }
-
                 bool stopping;
                 synchronized (mutex)
-                {
                     stopping = stopRequested;
-                    if (kind == ExecutionKind.Acp && MonoTime.currTime > lastRead + 15.seconds)
-                        deadline = MonoTime.currTime;
-                }
 
                 if (!signalled && (stopping || MonoTime.currTime >= deadline))
                 {
@@ -522,31 +469,11 @@ public:
         foreach (ref argument; owned)
             argument = argument.idup;
 
-        lastRead = MonoTime.currTime;
         save();
         monitor = new Thread({
             execute(owned, environment, timeout, prerequisite, dependency);
         });
         monitor.start();
-    }
-
-    void renewAcp()
-    {
-        synchronized (mutex)
-            lastRead = MonoTime.currTime;
-    }
-
-    void sendFrame(string frame)
-    {
-        synchronized (mutex)
-        {
-            if (kind != ExecutionKind.Acp || _state.status != ExecutionStatus.Running)
-                throw new Exception("ACP execution is not running");
-            if (frame.length > 16 * 1024 * 1024 || pendingInput.length + frame.length > 16 * 1024 * 1024)
-                throw new Exception("ACP input exceeded its size limit");
-
-            pendingInput ~= frame.idup~"\n";
-        }
     }
 
     void requestStop()

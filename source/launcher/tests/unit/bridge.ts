@@ -32,16 +32,10 @@ async function context(): Promise<Context>
     await writeFile(settings.configFile, "dataDir: ~/.local/share/autonom\ndevinCommand: devin\n");
     const opened: string[] = [];
     const configured: unknown[] = [];
-    const managed: string[] = [];
     const client = {
         async getState(directory?: string): Promise<unknown>
         {
             return { directory };
-        },
-        async manageSession(id: string): Promise<unknown>
-        {
-            managed.push(id);
-            return { id, managed: true };
         },
         configure(next: unknown): void
         {
@@ -213,24 +207,6 @@ test("the bridge saves launcher settings, daemon settings, and opens configurati
         const unknown = await request(environment.bridge, { action: "nonsense" });
         assert.equal(unknown.status, 400);
         assert.match(unknown.body.error, /Unknown bridge action/);
-    }
-    finally
-    {
-        await environment.close();
-    }
-});
-
-test("registerSession validates the id and adopts the session through the daemon", async () =>
-{
-    const environment = await context();
-    try
-    {
-        const result = await request(environment.bridge, { action: "registerSession", id: "session-one" });
-        assert.equal(result.status, 200);
-        assert.deepEqual(result.body.result, { id: "session-one", managed: true });
-        assert.equal((await request(environment.bridge, { action: "registerSession", id: "../escape" })).status, 400);
-        assert.equal((await request(environment.bridge, { action: "registerSession", id: 42 })).status, 400);
-        assert.equal((await request(environment.bridge, { action: "registerSession", id: "x" }, "wrong")).status, 403);
     }
     finally
     {
