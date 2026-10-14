@@ -11,7 +11,7 @@ Corollaries:
 - A green unit test proves the module, not the integration. It never closes a live gate.
 - A screenshot is evidence only when paired with the DOM/state assertions that explain what changed.
 - "It looked right" is not evidence. Record the exact command, target id, and observable values.
-- Never weaken a control to make a test pass: no disabling the integrity service, no rewriting checksums, no loosening CSP, no editing vendor files, no mutating the profile data directory.
+- Never weaken a control to make a test pass: no disabling the integrity service, no rewriting checksums, no loosening CSP, no test-only vendor patches, no mutating the profile data directory. The shipped entrypoint bootstrap is part of the product under test, not a validation workaround.
 
 ## Layers of evidence
 
@@ -49,21 +49,23 @@ cd source/launcher
 npm ci
 npm run check
 npm test
-npm run build
-node dist/launcher.js /abs/path/to/workspace
+cd ../..
+python3 source/launcher/run.py /abs/path/to/workspace
 ```
 
-The launcher verifies the build pin before spawning Desktop, starts the page bridge, launches Desktop with `--remote-debugging-pipe`, waits for the workbench window, and attaches the runtime. It prints the workspace, daemon port, Command Center definition, and control socket. If Desktop opens in editor mode, open the agent window (Ctrl+') and the launcher attaches within five seconds.
+For installed-startup validation, run `sudo bash install.sh --no-build`, quit Desktop once, and launch it normally instead of calling `run.py` directly. The bootstrap must hand off to the launcher without changing the logged-in profile.
+
+The launcher verifies the build pin before spawning Desktop, starts the page bridge and control socket, launches Desktop with `--remote-debugging-pipe`, and attaches eligible workbench or sessions windows. It prints the workspace and control socket. If Desktop opens in editor mode, open the agent window (Ctrl+') and the launcher attaches within five seconds.
 
 Do not copy or replace the user-data directory to get a "clean" run — test the real profile.
 
 ### 3. Observe through the control socket
 
 ```bash
-node cdp.mjs status
-node cdp.mjs targets
-node cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
-node cdp.mjs screenshot workbench /tmp/autonom-autonom.png
+node source/launcher/cdp.mjs status
+node source/launcher/cdp.mjs targets
+node source/launcher/cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
+node source/launcher/cdp.mjs screenshot workbench /tmp/autonom-autonom.png
 ```
 
 Assert:
@@ -89,7 +91,7 @@ Click the on-screen toggle (not a programmatic state set) and re-assert:
 Edit a page file, then:
 
 ```bash
-node cdp.mjs hot
+node source/launcher/cdp.mjs hot
 ```
 
 Confirm the new content renders in the same window. This is the rapid-iteration path and must not require a Desktop restart.
@@ -100,26 +102,26 @@ Prove the guardrails, not just the happy path:
 
 - Invalid JSON, unknown tab reference, duplicate id, symlink, or traversal in the definition → the launcher refuses to start before spawning Desktop; the last valid state stays active on `hot`.
 - A build with a different version, commit, or hash → refused with "Unsupported Devin Desktop build" or "not the verified pristine build".
-- A second launcher on the same socket path → refused with "already listening".
+- A subsequent launcher invocation delegates the window request to the already-managed Desktop without creating another pipe owner. A duplicate control server cannot take over its live socket.
 - A bridge request with a wrong or missing token → HTTP 403; an unknown action → HTTP 400.
 - Killing the launcher (`Ctrl+C`, `SIGKILL`) → the 30-second lease expires and the runtime wrappers are removed.
 - Starting the launcher while Desktop already runs → the spawn exits and the launcher reports that Desktop exited before attaching.
 
 ### 7. Integrity check
 
-Confirm no vendor file, `product.json`, CSP, or profile-data change occurred:
+Confirm only the shipped entrypoint bootstrap and install record changed the installation, with the original package backup intact. Vendor bundles, `product.json`, CSP, and profile data must remain unchanged:
 
 ```bash
 git status --short
 sha256sum /usr/share/devin-desktop/resources/app/out/vs/workbench/workbench.desktop.main.js
 ```
 
-There is no integrity-suppression path in the launcher: it never patches a file, so it must never dismiss a warning. Any visible corruption warning means something else changed the installation.
+There is no integrity-suppression path. The installer does not change any checksum-managed bundle or `product.json`. Any corruption warning must be investigated, never hidden.
 
 ### 8. Clean up
 
 ```bash
-node cdp.mjs detach
+node source/launcher/cdp.mjs detach
 ```
 
 Verify native labels and navigation return, then stop the launcher. Desktop keeps running without the Command Center overlay.
@@ -129,8 +131,8 @@ Verify native labels and navigation return, then stop the launcher. Desktop keep
 While developing the runtime bundle or the pages:
 
 ```bash
-cd source/launcher && npm run build
-node cdp.mjs hot
+npm --prefix source/launcher run build
+node source/launcher/cdp.mjs hot
 ```
 
 `hot` re-reads the definition and the rebuilt runtime and re-installs it in place. Use it for runtime/UI changes; the full launcher restart is still required to validate the launch path itself.
