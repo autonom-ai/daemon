@@ -205,7 +205,7 @@ export async function launchDesktop(options: {
     const child = spawn(options.binary, [...flags, ...(options.arguments ?? [])], {
         detached: false,
         stdio: options.debugPort === undefined ? ["ignore", "inherit", "inherit", "pipe", "pipe"] : "inherit",
-        env: { ...cleanEnvironment(), VSCODE_CWD: process.cwd(), AUTONOM_DESKTOP_MANAGED: "1" },
+        env: { ...cleanEnvironment(), VSCODE_CWD: process.cwd() },
     });
     let spawnError: Error | undefined;
     child.on("error", (error) =>
@@ -354,7 +354,7 @@ export function openInDesktop(command: string, args: string[]): void
     const child = spawn(command, args, {
         detached: true,
         stdio: "ignore",
-        env: { ...cleanEnvironment(), AUTONOM_DESKTOP_MANAGED: "1" },
+        env: cleanEnvironment(),
     });
     child.on("error", () =>
     {
