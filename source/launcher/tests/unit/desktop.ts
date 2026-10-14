@@ -1,8 +1,18 @@
-import { DESKTOP_COMMIT, DESKTOP_VERSION, PipeTransport, resolveDesktopBinary, verifyDesktopBuild, workbenchUrl } from "../../desktop";
+import {
+    connectDebugTransport,
+    DESKTOP_COMMIT,
+    DESKTOP_VERSION,
+    launchDesktop,
+    PipeTransport,
+    resolveDesktopBinary,
+    verifyDesktopBuild,
+    workbenchUrl,
+} from "../../desktop";
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -79,6 +89,8 @@ test("the Desktop command resolves the Electron binary beside a launcher shim", 
         await chmod(join(directory, "devin-desktop"), 0o755);
         assert.equal(resolveDesktopBinary(join(directory, "bin", "devin-desktop")), join(directory, "devin-desktop"));
         assert.equal(resolveDesktopBinary(join(directory, "devin-desktop")), join(directory, "devin-desktop"));
+        await symlink(join(directory, "bin", "devin-desktop"), join(directory, "command"));
+        assert.equal(resolveDesktopBinary(join(directory, "command")), join(directory, "devin-desktop"));
         assert.throws(() => resolveDesktopBinary(join(directory, "missing")), /Cannot find/);
     }
     finally
@@ -112,6 +124,35 @@ test("an unsupported Desktop build fails closed", async () =>
     finally
     {
         await rm(appRoot, { force: true, recursive: true });
+    }
+});
+
+test("debug mode rejects non-loopback and non-browser WebSocket endpoints", async () =>
+{
+    for (const address of [
+        "ws://localhost:9222/devtools/browser/test",
+        "ws://127.0.0.1:9333/devtools/browser/test",
+        "ws://127.0.0.1:9222/devtools/page/test",
+        "wss://127.0.0.1:9222/devtools/browser/test",
+        "ws://user:password@127.0.0.1:9222/devtools/browser/test",
+    ])
+        await assert.rejects(connectDebugTransport(address, 9222), /non-loopback browser/);
+});
+
+test("debug mode refuses an occupied port before spawning Desktop", async () =>
+{
+    const server = createServer();
+    await new Promise<void>((resolve_) => server.listen(0, "127.0.0.1", resolve_));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    try
+    {
+        await assert.rejects(launchDesktop({ binary: "/not-an-executable", workspace: tmpdir(), debugPort: address.port }),
+            { code: "EADDRINUSE" });
+    }
+    finally
+    {
+        await new Promise<void>((resolve_) => server.close(() => resolve_()));
     }
 });
 

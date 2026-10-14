@@ -1,4 +1,4 @@
-import type { CenterContent } from "../content";
+import type { CenterContent } from "../center";
 
 export type Fixture = {
     services: any;
@@ -95,8 +95,11 @@ export function fixture(): Fixture
 export const CONTENT: CenterContent = {
     enabled: true,
     revision: "demo",
-    items: [{ id: "automations", label: "Jared", tab: "hello" }],
-    tabs: { hello: { title: "Hello", html: "<h1>Hello world</h1>" } },
+    sections: [{ id: "pages", label: "Pages", items: [{
+        id: "automations",
+        label: "Jared",
+        actions: { left_click: { type: "html", file: "pages/welcome.html", version: "unit" } },
+    }] }],
 };
 
 export const BRIDGE = { url: "http://127.0.0.1:1", token: "unit-token" };
