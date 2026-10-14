@@ -135,13 +135,13 @@ export function resolveDesktopBinary(command: string): string
 {
     const found = command.includes("/") || isAbsolute(command) ? resolve(command) : searchPath(command);
     if (found === undefined || !isExecutable(found))
-        throw new Error(`Cannot find the Devin Desktop command '${command}'. Pass it with --desktop.`);
+        throw new Error(`Cannot find the Devin Desktop command '${command}'.`);
     const resolved = realpathSync(found);
     if (basename(dirname(resolved)) === "bin" && isShellScript(resolved))
     {
         const binary = join(dirname(dirname(resolved)), basename(resolved));
         if (!isExecutable(binary))
-            throw new Error(`Cannot find the Devin Desktop binary beside ${resolved}. Pass it with --desktop.`);
+            throw new Error(`Cannot find the Devin Desktop binary beside ${resolved}.`);
         return binary;
     }
     return resolved;
@@ -185,7 +185,6 @@ export async function verifyDesktopBuild(appRoot: string): Promise<void>
 
 export async function launchDesktop(options: {
     binary: string;
-    workspace: string;
     arguments?: string[];
     debugPort?: number;
 }): Promise<{ child: ChildProcess; transport: CdpTransport }>
@@ -203,11 +202,10 @@ export async function launchDesktop(options: {
 
     const flags = options.debugPort === undefined ? ["--remote-debugging-pipe"]
         : [`--remote-debugging-port=${options.debugPort}`, "--remote-debugging-address=127.0.0.1"];
-    const child = spawn(options.binary, [...flags, ...(options.arguments ?? [options.workspace])], {
-        cwd: options.workspace,
+    const child = spawn(options.binary, [...flags, ...(options.arguments ?? [])], {
         detached: false,
         stdio: options.debugPort === undefined ? ["ignore", "inherit", "inherit", "pipe", "pipe"] : "inherit",
-        env: { ...cleanEnvironment(), VSCODE_CWD: options.workspace, AUTONOM_DESKTOP_MANAGED: "1" },
+        env: { ...cleanEnvironment(), VSCODE_CWD: process.cwd(), AUTONOM_DESKTOP_MANAGED: "1" },
     });
     let spawnError: Error | undefined;
     child.on("error", (error) =>
@@ -262,21 +260,6 @@ export async function launchDesktop(options: {
         throw new Error("Desktop did not inherit the remote debugging pipe descriptors.");
 
     return { child, transport: new PipeTransport(readable as Readable, writable as Writable) };
-}
-
-export async function attachDebugTransport(port: number): Promise<CdpTransport>
-{
-    const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
-        signal: AbortSignal.timeout(2000), redirect: "error",
-    });
-    if (!response.ok)
-        throw new Error("Cannot discover the loopback Desktop debug endpoint.");
-
-    const info = await response.json() as { webSocketDebuggerUrl?: string };
-    if (typeof info.webSocketDebuggerUrl !== "string")
-        throw new Error("Desktop did not return a browser debug endpoint.");
-
-    return connectDebugTransport(info.webSocketDebuggerUrl, port);
 }
 
 export async function connectDebugTransport(address: string, port: number): Promise<CdpTransport>

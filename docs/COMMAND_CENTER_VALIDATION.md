@@ -11,7 +11,7 @@ Corollaries:
 - A green unit test proves the module, not the integration. It never closes a live gate.
 - A screenshot is evidence only when paired with the DOM/state assertions that explain what changed.
 - "It looked right" is not evidence. Record the exact command, target id, and observable values.
-- Never weaken a control to make a test pass: no disabling the integrity service, no rewriting checksums, no loosening CSP, no test-only vendor patches, no mutating the profile data directory. The shipped entrypoint bootstrap is part of the product under test, not a validation workaround.
+- Never weaken a control to make a test pass: no disabling the integrity service, no rewriting checksums, no loosening CSP, no test-only vendor patches, no mutating the profile data directory. The installed CLI wrapper is part of the product under test, not a validation workaround.
 
 ## Layers of evidence
 
@@ -31,7 +31,7 @@ A release needs all four. Unit coverage lives in `source/launcher/tests/unit/`: 
 - Devin Desktop **1.126.0**, commit `fcf7ba39e6150055fad817f8716385b4d320d46d`.
 - Native host bundle `out/vs/workbench/workbench.desktop.main.js` SHA-256 `da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d`.
 - No running Devin Desktop window: the pipe must reach the browser process the launcher spawns.
-- The repository `assets/commandCenter.json` and its `pages/*.html` files are present.
+- The repository `assets/ui.yml` and its `pages/*.html` files are present.
 - No concurrent change to Desktop's `user-data-dir`.
 
 Record the pristine baseline before touching anything:
@@ -50,10 +50,10 @@ npm ci
 npm run check
 npm test
 cd ../..
-python3 source/launcher/run.py /abs/path/to/workspace
+node dist/launcher.js /abs/path/to/workspace
 ```
 
-For installed-startup validation, run `sudo bash install.sh --no-build`, quit Desktop once, and launch it normally instead of calling `run.py` directly. The bootstrap must hand off to the launcher without changing the logged-in profile.
+For installed-startup validation, run `sudo bash install.sh --no-build`, quit Desktop once, then run `devin-desktop --debug` from a terminal. The installed CLI wrapper must behave exactly like `node dist/launcher.js --debug`, without changing the logged-in profile.
 
 The launcher verifies the build pin before spawning Desktop, starts the page bridge and control socket, launches Desktop with `--remote-debugging-pipe`, and attaches eligible workbench or sessions windows. It prints the workspace and control socket. If Desktop opens in editor mode, open the agent window (Ctrl+') and the launcher attaches within five seconds.
 
@@ -70,11 +70,13 @@ node source/launcher/cdp.mjs screenshot workbench /tmp/autonom-autonom.png
 
 Assert:
 
-- `status` reports the expected `mode`, `enabled`, `revision`, `activeTab`, and item labels.
+- `status` reports the expected `mode`, `enabled`, `revision`, `activeItem`, and item labels.
 - The Pages list contains the configured rows and excludes hidden ones.
 - The custom page webview is present and the native content is hidden while it is active.
 - No extra or unexpected sidebar rows exist.
-- `ss -ltnp` shows no listening DevTools port.
+- Default pipe mode has no DevTools listener. Explicit `--debug[=port]` mode listens only on loopback and verifies the browser PID.
+- Never click or navigate the communication window. Use a separate test window and its exact target ID through the control socket; launch Desktop with `devin-desktop --debug` to expose the loopback endpoint.
+- `node source/launcher/tests/integration/desktop.mjs <id> verify` checks repeated HTML selection, three Cloud/Editor/Autonom cycles, imported Wiki navigation, and the JS reload action.
 
 Capture a screenshot for each state and keep it beside the assertion output.
 
@@ -100,7 +102,7 @@ Confirm the new content renders in the same window. This is the rapid-iteration 
 
 Prove the guardrails, not just the happy path:
 
-- Invalid JSON, unknown tab reference, duplicate id, symlink, or traversal in the definition → the launcher refuses to start before spawning Desktop; the last valid state stays active on `hot`.
+- Invalid YAML, unknown imported element, unsupported action, duplicate id, symlink, or traversal in the definition → the launcher refuses to start before spawning Desktop; the last valid state stays active on `hot`.
 - A build with a different version, commit, or hash → refused with "Unsupported Devin Desktop build" or "not the verified pristine build".
 - A subsequent launcher invocation delegates the window request to the already-managed Desktop without creating another pipe owner. A duplicate control server cannot take over its live socket.
 - A bridge request with a wrong or missing token → HTTP 403; an unknown action → HTTP 400.
@@ -109,7 +111,7 @@ Prove the guardrails, not just the happy path:
 
 ### 7. Integrity check
 
-Confirm only the shipped entrypoint bootstrap and install record changed the installation, with the original package backup intact. Vendor bundles, `product.json`, CSP, and profile data must remain unchanged:
+Confirm only the `bin/devin-desktop` wrapper, its byte-for-byte `.autonom.orig` backup, and copied launcher payload changed the installation. The package entrypoint, Electron binary, vendor bundles, `product.json`, CSP, and profile data must remain unchanged:
 
 ```bash
 git status --short

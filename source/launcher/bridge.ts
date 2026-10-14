@@ -111,6 +111,13 @@ async function dispatch(context: BridgeContext, message: Record<string, unknown>
         case "getState":
             return await context.client.getState(context.workspace);
 
+        case "registerSession": {
+            const id = text(message.id);
+            if (!/^[A-Za-z0-9_.-]{1,128}$/.test(id))
+                throw new Error("A valid session id is required.");
+            return await context.client.manageSession(id);
+        }
+
         case "getSettings":
             return {
                 port: context.settings.port,

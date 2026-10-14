@@ -238,6 +238,34 @@ test("a failed lazy page refresh keeps the previous snapshot active", async () =
     }
 });
 
+test("the default HTML item is not opened or prefetched while Editor is selected", async () =>
+{
+    const target = globalThis as any;
+    const originalShell = target.__autonomShell;
+    target.__autonomShell = {
+        editorActive: () => true,
+        requestedMode: () => "autonom",
+        dispose: () => undefined,
+    };
+    const environment = fixture();
+    const runtime = install(environment.services, config({ ...CONTENT, activeItem: "automations" }));
+    try
+    {
+        await runtime.update(config({ ...CONTENT, activeItem: "automations" }));
+        assert.equal(runtime.status().activeItem, null);
+        assert.equal(environment.commands.length, 0);
+        assert.equal(messages.length, 0);
+    }
+    finally
+    {
+        runtime.dispose();
+        if (originalShell)
+            target.__autonomShell = originalShell;
+        else
+            delete target.__autonomShell;
+    }
+});
+
 test("installing again replaces the previous runtime without leaving descriptors", () =>
 {
     const environment = fixture();
@@ -248,4 +276,50 @@ test("installing again replaces the previous runtime without leaving descriptors
     replacement.dispose();
     assert.equal((globalThis as any).__autonomCenter, undefined);
     assert.equal(environment.listeners.size, 0);
+});
+
+test("focused ACP sessions register with the daemon once and only in Autonom mode", async () =>
+{
+    const target = globalThis as any;
+    const subscribers: (() => void)[] = [];
+    let focused: string | undefined;
+    target.__acpStore = {
+        subscribe(callback: () => void)
+        {
+            subscribers.push(callback);
+            return () => subscribers.splice(subscribers.indexOf(callback), 1);
+        },
+        getState()
+        {
+            return { acp: { focusedSessionId: focused } };
+        },
+    };
+    const environment = fixture();
+    const runtime = install(environment.services, config());
+    try
+    {
+        await runtime.update(config());
+        assert.equal(subscribers.length, 1);
+        focused = "provider/session-one";
+        for (const callback of [...subscribers])
+            callback();
+        await new Promise((resolve_) => setTimeout(resolve_, 10));
+        assert.deepEqual(messages, [{ action: "registerSession", id: "session-one", windowId: 2 }]);
+        for (const callback of [...subscribers])
+            callback();
+        await new Promise((resolve_) => setTimeout(resolve_, 10));
+        assert.equal(messages.length, 1);
+        await runtime.setMode("devin-cloud");
+        focused = "session-two";
+        for (const callback of [...subscribers])
+            callback();
+        await new Promise((resolve_) => setTimeout(resolve_, 10));
+        assert.equal(messages.length, 1);
+    }
+    finally
+    {
+        runtime.dispose();
+        assert.equal(subscribers.length, 0);
+        delete target.__acpStore;
+    }
 });

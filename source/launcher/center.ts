@@ -29,6 +29,7 @@ export type NativeItem = {
 export type CenterContent = {
     enabled: boolean;
     sections: SidebarSection[];
+    items?: SidebarItem[];
     devinCloud?: string[];
     css?: string;
     activeItem?: string;
@@ -42,7 +43,19 @@ export type ActionSource = {
 
 export function visibleItems(content: CenterContent): SidebarItem[]
 {
-    return content.sections.flatMap((section) => section.items).filter((item) => !item.hidden);
+    return [...(content.items ?? []), ...content.sections.flatMap((section) => section.items)]
+        .filter((item) => !item.hidden);
+}
+
+export function declaredItems(content: CenterContent): SidebarItem[]
+{
+    const ret = visibleItems(content);
+    const placed = new Set(ret.map((item) => item.id));
+    for (const id of content.devinCloud ?? [])
+        if (!placed.has(id))
+            ret.push({ id });
+
+    return ret;
 }
 
 export function overlayItems(native: NativeItem[], content: CenterContent): NativeItem[]
@@ -69,7 +82,8 @@ export function overlayItems(native: NativeItem[], content: CenterContent): Nati
             path: item.actions?.left_click ? `/autonom/${item.id}` : original!.path,
         };
     });
-    const placed = new Set(content.sections.flatMap((section) => section.items).map((item) => item.id));
+    const placed = new Set([...(content.items ?? []), ...content.sections.flatMap((section) => section.items)]
+        .map((item) => item.id));
     for (const id of imported)
         if (!placed.has(id))
             ret.push({ ...originals.get(id)! });

@@ -78,13 +78,12 @@ string routeParameter(string PATTERN)(const Request request)
 bool matchesPath(string PATTERN)(const Request request)
     => routeParameter!PATTERN(request).length != 0;
 
-JSONValue readBody(Request request)
+JSONValue readBody(Request request, size_t limit = 64 * 1024)
 {
     enum MIME = "application/json";
-    enum MAX_BODY = 64 * 1024;
     if (request.body.contentType != MIME && !request.body.contentType.startsWith(MIME~";"))
         throw new InvalidInputException("Expected application/json");
-    if (request.body.data.length > MAX_BODY)
+    if (request.body.data.length > limit)
         throw new InvalidInputException("Request body is too large");
 
     JSONValue ret;
