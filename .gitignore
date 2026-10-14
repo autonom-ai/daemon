@@ -20,4 +20,4 @@ docs/*
 
 # Launcher build output and dependencies.
 source/launcher/node_modules/
-source/launcher/dist/
+/dist/
