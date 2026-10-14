@@ -18,5 +18,5 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": ["*.ts", "tests/**/*.ts"]
+  "include": ["*.ts", "acp/**/*.ts", "tests/**/*.ts"]
 }

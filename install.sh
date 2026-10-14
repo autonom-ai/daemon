@@ -5,7 +5,6 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 case " $* " in
     *" --uninstall "*|*" --check "*|*" --no-build "*|*" --help "*) ;;
     *)
-        node --check "$root/source/launcher/bootstrap.mjs"
         if [[ "$EUID" -ne 0 ]]; then
             npm --prefix "$root/source/launcher" ci
             npm --prefix "$root/source/launcher" run check
@@ -22,13 +21,13 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-parser = argparse.ArgumentParser(description="Install the Autonom startup bootstrap into Devin Desktop.")
+parser = argparse.ArgumentParser(description="Install the Autonom launcher as the Devin Desktop CLI entrypoint.")
 parser.add_argument("repository", type=Path)
 parser.add_argument("--app", type=Path, default=Path("/usr/share/devin-desktop/resources/app"))
 parser.add_argument("--no-build", action="store_true")
@@ -37,10 +36,13 @@ action.add_argument("--uninstall", action="store_true")
 action.add_argument("--check", action="store_true")
 args = parser.parse_args()
 app = args.app.resolve(strict=True)
+desktop = app.parent.parent
+payload = desktop / "autonom"
+record = payload / "install.json"
+entrypoint = desktop / "bin/devin-desktop"
+backup = Path(str(entrypoint) + ".autonom.orig")
 package = app / "package.json"
-backup = app / "package.json.autonom.orig"
-bootstrap = app / "out/autonom-bootstrap.mjs"
-record = app / "out/autonom-install.json"
+legacy_backup = app / "package.json.autonom.orig"
 
 
 def read(path):
@@ -59,6 +61,7 @@ def write(path, content, mode=0o644):
 
     if path.exists() or path.is_symlink():
         read(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
     try:
         with os.fdopen(descriptor, "wb") as output:
@@ -73,7 +76,7 @@ def write(path, content, mode=0o644):
 
 
 current = read(package)
-original = read(backup) if backup.exists() else current
+original = read(legacy_backup) if legacy_backup.exists() else current
 metadata = json.loads(original)
 if metadata.get("version") != "1.126.0" or metadata.get("main") != "./out/main.js":
     raise SystemExit("Unsupported Desktop entrypoint or version; no installation files changed.")
@@ -84,55 +87,78 @@ if digest(read(app / "out/vs/workbench/workbench.desktop.main.js")) != (
     "da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d"
 ):
     raise SystemExit("Desktop's workbench is not pristine; no installation files changed.")
-anchor = b'"main": "./out/main.js"'
-if original.count(anchor) != 1:
-    raise SystemExit("Unknown package.json entrypoint format; no installation files changed.")
-patched = original.replace(anchor, b'"main": "./out/autonom-bootstrap.mjs"', 1)
-if current not in (original, patched):
+legacy_patched = original.replace(b'"main": "./out/main.js"', b'"main": "./out/autonom-bootstrap.mjs"', 1)
+if current not in (original, legacy_patched):
     raise SystemExit("package.json was changed outside Autonom; refusing to overwrite it.")
-installed = current == patched
-if installed or bootstrap.exists() or record.exists():
-    if not backup.exists():
-        raise SystemExit("Existing bootstrap files have no original backup; refusing to overwrite them.")
-    saved = json.loads(read(record))
-    if saved.get("packageHash") != digest(original) or saved.get("bootstrapHash") != digest(read(bootstrap)):
-        raise SystemExit("Autonom's backup or bootstrap was changed externally; refusing to overwrite it.")
+if current != original:
+    legacy_record = json.loads(read(app / "out/autonom-install.json"))
+    if legacy_record.get("packageHash") != digest(original) or legacy_record.get("bootstrapHash") != digest(
+        read(app / "out/autonom-bootstrap.mjs")
+    ):
+        raise SystemExit("Autonom's previous bootstrap was changed externally; refusing to overwrite it.")
+
+saved = json.loads(read(record)) if record.exists() else None
+legacy_installed = current != original
+installed = False
+if backup.exists():
+    original_entrypoint = read(backup)
+    current_entrypoint = read(entrypoint)
+    if not saved or saved.get("originalHash") != digest(original_entrypoint):
+        raise SystemExit("Autonom's original CLI backup changed externally; refusing to overwrite it.")
+    if digest(current_entrypoint) not in (saved.get("originalHash"), saved.get("stubHash")):
+        raise SystemExit("The Devin Desktop CLI changed outside Autonom; refusing to overwrite it.")
+    installed = digest(current_entrypoint) == saved.get("stubHash")
+else:
+    current_entrypoint = read(entrypoint)
 
 if args.check:
-    print("Autonom bootstrap installed." if installed else "Pristine Desktop entrypoint; Autonom not installed.")
-elif args.uninstall:
     if installed:
-        write(package, original, package.stat().st_mode & 0o777)
-        print("Restored package.json byte-for-byte. Backup and inert bootstrap files retained.")
+        print("Autonom launcher installed.")
+    elif legacy_installed:
+        print("Previous Autonom package bootstrap installed; CLI launcher upgrade required.")
     else:
-        print("Desktop already uses its original entrypoint.")
+        print("Pristine Devin Desktop CLI; Autonom launcher not installed.")
+elif args.uninstall:
+    if backup.exists():
+        write(entrypoint, read(backup), backup.stat().st_mode & 0o777)
+    if current != original:
+        write(package, original, package.stat().st_mode & 0o777)
+    print("Restored the Devin Desktop CLI byte-for-byte. Original backups and inert launcher files retained.")
 else:
     repository = args.repository.resolve(strict=True)
-    launcher = repository / "dist/launcher.js"
     node = shutil.which("node")
-    if not node or not launcher.is_file():
-        raise SystemExit("Build the launcher and make Node available before installing.")
-    content = read(repository / "source/launcher/bootstrap.mjs")
-    config = json.dumps({
-        "launcher": str(launcher),
-        "node": subprocess.check_output([node, "-p", "process.execPath"], text=True).strip(),
-        "packageHash": digest(original),
-        "bootstrapHash": digest(content),
-    }, indent=2).encode() + b"\n"
+    files = [
+        "dist/launcher.js",
+        "dist/runtime.js",
+        "source/launcher/cdp.mjs",
+        "source/launcher/acp/server.py",
+        "source/mcp/hook.py",
+        "source/mcp/orchestrate.py",
+        "source/mcp/server.py",
+        "bin/autonom-daemon",
+    ]
+    for directory in ["assets", "templates"]:
+        files.extend(str(path.relative_to(repository)) for path in (repository / directory).rglob("*")
+                     if path.is_file() and "__pycache__" not in path.parts)
+    if not node or any(not (repository / file).is_file() for file in files):
+        raise SystemExit("Build the launcher and daemon and make Node available before installing.")
+    node = subprocess.check_output([node, "-p", "process.execPath"], text=True).strip()
+    stub = ("#!/bin/sh\nexec " + shlex.quote(node) + " "
+            + shlex.quote(str(payload / "dist/launcher.js")) + ' "$@"\n').encode()
+    next_record = {"originalHash": digest(read(backup if backup.exists() else entrypoint)), "stubHash": digest(stub)}
     try:
+        for file in files:
+            source = repository / file
+            write(payload / file, read(source), source.stat().st_mode & 0o777)
+        write(record, json.dumps(next_record, indent=2).encode() + b"\n")
+        if current != original:
+            write(package, original, package.stat().st_mode & 0o777)
         if not backup.exists():
-            with backup.open("xb") as output:
-                output.write(original)
-                output.flush()
-                os.fsync(output.fileno())
-            os.chmod(backup, package.stat().st_mode & 0o777)
-        write(bootstrap, content)
-        write(record, config)
-        write(package, patched, package.stat().st_mode & 0o777)
+            entrypoint.rename(backup)
+        write(entrypoint, stub, 0o755)
     except PermissionError:
-        raise SystemExit("Installation is read-only. After building as your normal user, run: sudo bash install.sh")
-    print(f"Installed Autonom bootstrap in {app}.")
-    print("Quit Desktop once, then launch it normally. The existing profile and login are preserved.")
-    print("Launcher logs: ~/.cache/autonom/launcher.log (or $XDG_CACHE_HOME/autonom/launcher.log).")
+        raise SystemExit("Installation is read-only. After building as your normal user, run: sudo bash install.sh --no-build")
+    print(f"Installed Autonom launcher in {payload}.")
+    print("Quit Desktop once, then run devin-desktop. Arguments and terminal output are unchanged from node dist/launcher.js.")
     print("Rollback: bash install.sh --uninstall (use the same --app path and permissions).")
 PY

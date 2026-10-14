@@ -133,39 +133,28 @@ export async function loadCenter(configPath: string): Promise<CenterContent>
         throw new Error("UI definition contains invalid YAML.");
 
     const config = object(document.toJS({ maxAliasCount: 100 }));
-    const sections = config?.sections ?? (config?.enabled === false ? [] : undefined);
+    const sections = config?.sections ?? [];
+    const topItems = config?.items ?? [];
     if (!config || config.enabled !== undefined && typeof config.enabled !== "boolean"
-        || !Array.isArray(sections) || sections.length > 32)
-        throw new Error("UI definition needs sections (at most 32).");
+        || !Array.isArray(sections) || sections.length > 32 || !Array.isArray(topItems))
+        throw new Error("UI items and sections must be lists (at most 32 sections).");
 
-    allowFields(config, ["enabled", "sections", "active_item", "devin_cloud"]);
-    const imported = config.devin_cloud ?? [];
-    if (!Array.isArray(imported) || imported.length > 100 || !imported.every(identifier)
-        || new Set(imported).size !== imported.length)
+    allowFields(config, ["enabled", "items", "sections", "active_item", "devin_cloud"]);
+    const cloudImports = config.devin_cloud ?? [];
+    if (!Array.isArray(cloudImports) || cloudImports.length > 100 || !cloudImports.every(identifier)
+        || new Set(cloudImports).size !== cloudImports.length)
         throw new Error("devin_cloud must list unique native element ids.");
 
+    const imported: string[] = cloudImports;
     const ret: CenterContent = { enabled: config.enabled !== false, sections: [], devinCloud: imported };
     const directory = await realpath(dirname(configPath));
     const ids = new Set<string>();
     const assets = new Map<string, Promise<{ action: ItemAction; size: number }>>();
     let count = 0;
-    for (const value of sections)
+    async function loadItems(values: unknown[]): Promise<SidebarItem[]>
     {
-        const section = object(value);
-        if (!section || !identifier(section.id) || !Array.isArray(section.items)
-            || section.label !== undefined && (typeof section.label !== "string" || section.label.length > 200))
-            throw new Error("Invalid UI section.");
-
-        allowFields(section, ["id", "label", "items"]);
-        if (ids.has(section.id))
-            throw new Error(`Duplicate UI id: ${section.id}`);
-
-        ids.add(section.id);
-        const loaded: SidebarSection = { id: section.id, items: [] };
-        if (typeof section.label === "string")
-            loaded.label = section.label;
-
-        for (const value of section.items)
+        const ret: SidebarItem[] = [];
+        for (const value of values)
         {
             const item = object(value);
             if (!item || !identifier(item.id)
@@ -220,7 +209,11 @@ export async function loadCenter(configPath: string): Promise<CenterContent>
                                 throw new Error("UI action must be a bounded regular file (at most 256 KiB).");
 
                             return {
-                                action: { file: normalized, type: extension === ".html" ? "html" : "js", version: assetVersion(attributes) },
+                                action: {
+                                    file: normalized,
+                                    type: extension === ".html" ? "html" : "js",
+                                    version: assetVersion(attributes),
+                                },
                                 size: attributes.size,
                             };
                         }
@@ -238,8 +231,29 @@ export async function loadCenter(configPath: string): Promise<CenterContent>
             if (!entry.hidden && !entry.actions && !imported.includes(entry.id))
                 throw new Error(`Visible UI item needs a left_click action: ${entry.id}`);
 
-            loaded.items.push(entry);
+            ret.push(entry);
         }
+
+        return ret;
+    }
+
+    ret.items = await loadItems(topItems);
+    for (const value of sections)
+    {
+        const section = object(value);
+        const entries = section?.items ?? [];
+        if (!section || !identifier(section.id) || !Array.isArray(entries)
+            || section.label !== undefined && (typeof section.label !== "string" || section.label.length > 200))
+            throw new Error("Invalid UI section.");
+
+        allowFields(section, ["id", "label", "items"]);
+        if (ids.has(section.id))
+            throw new Error(`Duplicate UI id: ${section.id}`);
+
+        ids.add(section.id);
+        const loaded: SidebarSection = { id: section.id, items: await loadItems(entries) };
+        if (typeof section.label === "string")
+            loaded.label = section.label;
 
         ret.sections.push(loaded);
     }

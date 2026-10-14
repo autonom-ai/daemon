@@ -1,9 +1,12 @@
-import autonomMarkup from "../../assets/icons/autonom-fill.svg";
-import cloudMarkup from "../../assets/icons/cloud.svg";
-import editorMarkup from "../../assets/icons/editor.svg";
+import autonomFillMarkup from "../../assets/icons/autonom-fill.svg";
+import autonomLineMarkup from "../../assets/icons/autonom.svg";
+import cloudFillMarkup from "../../assets/icons/cloud-fill.svg";
+import cloudLineMarkup from "../../assets/icons/cloud.svg";
+import pencilFillMarkup from "../../assets/icons/pencil-fill.svg";
+import pencilLineMarkup from "../../assets/icons/pencil.svg";
 import uiCss from "../../assets/ui.css";
 import type { ActionSource, CenterContent, NativeItem, SidebarItem } from "./center";
-import { isFullDocument, overlayItems, pageHtml, visibleItems } from "./center";
+import { declaredItems, isFullDocument, overlayItems, pageHtml } from "./center";
 
 export type RuntimeConfig = {
     content: CenterContent;
@@ -35,11 +38,29 @@ type CustomView = {
     nativeSurfaceId: unknown;
     nativeTitle: unknown;
     nativeSidebar: unknown;
+    nativeCurrentSurface: unknown;
     stacks: Map<string, unknown>;
     lifetime: { dispose(): void };
 };
 
 const LEASE_TIMEOUT = 30000;
+
+type Mode = "autonom" | "devin-cloud" | "editor";
+
+function iconSet(lineMarkup: string, fillMarkup: string): { viewBox: string; line: string; fill: string }
+{
+    return {
+        viewBox: /viewBox="([^"]+)"/.exec(lineMarkup)?.[1] ?? "0 0 16 16",
+        line: /[\s]d="([^"]+)"/.exec(lineMarkup)?.[1] ?? "",
+        fill: /[\s]d="([^"]+)"/.exec(fillMarkup)?.[1] ?? "",
+    };
+}
+
+const ICONS: Record<Mode, { viewBox: string; line: string; fill: string }> = {
+    autonom: iconSet(autonomLineMarkup, autonomFillMarkup),
+    "devin-cloud": iconSet(cloudLineMarkup, cloudFillMarkup),
+    editor: iconSet(pencilLineMarkup, pencilFillMarkup),
+};
 
 export function prepareShell(css = uiCss): any
 {
@@ -52,7 +73,19 @@ export function prepareShell(css = uiCss): any
     }
 
     const style = document.createElement("style");
-    style.textContent = css;
+    const agentCss = `
+        .codicon-acp-agent-autonom::before,
+        [class*="codicon-acp-agent-autonom-"]::before,
+        .codicon-acp-agent-devin-autonom::before {
+            content: "" !important;
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            background-color: currentColor;
+            mask: url("data:image/svg+xml,${encodeURIComponent(autonomFillMarkup)}") center / contain no-repeat !important;
+            -webkit-mask: url("data:image/svg+xml,${encodeURIComponent(autonomFillMarkup)}") center / contain no-repeat !important;
+        }`;
+    style.textContent = css + agentCss;
     document.head.appendChild(style);
     const switches = new Map<HTMLElement, {
         host: HTMLElement;
@@ -62,11 +95,11 @@ export function prepareShell(css = uiCss): any
     }>();
     let requested: "autonom" | "devin-cloud" = "autonom";
     let lease: ReturnType<typeof setTimeout> | undefined;
-    let frame: number | undefined;
+    let frame: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
     const observer = new MutationObserver(() =>
     {
-        frame ??= requestAnimationFrame(() =>
+        frame ??= setTimeout(() =>
         {
             frame = undefined;
             render();
@@ -97,16 +130,24 @@ export function prepareShell(css = uiCss): any
                 continue;
 
             let entry = switches.get(root);
+            if (entry && (entry.agent !== agent || entry.editor !== editor))
+            {
+                root.style.display = entry.display;
+                entry.host.remove();
+                switches.delete(root);
+                entry = undefined;
+            }
+
             if (!entry)
             {
                 const host = document.createElement("div");
                 host.dataset.autonomModeSwitch = "true";
                 host.setAttribute("role", "group");
                 host.setAttribute("aria-label", "Workspace mode");
-                for (const [mode, label, markup] of [
-                    ["autonom", "Autonom", autonomMarkup],
-                    ["devin-cloud", "Devin Cloud", cloudMarkup],
-                    ["editor", "Editor", editorMarkup],
+                for (const [mode, label] of [
+                    ["autonom", "Autonom"],
+                    ["devin-cloud", "Devin Cloud"],
+                    ["editor", "Editor"],
                 ] as const)
                 {
                     const button = document.createElement("button");
@@ -114,29 +155,42 @@ export function prepareShell(css = uiCss): any
                     button.dataset.autonomMode = mode;
                     button.setAttribute("aria-label", label);
                     button.title = label;
+                    const icon = ICONS[mode];
                     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-                    svg.setAttribute("viewBox", /viewBox="([^"]+)"/.exec(markup)?.[1] ?? "0 0 16 16");
+                    svg.setAttribute("viewBox", icon.viewBox);
                     svg.setAttribute("aria-hidden", "true");
                     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                    path.setAttribute("d", /[\s]d="([^"]+)"/.exec(markup)?.[1] ?? "");
+                    path.setAttribute("fill-rule", "evenodd");
+                    path.setAttribute("d", icon.line);
                     svg.appendChild(path);
-                    const nativeIcon = mode === "editor" ? editor.querySelector("svg") : undefined;
-                    button.appendChild(nativeIcon ? nativeIcon.cloneNode(true) : svg);
+                    button.appendChild(svg);
                     button.addEventListener("click", () =>
                     {
-                        root.style.display = switches.get(root)?.display ?? "";
+                        const restore = switches.get(root)?.display ?? "";
+                        root.style.display = restore;
+                        const nativeAgent = root.querySelector<HTMLButtonElement>('button[aria-label="Agent"]');
+                        const nativeEditor = root.querySelector<HTMLButtonElement>('button[aria-label="Editor"]');
                         if (mode === "editor")
-                            editor.click();
-                        else
                         {
-                            requested = mode;
-                            if (editor.getAttribute("aria-pressed") === "true")
-                                agent.click();
+                            nativeEditor?.click();
+                            setTimeout(() =>
+                            {
+                                root.style.display = "none";
+                                if (!shell.editorActive())
+                                    void target.__autonomCenter?.toggleEditor()
+                                        .catch((error: Error) => console.error("[autonom]", error));
 
-                            void target.__autonomCenter?.setMode(mode)
-                                .catch((error: Error) => console.error("[autonom]", error));
+                                render();
+                            }, 150);
+                            return;
                         }
 
+                        requested = mode;
+                        if (nativeEditor?.getAttribute("aria-pressed") === "true")
+                            nativeAgent?.click();
+
+                        void target.__autonomCenter?.setMode(mode)
+                            .catch((error: Error) => console.error("[autonom]", error));
                         root.style.display = "none";
                         render();
                     });
@@ -152,7 +206,18 @@ export function prepareShell(css = uiCss): any
             const mode = editor.getAttribute("aria-pressed") === "true" ? "editor"
                 : target.__autonomCenter?.status().mode ?? requested;
             for (const button of entry.host.querySelectorAll<HTMLButtonElement>("button"))
-                button.setAttribute("aria-pressed", String(button.dataset.autonomMode === mode));
+            {
+                const active = button.dataset.autonomMode === mode;
+                button.setAttribute("aria-pressed", String(active));
+                const icon = ICONS[button.dataset.autonomMode as Mode];
+                const path = button.querySelector("path");
+                if (!icon || !path)
+                    continue;
+
+                const d = active ? icon.fill : icon.line;
+                if (path.getAttribute("d") !== d)
+                    path.setAttribute("d", d);
+            }
         }
 
         observer.observe(document.body, { childList: true, subtree: true, attributes: true,
@@ -166,13 +231,13 @@ export function prepareShell(css = uiCss): any
         },
         editorActive(): boolean
         {
-            return [...switches.values()].filter((entry) => entry.host.getBoundingClientRect().width > 0)
-                .some((entry) => entry.editor.getAttribute("aria-pressed") === "true");
+            return [...switches].filter(([, entry]) => entry.host.getBoundingClientRect().width > 0)
+                .some(([root]) => root.querySelector('button[aria-label="Editor"]')?.getAttribute("aria-pressed") === "true");
         },
         update(nextCss: string): void
         {
-            if (style.textContent !== nextCss)
-                style.textContent = nextCss;
+            if (style.textContent !== nextCss + agentCss)
+                style.textContent = nextCss + agentCss;
 
             render();
         },
@@ -180,6 +245,7 @@ export function prepareShell(css = uiCss): any
         {
             clearTimeout(lease);
             lease = setTimeout(() => shell.dispose(), LEASE_TIMEOUT);
+            render();
         },
         dispose(): void
         {
@@ -189,7 +255,7 @@ export function prepareShell(css = uiCss): any
             disposed = true;
             clearTimeout(lease);
             if (frame !== undefined)
-                cancelAnimationFrame(frame);
+                clearTimeout(frame);
 
             observer.disconnect();
             for (const [root, entry] of switches)
@@ -227,10 +293,10 @@ export function install(services: any, config: RuntimeConfig): any
     const previousMode = target.__autonomCenter?.status().mode;
     const previousNavigation = target.__autonomCenter?.navigationState?.();
     const previousSurface = groups.getActiveNavSurface(windowId);
+    const requestedMode = target.__autonomShell?.requestedMode() ?? "autonom";
     target.__autonomCenter?.dispose();
     let content: CenterContent = { enabled: false, sections: [] };
     let bridge = config.bridge;
-    const requestedMode = target.__autonomShell?.requestedMode() ?? "autonom";
     let mode: "autonom" | "devin-cloud" = previousMode ?? requestedMode;
     let savedAutonomSurface: { id: string; path: string } | null = previousNavigation?.autonom ?? null;
     let savedNativeSurface: { id: string; path: string } | null = previousNavigation?.native ?? null;
@@ -252,8 +318,36 @@ export function install(services: any, config: RuntimeConfig): any
     const scripts = new Map<string, { version: string; run: (context: any) => Promise<unknown> }>();
     const headers = new Map<HTMLUListElement, Map<string, HTMLLIElement>>();
     const running = new Set<string>();
-    let observerFrame: number | undefined;
+    let observerFrame: ReturnType<typeof setTimeout> | undefined;
     let navigation = 0;
+    let acpStoreUnsubscribe: (() => void) | undefined;
+    const registeredSessionIds = new Set<string>();
+
+    function attachSessionWatcher(): void
+    {
+        if (acpStoreUnsubscribe)
+            return;
+
+        const store = (globalThis as any).__acpStore;
+        if (!store || typeof store.subscribe !== "function" || typeof store.getState !== "function")
+            return;
+
+        acpStoreUnsubscribe = store.subscribe(() =>
+        {
+            if (disposed || mode !== "autonom")
+                return;
+
+            const focused = store.getState()?.acp?.focusedSessionId;
+            const sessionId = typeof focused === "string" && focused.includes("/")
+                ? focused.split("/").pop()! : focused;
+            if (typeof sessionId !== "string" || !/^[a-z0-9_.-]{1,128}$/i.test(sessionId)
+                || registeredSessionIds.has(sessionId))
+                return;
+
+            registeredSessionIds.add(sessionId);
+            void bridgeRequest({ action: "registerSession", id: sessionId }).catch(() => undefined);
+        });
+    }
 
     function effectiveManifest(): any
     {
@@ -384,7 +478,9 @@ export function install(services: any, config: RuntimeConfig): any
         shell._activeSurfaceId = view.nativeSurfaceId;
         shell._title = view.nativeTitle;
         shell._activeSidebar = view.nativeSidebar;
+        instance._currentSurface = view.nativeCurrentSurface;
         instance._loadedSurfaceId = undefined;
+        shell._reportState();
         instance._store?.delete(view.lifetime);
         view.lifetime.dispose();
         view.webview.dispose();
@@ -467,6 +563,7 @@ export function install(services: any, config: RuntimeConfig): any
                 nativeSurfaceId: shell._activeSurfaceId,
                 nativeTitle: shell._title,
                 nativeSidebar: shell._activeSidebar,
+                nativeCurrentSurface: instance._currentSurface,
                 stacks: new Map(),
                 lifetime: {
                     dispose(): void
@@ -522,6 +619,7 @@ export function install(services: any, config: RuntimeConfig): any
 
     function renderLayout(): void
     {
+        attachSessionWatcher();
         if (!globalThis.document?.body || disposed)
             return;
 
@@ -535,7 +633,7 @@ export function install(services: any, config: RuntimeConfig): any
         {
             observer ??= new MutationObserver(() =>
             {
-                observerFrame ??= requestAnimationFrame(() =>
+                observerFrame ??= setTimeout(() =>
                 {
                     observerFrame = undefined;
                     renderLayout();
@@ -751,10 +849,10 @@ export function install(services: any, config: RuntimeConfig): any
                 throw new Error("The Command Center runtime needs content and a bridge endpoint.");
 
             overlayItems(getManifest.call(manifest).items, next.content);
-            const nextItems = new Map(visibleItems(next.content).map((item) => [item.id, item]));
+            const nextItems = new Map(declaredItems(next.content).map((item) => [item.id, item]));
             const active = groups.getActiveNavSurface(windowId);
-            const initial = !initialized ? nextItems.get(previousSurface?.id)?.id
-                ?? (!replacing ? next.content.activeItem : undefined) : undefined;
+            const initial = !initialized && !target.__autonomShell?.editorActive()
+                ? nextItems.get(previousSurface?.id)?.id ?? (!replacing ? next.content.activeItem : undefined) : undefined;
             const selectedIds = new Set([active?.id, initial, ...[...views.values()].map((view) => view.surface.id)]);
             if (next.content.enabled && mode === "autonom")
             {
@@ -864,6 +962,10 @@ export function install(services: any, config: RuntimeConfig): any
             return item?.actions?.left_click.type === "js" && item.actions.left_click.version === version
                 && scripts.get(actionKey(item))?.version === version;
         },
+        async toggleEditor(): Promise<void>
+        {
+            await api.executeCommand("devin.webapp.toggleAgentWindow");
+        },
         setScript(id: string, version: string, run: (context: any) => Promise<unknown>): void
         {
             const action = items.get(id)?.actions?.left_click;
@@ -897,7 +999,8 @@ export function install(services: any, config: RuntimeConfig): any
 
             if (mode === next)
             {
-                if (next === "autonom" && !groups.getActiveNavSurface(windowId) && content.activeItem)
+                if (next === "autonom" && !target.__autonomShell?.editorActive()
+                    && !groups.getActiveNavSurface(windowId) && content.activeItem)
                     await runtime.open(content.activeItem);
 
                 return runtime.status();
@@ -909,6 +1012,7 @@ export function install(services: any, config: RuntimeConfig): any
             else
                 savedNativeSurface = active;
 
+            navigation++;
             mode = next;
             cachedManifest = undefined;
             notify();
@@ -925,7 +1029,7 @@ export function install(services: any, config: RuntimeConfig): any
             else
             {
                 groups.setActiveNavSurface(windowId, null);
-                if (next === "autonom" && content.activeItem)
+                if (next === "autonom" && !target.__autonomShell?.editorActive() && content.activeItem)
                     await runtime.open(content.activeItem);
             }
 
@@ -940,8 +1044,11 @@ export function install(services: any, config: RuntimeConfig): any
             clearTimeout(lease);
             observer?.disconnect();
             if (observerFrame !== undefined)
-                cancelAnimationFrame(observerFrame);
+                clearTimeout(observerFrame);
 
+            acpStoreUnsubscribe?.();
+            acpStoreUnsubscribe = undefined;
+            registeredSessionIds.clear();
             globalThis.document?.removeEventListener("click", onClick, true);
             target.__autonomShell?.dispose();
             for (const sectionHeaders of headers.values())

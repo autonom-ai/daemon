@@ -100,6 +100,11 @@ export class DaemonClient
         return this.request(`/api/client/state${query}`);
     }
 
+    async manageSession(id: string): Promise<unknown>
+    {
+        return this.request(`/api/sessions/${encodeURIComponent(id)}/manage`, "POST", {});
+    }
+
     private get base(): string
     {
         return `http://127.0.0.1:${this.settings.port}`;

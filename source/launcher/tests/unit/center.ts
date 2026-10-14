@@ -96,7 +96,7 @@ test("invalid YAML layouts and unsupported actions reject the entire definition"
         { sections: [{ id: "group", items: [item] }], active_item: "missing" },
         { sections: [{ id: "group", items: [{ ...item, tab: "old" }] }] },
         { sections: [], tabs: {} },
-        { sections: [], items: [] },
+        { sections: [], items: "not a list" },
         { sections: [], enabled: "yes" },
         { sections: [{ id: "group", items: [{ id: "missing" }] }] },
     ];
@@ -118,6 +118,33 @@ test("invalid YAML layouts and unsupported actions reject the entire definition"
     {
         await writeFile(path, "sections: [broken\n");
         await assert.rejects(loadCenter(path), /invalid YAML/);
+    }
+    finally
+    {
+        await rm(dirname(path), { recursive: true, force: true });
+    }
+});
+
+test("flat items precede empty Rooms and Profiles sections", async () =>
+{
+    const path = await center({ "pages/events.html": "<h1>Events</h1>" }, {
+        items: [{ id: "events", actions: { left_click: "pages/events.html" } }],
+        sections: [{ id: "rooms", label: "Rooms" }, { id: "profiles", label: "Profiles", items: [] }],
+        active_item: "events",
+    });
+    try
+    {
+        const content = await loadCenter(path);
+        assert.equal(content.items?.[0]?.id, "events");
+        assert.deepEqual(content.sections, [
+            { id: "rooms", label: "Rooms", items: [] },
+            { id: "profiles", label: "Profiles", items: [] },
+        ]);
+        assert.equal(content.activeItem, "events");
+        await writeFile(path, stringify({
+            items: [{ id: "rooms", hidden: true }], sections: [{ id: "rooms", label: "Rooms" }],
+        }));
+        await assert.rejects(loadCenter(path), /Duplicate UI id/);
     }
     finally
     {
