@@ -1,14 +1,13 @@
-import autonomFillMarkup from "../../assets/icons/autonom-fill.svg";
-import autonomLineMarkup from "../../assets/icons/autonom.svg";
-import type { CenterContent, NativeItem } from "./content";
-import { isFullDocument, overlayItems, pageHtml } from "./content";
+import autonomMarkup from "../../assets/icons/autonom-fill.svg";
+import cloudMarkup from "../../assets/icons/cloud.svg";
+import editorMarkup from "../../assets/icons/editor.svg";
+import uiCss from "../../assets/ui.css";
+import type { ActionSource, CenterContent, NativeItem, SidebarItem } from "./center";
+import { isFullDocument, overlayItems, pageHtml, visibleItems } from "./center";
 
 export type RuntimeConfig = {
     content: CenterContent;
-    bridge: {
-        url: string;
-        token: string;
-    };
+    bridge: { url: string; token: string };
 };
 
 export type RuntimeStatus = {
@@ -16,17 +15,20 @@ export type RuntimeStatus = {
     mode: "autonom" | "devin-cloud";
     enabled: boolean;
     revision: string | null;
-    activeTab: string | null;
+    activeItem: string | null;
     windowId: number;
+    editorActive: boolean;
     items: { id: string; label: string; path: string }[];
+    sections: { id: string; label: string | null; items: string[] }[];
+    loadedActions: number;
+    compiledScripts: number;
 };
 
 type CustomView = {
-    controller: any;
     host: HTMLElement;
     webview: any;
-    isAutonom?: boolean;
-    messageSub?: { dispose(): void };
+    surface: NativeItem;
+    html: string;
     nativeVisibility: string;
     routeDescriptor: PropertyDescriptor | undefined;
     routeWrapper: Function;
@@ -35,68 +37,239 @@ type CustomView = {
     nativeSidebar: unknown;
     stacks: Map<string, unknown>;
     lifetime: { dispose(): void };
-    surface: NativeItem;
-    html: string;
 };
 
-const DEVIN_CLOUD_IDS = new Set(["sessions", "review", "automations", "security", "wiki", "desktop-settings"]);
-const DEVIN_LOCAL = "Devin Local";
 const LEASE_TIMEOUT = 30000;
 
-const AUTONOM_FILL_PATH = iconPath(autonomFillMarkup);
-const AUTONOM_LINE_PATH = iconPath(autonomLineMarkup);
-const CLOUD_FILL_PATH = "M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579C14.758 6.804 16 8.137 16 9.773 16 11.569 14.502 13 12.687 13H3.781C1.708 13 0 11.366 0 9.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383";
-const CLOUD_LINE_PATH = "M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579C14.758 6.804 16 8.137 16 9.773 16 11.569 14.502 13 12.687 13H3.781C1.708 13 0 11.366 0 9.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383zm.653.757c-.757.653-1.153 1.44-1.153 2.056v.448l-.445.049C2.064 6.805 1 7.952 1 9.318 1 10.785 2.23 12 3.781 12h8.906C13.98 12 15 10.988 15 9.773c0-1.216-1.02-2.228-2.313-2.228h-.5v-.5C12.188 4.825 10.328 3 8 3a4.53 4.53 0 0 0-2.941 1.1z";
-
-function iconPath(markup: string): string
+export function prepareShell(css = uiCss): any
 {
-    return /[\s]d="([^"]+)"/.exec(markup)?.[1] ?? "";
+    const target = globalThis as any;
+    if (target.__autonomShell)
+    {
+        target.__autonomShell.update(css);
+        target.__autonomShell.heartbeat();
+        return target.__autonomShell;
+    }
+
+    const style = document.createElement("style");
+    style.textContent = css;
+    document.head.appendChild(style);
+    const switches = new Map<HTMLElement, {
+        host: HTMLElement;
+        display: string;
+        agent: HTMLButtonElement;
+        editor: HTMLButtonElement;
+    }>();
+    let requested: "autonom" | "devin-cloud" = "autonom";
+    let lease: ReturnType<typeof setTimeout> | undefined;
+    let frame: number | undefined;
+    let disposed = false;
+    const observer = new MutationObserver(() =>
+    {
+        frame ??= requestAnimationFrame(() =>
+        {
+            frame = undefined;
+            render();
+        });
+    });
+
+    function render(): void
+    {
+        if (disposed)
+            return;
+
+        observer.disconnect();
+        for (const [root, entry] of switches)
+        {
+            if (root.isConnected && entry.host.isConnected)
+                continue;
+
+            root.style.display = entry.display;
+            entry.host.remove();
+            switches.delete(root);
+        }
+
+        for (const root of document.querySelectorAll<HTMLElement>(".agent-editor-switch"))
+        {
+            const agent = root.querySelector<HTMLButtonElement>('button[aria-label="Agent"]');
+            const editor = root.querySelector<HTMLButtonElement>('button[aria-label="Editor"]');
+            if (!agent || !editor || !root.parentElement)
+                continue;
+
+            let entry = switches.get(root);
+            if (!entry)
+            {
+                const host = document.createElement("div");
+                host.dataset.autonomModeSwitch = "true";
+                host.setAttribute("role", "group");
+                host.setAttribute("aria-label", "Workspace mode");
+                for (const [mode, label, markup] of [
+                    ["autonom", "Autonom", autonomMarkup],
+                    ["devin-cloud", "Devin Cloud", cloudMarkup],
+                    ["editor", "Editor", editorMarkup],
+                ] as const)
+                {
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.dataset.autonomMode = mode;
+                    button.setAttribute("aria-label", label);
+                    button.title = label;
+                    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                    svg.setAttribute("viewBox", /viewBox="([^"]+)"/.exec(markup)?.[1] ?? "0 0 16 16");
+                    svg.setAttribute("aria-hidden", "true");
+                    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    path.setAttribute("d", /[\s]d="([^"]+)"/.exec(markup)?.[1] ?? "");
+                    svg.appendChild(path);
+                    const nativeIcon = mode === "editor" ? editor.querySelector("svg") : undefined;
+                    button.appendChild(nativeIcon ? nativeIcon.cloneNode(true) : svg);
+                    button.addEventListener("click", () =>
+                    {
+                        root.style.display = switches.get(root)?.display ?? "";
+                        if (mode === "editor")
+                            editor.click();
+                        else
+                        {
+                            requested = mode;
+                            if (editor.getAttribute("aria-pressed") === "true")
+                                agent.click();
+
+                            void target.__autonomCenter?.setMode(mode)
+                                .catch((error: Error) => console.error("[autonom]", error));
+                        }
+
+                        root.style.display = "none";
+                        render();
+                    });
+                    host.appendChild(button);
+                }
+
+                entry = { host, agent, editor, display: root.style.display };
+                switches.set(root, entry);
+                root.after(host);
+                root.style.display = "none";
+            }
+
+            const mode = editor.getAttribute("aria-pressed") === "true" ? "editor"
+                : target.__autonomCenter?.status().mode ?? requested;
+            for (const button of entry.host.querySelectorAll<HTMLButtonElement>("button"))
+                button.setAttribute("aria-pressed", String(button.dataset.autonomMode === mode));
+        }
+
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true,
+            attributeFilter: ["aria-pressed"] });
+    }
+
+    const shell = {
+        requestedMode(): "autonom" | "devin-cloud"
+        {
+            return requested;
+        },
+        editorActive(): boolean
+        {
+            return [...switches.values()].filter((entry) => entry.host.getBoundingClientRect().width > 0)
+                .some((entry) => entry.editor.getAttribute("aria-pressed") === "true");
+        },
+        update(nextCss: string): void
+        {
+            if (style.textContent !== nextCss)
+                style.textContent = nextCss;
+
+            render();
+        },
+        heartbeat(): void
+        {
+            clearTimeout(lease);
+            lease = setTimeout(() => shell.dispose(), LEASE_TIMEOUT);
+        },
+        dispose(): void
+        {
+            if (disposed)
+                return;
+
+            disposed = true;
+            clearTimeout(lease);
+            if (frame !== undefined)
+                cancelAnimationFrame(frame);
+
+            observer.disconnect();
+            for (const [root, entry] of switches)
+            {
+                root.style.display = entry.display;
+                entry.host.remove();
+            }
+
+            style.remove();
+            if (target.__autonomShell === shell)
+                delete target.__autonomShell;
+        },
+    };
+    target.__autonomShell = shell;
+    shell.heartbeat();
+    render();
+    return shell;
 }
 
 /** `install` binds the runtime to one window; `update` applies a configuration. */
 export function install(services: any, config: RuntimeConfig): any
 {
     const target = globalThis as any;
-    target.__autonomCenter?.dispose();
     const { manifest, groups, controller, api, windowId } = services;
     if (!manifest?.getManifest || !manifest?._onDidChangeManifest?.fire || !manifest.onDidChangeManifest
         || !groups?.setActiveNavSurface || !groups?.getActiveNavSurface || !api?.executeCommand
         || !Number.isInteger(windowId) || !controller?.show || !controller?.setVisible
         || !controller?.resetActiveSurface || !controller?.reloadActiveSurface || !controller?._load)
         throw new Error("Unsupported native Command Center service shape.");
+
     if (!config?.content || !config.bridge?.url || !config.bridge?.token)
         throw new Error("The Command Center runtime needs content and a bridge endpoint.");
-    let content: CenterContent = { enabled: false, items: [], tabs: {} };
+
+    const replacing = Boolean(target.__autonomCenter);
+    const previousMode = target.__autonomCenter?.status().mode;
+    const previousNavigation = target.__autonomCenter?.navigationState?.();
+    const previousSurface = groups.getActiveNavSurface(windowId);
+    target.__autonomCenter?.dispose();
+    let content: CenterContent = { enabled: false, sections: [] };
     let bridge = config.bridge;
-    let mode: "autonom" | "devin-cloud" = "autonom";
-    let autonomActiveSurface: { id: string; path: string } | null = null;
-    let devinCloudActiveSurface: { id: string; path: string } | null = null;
-    let autonomPageVisible = false;
+    const requestedMode = target.__autonomShell?.requestedMode() ?? "autonom";
+    let mode: "autonom" | "devin-cloud" = previousMode ?? requestedMode;
+    let savedAutonomSurface: { id: string; path: string } | null = previousNavigation?.autonom ?? null;
+    let savedNativeSurface: { id: string; path: string } | null = previousNavigation?.native ?? null;
     let generation = 0;
+    let initialized = false;
     let cachedBase: any;
     let cachedManifest: any;
-    let relaying = false;
+    let notifying = false;
+    let disposed = false;
     let lease: ReturnType<typeof setTimeout> | undefined;
-    let providerObserver: MutationObserver | undefined;
-    let providerRow: HTMLLIElement | undefined;
+    let observer: MutationObserver | undefined;
+
     const descriptors: { object: any; name: string; descriptor: PropertyDescriptor | undefined; wrapper: Function }[] = [];
     const views = new Map<any, CustomView>();
     const getManifest = manifest.getManifest;
+    let items = new Map<string, SidebarItem>();
+    const sources = new Map<string, ActionSource>();
+    const requests = new Map<string, Promise<ActionSource>>();
+    const scripts = new Map<string, { version: string; run: (context: any) => Promise<unknown> }>();
+    const headers = new Map<HTMLUListElement, Map<string, HTMLLIElement>>();
+    const running = new Set<string>();
+    let observerFrame: number | undefined;
+    let navigation = 0;
 
     function effectiveManifest(): any
     {
         const base = getManifest.call(manifest);
         if (!content.enabled || mode !== "autonom")
             return base;
+
         if (base !== cachedBase || !cachedManifest)
         {
             cachedBase = base;
-            const filteredBaseItems = (base.items as NativeItem[]).filter((item) => !DEVIN_CLOUD_IDS.has(item.id));
             cachedManifest = Object.assign(Object.create(Object.getPrototypeOf(base)), base, {
-                items: overlayItems(filteredBaseItems, { ...content, enabled: true }),
+                items: overlayItems(base.items, content),
                 revision: `${base.revision}:autonom:${generation}`,
             });
         }
+
         return cachedManifest;
     }
 
@@ -108,25 +281,64 @@ export function install(services: any, config: RuntimeConfig): any
 
     function notify(): void
     {
-        if (relaying)
+        if (notifying)
             return;
-        relaying = true;
+
+        notifying = true;
         try
         {
             manifest._onDidChangeManifest.fire(effectiveManifest());
         }
         finally
         {
-            relaying = false;
+            notifying = false;
         }
     }
 
-    function tabFor(surface: any): string | null
+    function itemFor(surface: any): SidebarItem | undefined
     {
         if (!content.enabled || mode !== "autonom" || typeof surface?.path !== "string")
-            return null;
-        const tab = surface.path.startsWith("/autonom/") ? surface.path.slice(9) : "";
-        return Object.hasOwn(content.tabs, tab) ? tab : null;
+            return undefined;
+
+        const item = items.get(surface.id);
+        return item?.actions?.left_click.type === "html" && surface.path === `/autonom/${item.id}` ? item : undefined;
+    }
+
+    function actionKey(item: SidebarItem): string
+    {
+        const action = item.actions!.left_click;
+        return `${action.file}:${action.version}`;
+    }
+
+    async function loadPage(item: SidebarItem, revision = content.revision): Promise<ActionSource>
+    {
+        const key = actionKey(item);
+        let request = requests.get(key);
+        if (!request)
+        {
+            request = bridgeRequest({ action: "getAction", id: item.id, revision }).then((value) =>
+            {
+                if (value?.type !== "html" || typeof value.source !== "string")
+                    throw new Error("The UI action did not return HTML.");
+
+                if (!disposed && requests.get(key) === request)
+                    sources.set(key, value);
+                return value as ActionSource;
+            });
+            requests.set(key, request);
+        }
+
+        try
+        {
+            return await request;
+        }
+        catch (error)
+        {
+            if (requests.get(key) === request)
+                requests.delete(key);
+
+            throw error;
+        }
     }
 
     async function bridgeRequest(message: Record<string, unknown>): Promise<any>
@@ -134,11 +346,13 @@ export function install(services: any, config: RuntimeConfig): any
         const response = await fetch(`${bridge.url}/request`, {
             method: "POST",
             headers: { "content-type": "application/json", "x-autonom-bridge": bridge.token },
-            body: JSON.stringify(message),
+            body: JSON.stringify({ ...message, windowId }),
+            signal: AbortSignal.timeout(30000),
         });
-        const body = await response.json().catch(() => undefined);
+        const body = await response.json();
         if (!response.ok)
             throw new Error(body?.error || `The Command Center bridge returned HTTP ${response.status}.`);
+
         return body?.result;
     }
 
@@ -147,11 +361,10 @@ export function install(services: any, config: RuntimeConfig): any
         const view = views.get(instance);
         if (!view)
             return;
+
         views.delete(instance);
-        autonomPageVisible = false;
         const shell = instance._webview;
-        if (shell._mountEl)
-            shell._mountEl.style.visibility = view.nativeVisibility;
+        shell._mountEl.style.visibility = view.nativeVisibility;
         if (shell._onActiveRoute === view.routeWrapper)
         {
             if (view.routeDescriptor)
@@ -159,6 +372,7 @@ export function install(services: any, config: RuntimeConfig): any
             else
                 delete shell._onActiveRoute;
         }
+
         for (const [id, stack] of view.stacks)
         {
             if (stack === undefined)
@@ -166,71 +380,84 @@ export function install(services: any, config: RuntimeConfig): any
             else
                 shell._surfaces.set(id, stack);
         }
+
         shell._activeSurfaceId = view.nativeSurfaceId;
         shell._title = view.nativeTitle;
         shell._activeSidebar = view.nativeSidebar;
         instance._loadedSurfaceId = undefined;
         instance._store?.delete(view.lifetime);
+        view.lifetime.dispose();
         view.webview.dispose();
         view.host.remove();
     }
 
-    function render(instance: any, surface: NativeItem): boolean
+    function render(instance: any, surface: NativeItem, visible = true): boolean
     {
-        const tab = tabFor(surface);
-        if (!tab)
+        const item = itemFor(surface);
+        if (!item)
             return false;
-        const page = content.tabs[tab]!;
+
+        const source = sources.get(actionKey(item));
+        if (!source)
+            throw new Error("The HTML action is not loaded yet.");
+
+        const page = { title: item.label ?? item.id, html: source.source };
         const shell = instance._webview;
-        if (!shell?._hostEl || !shell?._mountEl || !shell?._webviewService?.createWebviewElement)
+        if (!shell?._hostEl || !shell?._mountEl || !shell?._webviewService?.createWebviewElement
+            || !shell?._surfaces || !shell?._reportState || !instance._register)
             throw new Error("Native page host is not ready.");
+
         let view = views.get(instance);
-        const enableScripts = isFullDocument(page.html);
-        if (!view || !view.host.isConnected || view.isAutonom !== enableScripts)
+        if (!view || !view.host.isConnected)
         {
             removeView(instance);
             const host = shell._hostEl.ownerDocument.createElement("div") as HTMLElement;
             host.dataset.autonomCenter = "page";
-            host.style.cssText = "position:absolute;inset:0;width:100%;height:100%;z-index:1;";
             shell._hostEl.appendChild(host);
             const webview = shell._webviewService.createWebviewElement({
                 title: page.title,
                 options: { retainContextWhenHidden: true, enableFindWidget: true },
                 contentOptions: {
-                    enableScripts,
-                    allowScripts: enableScripts,
-                    enableForms: enableScripts,
-                    allowForms: enableScripts,
+                    enableScripts: true,
+                    allowScripts: true,
+                    enableForms: true,
+                    allowForms: true,
                     localResourceRoots: [],
                 },
                 extension: undefined,
             });
-            webview.mountTo(host, shell._hostEl.ownerDocument.defaultView);
-            const messageSub = (enableScripts && typeof webview.onMessage === "function")
-                ? webview.onMessage(async (event: any) =>
+            try
+            {
+                webview.mountTo(host, shell._hostEl.ownerDocument.defaultView);
+            }
+            catch (error)
+            {
+                webview.dispose();
+                host.remove();
+                throw error;
+            }
+
+            const messageSub = webview.onMessage?.(async (event: any) =>
+            {
+                const message = event?.message ?? event;
+                const reqId = message?.reqId ?? message?.id;
+                if (typeof reqId !== "string" && typeof reqId !== "number")
+                    return;
+
+                try
                 {
-                    const message = event?.message ?? event;
-                    if (!message || typeof message !== "object")
-                        return;
-                    const reqId = message.reqId || message.id;
-                    if (!reqId)
-                        return;
-                    try
-                    {
-                        webview.postMessage({ reqId, id: reqId, result: await bridgeRequest(message) });
-                    }
-                    catch (error: any)
-                    {
-                        webview.postMessage({ reqId, id: reqId, error: error?.message || String(error) });
-                    }
-                })
-                : undefined;
+                    webview.postMessage({ reqId, id: reqId, result: await bridgeRequest(message) });
+                }
+                catch (error)
+                {
+                    webview.postMessage({ reqId, id: reqId, error: error instanceof Error ? error.message : String(error) });
+                }
+            });
             view = {
-                controller: instance,
                 host,
                 webview,
-                isAutonom: enableScripts,
-                messageSub,
+                surface,
+                html: "",
                 nativeVisibility: shell._mountEl.style.visibility,
                 routeDescriptor: Object.getOwnPropertyDescriptor(shell, "_onActiveRoute"),
                 routeWrapper: function (): void
@@ -244,501 +471,204 @@ export function install(services: any, config: RuntimeConfig): any
                 lifetime: {
                     dispose(): void
                     {
-                        messageSub?.dispose?.();
+                        messageSub?.dispose();
                         removeView(instance);
                     },
                 },
-                surface,
-                html: "",
             };
             views.set(instance, view);
             shell._onActiveRoute = view.routeWrapper;
             instance._register(view.lifetime);
         }
-        const html = enableScripts ? page.html : pageHtml(page);
+
+        const html = isFullDocument(page.html) ? page.html : pageHtml(page);
         if (view.html !== html)
         {
             view.webview.setHtml(html);
             view.html = html;
         }
+
         view.surface = surface;
-        view.host.dataset.autonomTab = tab;
-        view.host.style.display = "";
-        autonomPageVisible = true;
-        autonomActiveSurface = { id: surface.id, path: surface.path };
+        view.host.dataset.autonomItem = item.id;
+        view.host.hidden = !visible;
         shell._mountEl.style.visibility = "hidden";
         instance._currentSurface = surface;
         shell._activeSurfaceId = surface.id;
         if (!view.stacks.has(surface.id))
             view.stacks.set(surface.id, shell._surfaces.get(surface.id));
+
         shell._surfaces.set(surface.id, { stack: [surface.path], cursor: 0, lastRouteCategory: undefined });
         shell._title = page.title;
         shell._activeSidebar = undefined;
         shell._reportState();
-        instance.setVisible(true);
+        instance.setVisible(visible);
         return true;
     }
 
-    function createSvgIcon(viewBox: string, pathD: string): SVGSVGElement
+    async function renderLoaded(instance: any, surface: NativeItem): Promise<boolean>
     {
-        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        svg.setAttribute("viewBox", viewBox);
-        svg.setAttribute("width", "14");
-        svg.setAttribute("height", "14");
-        svg.setAttribute("fill", "currentColor");
-        svg.setAttribute("aria-hidden", "true");
-        svg.style.flexShrink = "0";
-        svg.style.pointerEvents = "none";
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("fill-rule", "evenodd");
-        path.setAttribute("clip-rule", "evenodd");
-        path.setAttribute("d", pathD);
-        svg.appendChild(path);
-        return svg;
+        const item = itemFor(surface);
+        if (!item)
+            return false;
+
+        const key = actionKey(item);
+        await loadPage(item);
+        const current = itemFor(surface);
+        if (disposed || !current || actionKey(current) !== key)
+            return true;
+
+        return render(instance, surface);
     }
 
-    function renderProviderToggle(): void
+    function renderLayout(): void
     {
-        const document = globalThis.document;
-        if (!content.enabled || !document?.body)
-        {
-            providerRow?.remove();
-            providerRow = undefined;
-            providerObserver?.disconnect();
-            providerObserver = undefined;
+        if (!globalThis.document?.body || disposed)
             return;
-        }
-        const menu = [...document.querySelectorAll<HTMLUListElement>("ul[data-slot=sidebar-menu]")]
-            .find((candidate) => candidate.querySelector('button[aria-label="New session"]'));
-        const reference = menu?.querySelector('button[aria-label="New session"]')?.closest("li");
-        if (!menu || !reference)
-        {
-            providerRow?.remove();
-            providerRow = undefined;
-            return;
-        }
-        if (!providerRow || !providerRow.isConnected || providerRow.parentElement !== menu)
-        {
-            providerRow?.remove();
-            providerRow = document.createElement("li");
-            providerRow.dataset.slot = "sidebar-menu-item";
-            providerRow.dataset.autonomProviderSwitch = "true";
-            providerRow.className = reference.className;
-            providerRow.style.margin = "2px 0 8px 0";
-            providerRow.style.padding = "0";
-            menu.insertBefore(providerRow, reference);
-            const switchRoot = document.createElement("div");
-            switchRoot.className = "agent-editor-switch";
-            switchRoot.setAttribute("role", "group");
-            switchRoot.setAttribute("aria-label", "Command Center provider");
-            switchRoot.style.width = "100%";
-            const segments = document.createElement("div");
-            segments.className = "switch-container";
-            segments.style.width = "100%";
-            segments.style.height = "28px";
-            segments.style.padding = "2px";
-            segments.style.boxSizing = "border-box";
-            segments.style.display = "flex";
-            segments.style.alignItems = "center";
-            segments.style.borderRadius = "7px";
-            segments.style.backgroundColor = "var(--windsurf-switch-background, rgba(230, 230, 230, 0.05))";
-            for (const [provider, label] of [
-                ["autonom", "Autonom"],
-                ["devin-cloud", "Devin Cloud"],
-            ] as const)
-            {
-                const button = document.createElement("button");
-                button.type = "button";
-                button.className = "switch-segment";
-                button.style.flex = "1 1 0";
-                button.style.minWidth = "0";
-                button.style.height = "100%";
-                button.style.display = "flex";
-                button.style.alignItems = "center";
-                button.style.justifyContent = "center";
-                button.style.gap = "6px";
-                button.style.padding = "0 8px";
-                button.style.borderRadius = "5px";
-                button.style.border = "1px solid transparent";
-                button.style.boxSizing = "border-box";
-                button.style.fontSize = "12px";
-                button.style.fontWeight = "500";
-                button.style.cursor = "pointer";
-                button.style.userSelect = "none";
-                button.style.transition = "background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease";
-                button.dataset.autonomProvider = provider;
-                button.setAttribute("aria-label", label);
 
-                const iconSpan = document.createElement("span");
-                iconSpan.className = "segment-icon";
-                iconSpan.style.display = "inline-flex";
-                iconSpan.style.alignItems = "center";
-                iconSpan.style.justifyContent = "center";
-                iconSpan.style.lineHeight = "0";
-                iconSpan.style.flexShrink = "0";
-                const isAutonom = provider === "autonom";
-                iconSpan.appendChild(createSvgIcon(isAutonom ? "0 0 48 48" : "0 0 16 16",
-                    isAutonom ? AUTONOM_FILL_PATH : CLOUD_LINE_PATH));
-                button.appendChild(iconSpan);
-
-                const text = document.createElement("span");
-                text.className = "segment-label";
-                text.style.overflow = "hidden";
-                text.style.textOverflow = "ellipsis";
-                text.style.whiteSpace = "nowrap";
-                text.textContent = label;
-                button.appendChild(text);
-
-                button.addEventListener("click", (event) =>
-                {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    void runtime.setMode(provider);
-                });
-                segments.appendChild(button);
-            }
-            switchRoot.appendChild(segments);
-            providerRow.appendChild(switchRoot);
-        }
-        for (const button of providerRow.querySelectorAll<HTMLButtonElement>("button[data-autonom-provider]"))
-        {
-            const isAutonom = button.dataset.autonomProvider === "autonom";
-            const active = button.dataset.autonomProvider === mode;
-            button.setAttribute("aria-pressed", String(active));
-            button.classList.toggle("active", active);
-            button.style.backgroundColor = active ? "rgb(var(--bg-elevated-transparent))" : "transparent";
-            button.style.borderColor = active ? "rgb(var(--border-secondary, 255 255 255 / 0.1))" : "transparent";
-            button.style.color = active
-                ? "var(--text-primary, var(--vscode-titleBar-activeForeground, #fff))"
-                : "var(--text-secondary, currentColor)";
-            button.style.opacity = active ? "1" : "0.56";
-            button.style.boxShadow = active ? "rgba(0, 0, 0, 0.05) 0px 1px 2px" : "none";
-
-            const path = button.querySelector<SVGPathElement>("path");
-            const svg = button.querySelector<SVGSVGElement>("svg");
-            const expectedViewBox = isAutonom ? "0 0 48 48" : "0 0 16 16";
-            const expectedPath = isAutonom
-                ? (active ? AUTONOM_FILL_PATH : AUTONOM_LINE_PATH)
-                : (active ? CLOUD_FILL_PATH : CLOUD_LINE_PATH);
-            if (svg && svg.getAttribute("viewBox") !== expectedViewBox)
-                svg.setAttribute("viewBox", expectedViewBox);
-            if (path && path.getAttribute("d") !== expectedPath)
-                path.setAttribute("d", expectedPath);
-        }
-    }
-
-    let keydownListenerAttached = false;
-    let acpStoreUnsubscribe: (() => void) | undefined;
-    const registeredSessionIds = new Set<string>();
-
-    function onKeyDown(event: KeyboardEvent): void
-    {
-        if (mode === "autonom" && (event.ctrlKey || event.metaKey) && (event.key === "'" || event.code === "Quote"))
-        {
-            event.stopImmediatePropagation();
-            event.preventDefault();
-        }
-    }
-
-    function attachSessionWatcher(): void
-    {
-        if (acpStoreUnsubscribe)
-            return;
-        const store = (globalThis as any).__acpStore;
-        if (!store || typeof store.subscribe !== "function")
-            return;
-        acpStoreUnsubscribe = store.subscribe(() =>
-        {
-            if (mode !== "autonom")
-                return;
-            const state = store.getState();
-            const focused = state?.acp?.focusedSessionId;
-            if (typeof focused === "string" && focused.length > 0)
-            {
-                const sessionId = focused.includes("/") ? focused.split("/").pop()! : focused;
-                if (sessionId && !registeredSessionIds.has(sessionId) && /^[a-z0-9_-]+$/i.test(sessionId))
-                {
-                    registeredSessionIds.add(sessionId);
-                    void bridgeRequest({ action: "registerSession", id: sessionId }).catch(() => undefined);
-                }
-            }
-        });
-    }
-
-    let overrideStyle: HTMLStyleElement | undefined;
-
-    function updateOverrideStyles(): void
-    {
-        const document = globalThis.document;
-        if (!document?.head)
-            return;
-        if (mode === "autonom" && content.enabled)
-        {
-            if (!overrideStyle || !overrideStyle.isConnected)
-            {
-                overrideStyle?.remove();
-                overrideStyle = document.createElement("style");
-                overrideStyle.id = "autonom-native-overrides";
-                document.head.appendChild(overrideStyle);
-            }
-            overrideStyle.textContent = `
-                div[class*="max-w-[200px]"] button[aria-haspopup="menu"] {
-                    pointer-events: none !important;
-                    cursor: default !important;
-                }
-                /* Custom session page cleanups: hide Switch agent location, Go to sessions list, and Recent sessions list */
-                [data-beard-row="true"] button:first-child:not(:only-child) {
-                    display: none !important;
-                }
-                [data-beard-row="true"] button:last-child:not(:only-child) {
-                    display: none !important;
-                }
-                .windsurf-welcome-container .absolute.left-0.top-full {
-                    display: none !important;
-                }
-            `;
-        }
-        else
-        {
-            overrideStyle?.remove();
-            overrideStyle = undefined;
-        }
-    }
-
-    let isSyncing = false;
-    function syncAutonomDomState(): void
-    {
-        const document = globalThis.document;
-        if (!document?.body || isSyncing)
-            return;
-        isSyncing = true;
-        if (providerObserver)
-            providerObserver.disconnect();
+        observer?.disconnect();
         try
         {
-            updateOverrideStyles();
-            renderProviderToggle();
-
-            if (!keydownListenerAttached)
-            {
-                document.addEventListener("keydown", onKeyDown, true);
-                keydownListenerAttached = true;
-            }
-
-            attachSessionWatcher();
-
-            const aside = document.querySelector<HTMLElement>('aside[data-slot="sidebar"]');
-            const asideChildren = aside ? (Array.from(aside.children) as HTMLElement[]) : [];
-            const header = aside?.querySelector<HTMLElement>('[data-slot="sidebar-header"]');
-            const footer = aside?.querySelector<HTMLElement>('[data-slot="sidebar-footer"]');
-            const middle = asideChildren.find((child) => child.querySelector?.('[data-slot="sidebar-content-wrapper"]')
-                || (!child.className?.includes("hidden") && child.className?.includes("min-h-0 flex-1")));
-
-            if (mode === "autonom")
-            {
-                for (const child of asideChildren)
-                {
-                    if (child === header || child.contains(header || null) || child === middle
-                        || child === footer || child.contains(footer || null))
-                        child.style.display = "";
-                    else
-                        child.style.display = "none";
-                }
-                if (footer)
-                    footer.style.display = "";
-
-                for (const group of document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group"]'))
-                {
-                    const label = group.textContent || "";
-                    if (label.includes("Spaces") || label.includes("Split into new space")
-                        || label.includes("ago") || label.includes("Session "))
-                        group.style.display = "none";
-                    else
-                        group.style.display = "";
-                }
-
-                for (const item of aside?.querySelectorAll("li") || [])
-                {
-                    if (item.textContent?.trim() === "Sessions")
-                        item.style.display = "none";
-                }
-
-                const scrollContent = aside?.querySelector<HTMLElement>('[data-slot="scroll-area-content"]');
-                const navGroup = scrollContent?.querySelector<HTMLElement>('[data-slot="sidebar-group"]');
-                if (scrollContent && navGroup)
-                {
-                    const profilesHeader = sectionHeader(document, scrollContent, "profiles", "Profiles");
-                    if (profilesHeader.parentElement !== scrollContent || profilesHeader.previousElementSibling !== navGroup)
-                        navGroup.after(profilesHeader);
-                    profilesHeader.style.display = "";
-
-                    const roomsHeader = sectionHeader(document, scrollContent, "rooms", "Rooms");
-                    if (roomsHeader.parentElement !== scrollContent || roomsHeader.previousElementSibling !== profilesHeader)
-                        profilesHeader.after(roomsHeader);
-                    roomsHeader.style.display = "";
-                }
-
-                const newSessionBtn = document.querySelector<HTMLButtonElement>('button[aria-label="New session"]');
-                if (newSessionBtn && !(newSessionBtn as any).__autonomHooked)
-                {
-                    (newSessionBtn as any).__autonomHooked = true;
-                    newSessionBtn.addEventListener("click", () =>
-                    {
-                        if (mode === "autonom")
-                        {
-                            autonomPageVisible = false;
-                            autonomActiveSurface = null;
-                            for (const view of views.values())
-                                view.host.style.display = "none";
-                        }
-                    }, true);
-                }
-
-                const devinLogo = document.querySelector<SVGSVGElement>(
-                    ".windsurf-welcome-container svg.absolute.bottom-full:not([data-autonom-logo])");
-                if (devinLogo)
-                {
-                    devinLogo.style.display = "none";
-                    let autonomLogo = devinLogo.parentElement?.querySelector<SVGSVGElement>("svg[data-autonom-logo]");
-                    if (!autonomLogo && devinLogo.parentElement)
-                    {
-                        autonomLogo = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-                        autonomLogo.dataset.autonomLogo = "true";
-                        autonomLogo.setAttribute("class", "absolute bottom-full mb-6 text-text-primary opacity-10");
-                        autonomLogo.setAttribute("aria-hidden", "true");
-                        autonomLogo.setAttribute("width", "64px");
-                        autonomLogo.setAttribute("height", "64px");
-                        autonomLogo.setAttribute("viewBox", "0 0 48 48");
-                        autonomLogo.setAttribute("fill", "currentColor");
-                        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                        path.setAttribute("fill-rule", "evenodd");
-                        path.setAttribute("clip-rule", "evenodd");
-                        path.setAttribute("d", AUTONOM_FILL_PATH);
-                        autonomLogo.appendChild(path);
-                        devinLogo.parentElement.insertBefore(autonomLogo, devinLogo);
-                    }
-                    if (autonomLogo)
-                        autonomLogo.style.display = "";
-                }
-
-                for (const button of document.querySelectorAll<HTMLButtonElement>("button"))
-                {
-                    if (button.classList.contains("switch-segment"))
-                        continue;
-                    const isAcpParent = button.parentElement?.className?.includes("max-w-[200px]");
-                    const label = button.textContent?.trim() || "";
-                    const isAcpText = ["Devin Local", "Codex", "OpenCode", "Antigravity (DBA)", "Devin Cloud"].includes(label);
-                    if ((isAcpParent || isAcpText) && button.getAttribute("aria-haspopup") === "menu")
-                    {
-                        const span = button.querySelector("span");
-                        if (span && span.textContent !== DEVIN_LOCAL)
-                            span.textContent = DEVIN_LOCAL;
-                        button.style.pointerEvents = "none";
-                        button.style.cursor = "default";
-                        button.setAttribute("data-disabled", "");
-                        button.setAttribute("aria-disabled", "true");
-                        button.tabIndex = -1;
-                    }
-                }
-
-                for (const popup of document.querySelectorAll<HTMLElement>('[role="menu"], [data-slot="menu"], [class*="popup"]'))
-                {
-                    const label = popup.textContent || "";
-                    if (label.includes("switch agents")
-                        || (label.includes("Devin Local") && (label.includes("Codex") || label.includes("OpenCode"))))
-                    {
-                        popup.style.display = "none";
-                        popup.remove();
-                    }
-                }
-            }
-            else
-            {
-                for (const child of asideChildren)
-                    child.style.display = "";
-                for (const group of document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group"]'))
-                    group.style.display = "";
-                for (const header_ of document.querySelectorAll<HTMLElement>('[data-autonom-section]'))
-                    header_.remove();
-                if (footer)
-                    footer.style.display = "";
-                for (const item of aside?.querySelectorAll("li") || [])
-                {
-                    if (item.textContent?.trim() === "Sessions")
-                        item.style.display = "";
-                }
-                const devinLogo = document.querySelector<SVGSVGElement>(
-                    ".windsurf-welcome-container svg.absolute.bottom-full:not([data-autonom-logo])");
-                if (devinLogo)
-                    devinLogo.style.display = "";
-                const autonomLogo = document.querySelector<SVGSVGElement>(
-                    ".windsurf-welcome-container svg[data-autonom-logo]");
-                if (autonomLogo)
-                    autonomLogo.style.display = "none";
-                for (const button of document.querySelectorAll<HTMLButtonElement>("button"))
-                {
-                    if (button.parentElement?.className?.includes("max-w-[200px]")
-                        && button.getAttribute("aria-haspopup") === "menu")
-                    {
-                        button.style.pointerEvents = "";
-                        button.style.cursor = "";
-                        button.removeAttribute("data-disabled");
-                        button.removeAttribute("aria-disabled");
-                        button.tabIndex = 0;
-                    }
-                }
-            }
+            prepareShell(content.css ?? uiCss);
+            renderSections();
         }
         finally
         {
-            isSyncing = false;
-            if (!providerObserver)
-                providerObserver = new MutationObserver(() => syncAutonomDomState());
-            providerObserver.observe(document.body, { childList: true, subtree: true });
+            observer ??= new MutationObserver(() =>
+            {
+                observerFrame ??= requestAnimationFrame(() =>
+                {
+                    observerFrame = undefined;
+                    renderLayout();
+                });
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
         }
     }
 
-    function sectionHeader(document: Document, scrollContent: HTMLElement, id: string, label: string): HTMLElement
+    function nativeItemId(button: HTMLElement): string | undefined
     {
-        let header = scrollContent.querySelector<HTMLElement>(`[data-autonom-section="${id}"]`);
-        if (header)
-            return header;
-        header = document.createElement("div");
-        header.dataset.slot = "sidebar-group";
-        header.dataset.autonomSection = id;
-        header.className = "relative flex w-full min-w-0 flex-col px-[--sidebar-padding] pb-1";
-        const row = document.createElement("div");
-        row.dataset.slot = "sidebar-label-row";
-        row.className = "group/sidebar-label-row flex h-8 shrink-0 items-center justify-between gap-px pl-[--sidebar-content-button-x-padding] pr-1";
-        const labelElement = document.createElement("div");
-        labelElement.dataset.slot = "sidebar-group-label";
-        labelElement.className = "text-12 text-text-secondary flex items-center rounded-md font-medium flex-1";
-        labelElement.textContent = label;
-        row.appendChild(labelElement);
-        header.appendChild(row);
-        return header;
+        const key = Object.keys(button).find((name) => name.startsWith("__reactFiber$"));
+        let fiber = key ? (button as any)[key] : null;
+        for (let index = 0; fiber && index < 128; index++, fiber = fiber.return)
+        {
+            const id = fiber.memoizedProps?.tab;
+            if (typeof id === "string" && items.has(id))
+                return id;
+        }
+
+        return undefined;
     }
 
-    wrap(manifest, "getManifest", effectiveManifest);
-    const nativeNewAgentWindowSession = groups.newAgentWindowSession;
-    if (typeof nativeNewAgentWindowSession === "function")
+    function renderSections(): void
     {
-        wrap(groups, "newAgentWindowSession", function (this: any, ...args: any[]): any
+        const menus = new Set(document.querySelectorAll<HTMLUListElement>('ul[aria-label="Pages"]'));
+        for (const [menu, sectionHeaders] of headers)
         {
-            if (mode === "autonom")
+            if (menus.has(menu) && content.enabled && mode === "autonom")
+                continue;
+
+            for (const header of sectionHeaders.values())
+                header.remove();
+
+            headers.delete(menu);
+        }
+
+        for (const button of document.querySelectorAll<HTMLElement>("button[data-autonom-item]"))
+            if (!content.enabled || mode !== "autonom" || !items.has(button.dataset.autonomItem!))
+                delete button.dataset.autonomItem;
+
+        if (!content.enabled || mode !== "autonom")
+            return;
+
+        for (const menu of menus)
+        {
+            const rows = new Map<string, HTMLElement>();
+            for (const row of Array.from(menu.children) as HTMLElement[])
             {
-                autonomPageVisible = false;
-                autonomActiveSurface = null;
-                for (const view of views.values())
-                    view.host.style.display = "none";
+                const button = row.querySelector<HTMLElement>('[data-slot="sidebar-menu-button"] > button[aria-label]');
+                const id = button && nativeItemId(button);
+                if (!id || !button)
+                    continue;
+
+                button.dataset.autonomItem = id;
+                rows.set(id, row);
             }
-            return nativeNewAgentWindowSession.apply(this, args);
-        });
+
+            let sectionHeaders = headers.get(menu);
+            if (!sectionHeaders)
+            {
+                sectionHeaders = new Map();
+                headers.set(menu, sectionHeaders);
+            }
+
+            const displayed = new Set<string>();
+            let anchor: HTMLElement | null = null;
+            for (let index = content.sections.length - 1; index >= 0; index--)
+            {
+                const section = content.sections[index]!;
+                anchor = section.items.map((item) => rows.get(item.id)).find(Boolean) ?? anchor;
+                if (!section.label || section.items.length > 0 && section.items.every((item) => item.hidden))
+                    continue;
+
+                displayed.add(section.id);
+                let header = sectionHeaders.get(section.id);
+                if (!header)
+                {
+                    header = document.createElement("li");
+                    header.dataset.autonomSection = section.id;
+                    header.setAttribute("role", "presentation");
+                    const label = document.createElement("h2");
+                    header.appendChild(label);
+                    sectionHeaders.set(section.id, header);
+                }
+
+                if (header.firstElementChild!.textContent !== section.label)
+                    header.firstElementChild!.textContent = section.label;
+
+                if (header.parentElement !== menu || header.nextElementSibling !== anchor)
+                    menu.insertBefore(header, anchor);
+
+                anchor = header;
+            }
+
+            for (const [id, header] of sectionHeaders)
+            {
+                if (displayed.has(id))
+                    continue;
+
+                header.remove();
+                sectionHeaders.delete(id);
+            }
+        }
     }
+
+    function onClick(event: MouseEvent): void
+    {
+        if (!content.enabled || mode !== "autonom" || event.button !== 0)
+            return;
+
+        const button = (event.target as Element | null)?.closest<HTMLButtonElement>("button[data-autonom-item]");
+        const id = button?.dataset.autonomItem;
+        if (!button || !id || !items.get(id)?.actions?.left_click)
+            return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        button.setAttribute("aria-busy", "true");
+        void runtime.activate(id).catch((error) =>
+        {
+            button.title = error instanceof Error ? error.message : String(error);
+            console.error("[autonom]", error);
+        }).finally(() => button.removeAttribute("aria-busy"));
+    }
+
+    globalThis.document?.addEventListener("click", onClick, true);
+    wrap(manifest, "getManifest", effectiveManifest);
     const subscription = manifest.onDidChangeManifest(() =>
     {
-        if (relaying)
+        if (notifying)
             return;
+
         cachedManifest = undefined;
         if (content.enabled && mode === "autonom")
             notify();
@@ -746,8 +676,9 @@ export function install(services: any, config: RuntimeConfig): any
     const show = controller.show;
     wrap(controller, "show", async function (this: any, surface: NativeItem): Promise<void>
     {
-        if (render(this, surface))
+        if (await renderLoaded(this, surface))
             return;
+
         removeView(this);
         return show.call(this, surface);
     });
@@ -756,236 +687,303 @@ export function install(services: any, config: RuntimeConfig): any
         const original = controller[name];
         if (typeof original !== "function")
             continue;
-        wrap(controller, name, function (this: any, ...arguments_: unknown[]): unknown
+
+        wrap(controller, name, async function (this: any, ...args: unknown[]): Promise<unknown>
         {
-            if (render(this, this._currentSurface))
-                return Promise.resolve();
-            return original.apply(this, arguments_);
+            if (await renderLoaded(this, this._currentSurface))
+                return;
+
+            return original.apply(this, args);
         });
     }
+
     const setVisible = controller.setVisible;
     wrap(controller, "setVisible", function (this: any, visible: boolean): void
     {
         setVisible.call(this, visible);
         const view = views.get(this);
         if (view)
-            view.host.style.display = visible ? "" : "none";
+            view.host.hidden = !visible;
     });
 
     const runtime = {
         heartbeat(): void
         {
-            if (lease !== undefined)
-                clearTimeout(lease);
+            if (disposed)
+                return;
+
+            clearTimeout(lease);
             lease = setTimeout(() => runtime.dispose(), LEASE_TIMEOUT);
         },
         status(): RuntimeStatus
         {
-            const active = groups.getActiveNavSurface(windowId);
             return {
-                connected: true,
+                connected: !disposed,
                 mode,
                 enabled: content.enabled && mode === "autonom",
                 revision: content.revision ?? null,
-                activeTab: tabFor(active),
+                activeItem: itemFor(groups.getActiveNavSurface(windowId))?.id ?? null,
                 windowId,
+                editorActive: target.__autonomShell?.editorActive() ?? false,
                 items: effectiveManifest().items.map((item: NativeItem) =>
                 {
                     return { id: item.id, label: item.label, path: item.path };
                 }),
+                sections: content.sections.map((section) => ({
+                    id: section.id,
+                    label: section.label ?? null,
+                    items: section.items.filter((item) => !item.hidden).map((item) => item.id),
+                })),
+                loadedActions: sources.size + scripts.size,
+                compiledScripts: scripts.size,
             };
+        },
+        navigationState(): unknown
+        {
+            return { autonom: savedAutonomSurface, native: savedNativeSurface };
         },
         async update(next: RuntimeConfig): Promise<RuntimeStatus>
         {
+            if (disposed)
+                throw new Error("The UI runtime is disposed.");
+
             if (!next?.content || !next.bridge?.url || !next.bridge?.token)
                 throw new Error("The Command Center runtime needs content and a bridge endpoint.");
-            overlayItems(getManifest.call(manifest).items, { ...next.content, enabled: next.content.enabled && mode === "autonom" });
+
+            overlayItems(getManifest.call(manifest).items, next.content);
+            const nextItems = new Map(visibleItems(next.content).map((item) => [item.id, item]));
+            const active = groups.getActiveNavSurface(windowId);
+            const initial = !initialized ? nextItems.get(previousSurface?.id)?.id
+                ?? (!replacing ? next.content.activeItem : undefined) : undefined;
+            const selectedIds = new Set([active?.id, initial, ...[...views.values()].map((view) => view.surface.id)]);
+            if (next.content.enabled && mode === "autonom")
+            {
+                for (const id of selectedIds)
+                {
+                    const selected = nextItems.get(id);
+                    if (selected?.actions?.left_click.type === "html")
+                        await loadPage(selected, next.content.revision);
+                }
+            }
+
+            if (disposed)
+                throw new Error("The UI runtime is disposed.");
+
+            navigation++;
             content = next.content;
+            items = nextItems;
+            const keys = new Set([...items.values()].filter((item) => item.actions).map(actionKey));
+            for (const key of requests.keys())
+            {
+                if (keys.has(key))
+                    continue;
+
+                requests.delete(key);
+                sources.delete(key);
+            }
+
+            for (const key of scripts.keys())
+                if (!keys.has(key))
+                    scripts.delete(key);
+
             bridge = next.bridge;
             if (!content.enabled)
                 mode = "devin-cloud";
-            else if (mode === "devin-cloud" && generation === 0)
-                mode = "autonom";
+
             generation++;
             cachedManifest = undefined;
             notify();
-            syncAutonomDomState();
-            const active = groups.getActiveNavSurface(windowId);
-            const effective = effectiveManifest().items.find((item: NativeItem) => item.id === active?.id);
-            if (active && (!effective || effective.path !== active.path))
-                groups.setActiveNavSurface(windowId, effective ? { id: effective.id, path: effective.path } : null);
-            for (const view of [...views.values()])
+            renderLayout();
+            const item = effectiveManifest().items.find((entry: NativeItem) => entry.id === active?.id);
+            if (active && (!item || item.path !== active.path))
+                groups.setActiveNavSurface(windowId, item ? { id: item.id, path: item.path } : null);
+
+            for (const [instance, view] of views)
             {
-                if (tabFor(view.surface) && effective?.path === view.surface.path)
-                    render(view.controller, view.surface);
+                const selected = itemFor(view.surface);
+                if (selected)
+                    render(instance, view.surface, !view.host.hidden);
                 else
-                    removeView(view.controller);
-            }
-            if (content.enabled && mode === "autonom" && content.activeTab)
-                await runtime.open(content.activeTab);
-            return runtime.status();
-        },
-        async open(tab: string): Promise<RuntimeStatus>
-        {
-            const item = effectiveManifest().items.find((item: NativeItem) => item.path === `/autonom/${tab}`);
-            if (!content.enabled || mode !== "autonom" || !Object.hasOwn(content.tabs, tab) || !item)
-                throw new Error(`Unknown or hidden custom tab: ${tab}`);
-            await api.executeCommand("devin.desktopNav.openSurface", { id: item.id, path: item.path });
-            return runtime.status();
-        },
-        async setMode(nextMode: "autonom" | "devin-cloud"): Promise<RuntimeStatus>
-        {
-            if (nextMode !== "autonom" && nextMode !== "devin-cloud")
-                throw new Error("Unknown Command Center provider.");
-            if (mode === nextMode)
-                return runtime.status();
-            const active = groups.getActiveNavSurface(windowId);
-            const nativeItems = getManifest.call(manifest).items as NativeItem[];
-
-            if (mode === "autonom")
-            {
-                autonomActiveSurface = (autonomPageVisible && active?.path?.startsWith("/autonom/"))
-                    ? { id: active.id, path: active.path }
-                    : null;
-            }
-            else
-            {
-                devinCloudActiveSurface = active ? { id: active.id, path: active.path } : null;
-            }
-
-            mode = nextMode;
-            generation++;
-            cachedManifest = undefined;
-            notify();
-            syncAutonomDomState();
-
-            if (mode === "devin-cloud")
-            {
-                for (const instance of [...views.keys()])
                     removeView(instance);
-                if (devinCloudActiveSurface)
-                {
-                    await api.executeCommand("devin.desktopNav.openSurface", {
-                        id: devinCloudActiveSurface.id,
-                        path: devinCloudActiveSurface.path,
-                    }).catch(() =>
-                    {
-                        groups.setActiveNavSurface(windowId, devinCloudActiveSurface);
-                    });
-                }
-                else if (active?.path?.startsWith("/autonom/"))
-                {
-                    const fallback = nativeItems.find((item) => item.id === active.id);
-                    if (fallback)
-                        groups.setActiveNavSurface(windowId, { id: fallback.id, path: fallback.path });
-                    else
-                    {
-                        groups.setActiveNavSurface(windowId, null);
-                        groups.newAgentWindowSession?.();
-                    }
-                }
-                else
-                {
-                    groups.setActiveNavSurface(windowId, null);
-                    groups.newAgentWindowSession?.();
-                }
             }
+
+            if (initial && content.enabled && mode === "autonom" && !target.__autonomShell?.editorActive()
+                && items.get(initial)?.actions?.left_click.type === "html")
+                await runtime.open(initial);
+
+            initialized = true;
+            return runtime.status();
+        },
+        async open(id: string): Promise<RuntimeStatus>
+        {
+            if (disposed)
+                throw new Error("The UI runtime is disposed.");
+
+            const item = items.get(id);
+            if (!content.enabled || mode !== "autonom" || item?.actions?.left_click.type !== "html")
+                throw new Error(`Unknown, hidden, or non-HTML item: ${id}`);
+
+            const pending = ++navigation;
+            const key = actionKey(item);
+            await loadPage(item);
+            if (disposed || pending !== navigation || mode !== "autonom"
+                || !items.get(id)?.actions || actionKey(items.get(id)!) !== key)
+                return runtime.status();
+
+            await api.executeCommand("devin.desktopNav.openSurface", { id, path: `/autonom/${id}` });
+            return runtime.status();
+        },
+        async activate(id: string): Promise<void>
+        {
+            if (disposed)
+                throw new Error("The UI runtime is disposed.");
+
+            const item = items.get(id);
+            if (!content.enabled || mode !== "autonom" || !item?.actions?.left_click)
+                throw new Error(`Unknown or hidden UI action: ${id}`);
+
+            if (running.has(id))
+                return;
+
+            running.add(id);
+            try
+            {
+                if (item.actions.left_click.type === "html")
+                    await runtime.open(id);
+                else
+                    await bridgeRequest({ action: "runScript", id, revision: content.revision });
+            }
+            finally
+            {
+                running.delete(id);
+            }
+        },
+        hasScript(id: string, version: string): boolean
+        {
+            const item = items.get(id);
+            return item?.actions?.left_click.type === "js" && item.actions.left_click.version === version
+                && scripts.get(actionKey(item))?.version === version;
+        },
+        setScript(id: string, version: string, run: (context: any) => Promise<unknown>): void
+        {
+            const action = items.get(id)?.actions?.left_click;
+            if (disposed || action?.type !== "js" || action.version !== version)
+                throw new Error("The JS action changed before compilation.");
+
+            scripts.set(actionKey(items.get(id)!), { version, run });
+        },
+        async runScript(id: string, version: string): Promise<void>
+        {
+            const item = items.get(id);
+            const script = item?.actions?.left_click.type === "js" ? scripts.get(actionKey(item)) : undefined;
+            if (disposed || !content.enabled || mode !== "autonom" || !script || script.version !== version)
+                throw new Error("The JS action is not available in this UI snapshot.");
+
+            await script.run(Object.freeze({
+                item: Object.freeze({ id, label: items.get(id)?.label ?? id }),
+                request: bridgeRequest,
+                open: (itemId: string) => runtime.open(itemId),
+                executeCommand: (command: string, ...args: unknown[]) => api.executeCommand(command, ...args),
+                refresh: () => bridgeRequest({ action: "reloadUi" }),
+            }));
+        },
+        async setMode(next: "autonom" | "devin-cloud"): Promise<RuntimeStatus>
+        {
+            if (disposed)
+                throw new Error("The UI runtime is disposed.");
+
+            if (next !== "autonom" && next !== "devin-cloud")
+                throw new Error("Unknown Command Center provider.");
+
+            if (mode === next)
+            {
+                if (next === "autonom" && !groups.getActiveNavSurface(windowId) && content.activeItem)
+                    await runtime.open(content.activeItem);
+
+                return runtime.status();
+            }
+
+            const active = groups.getActiveNavSurface(windowId);
+            if (mode === "autonom")
+                savedAutonomSurface = active;
+            else
+                savedNativeSurface = active;
+
+            mode = next;
+            cachedManifest = undefined;
+            notify();
+            renderLayout();
+            for (const instance of views.keys())
+                removeView(instance);
+
+            const saved = next === "autonom" ? savedAutonomSurface : savedNativeSurface;
+            const item = effectiveManifest().items.find((entry: NativeItem) => entry.id === (saved?.id ?? active?.id));
+            if (item && next === "autonom" && items.get(item.id)?.actions?.left_click.type === "html")
+                await runtime.open(item.id);
+            else if (item)
+                await api.executeCommand("devin.desktopNav.openSurface", { id: item.id, path: item.path });
             else
             {
-                if (autonomActiveSurface && autonomActiveSurface.path.startsWith("/autonom/"))
-                {
-                    const tab = autonomActiveSurface.path.slice(9);
-                    if (Object.hasOwn(content.tabs, tab))
-                        await runtime.open(tab).catch(() => undefined);
-                }
-                else
-                {
-                    for (const view of views.values())
-                        view.host.style.display = "none";
-                    groups.setActiveNavSurface(windowId, null);
-                    groups.newAgentWindowSession?.();
-                }
+                groups.setActiveNavSurface(windowId, null);
+                if (next === "autonom" && content.activeItem)
+                    await runtime.open(content.activeItem);
             }
+
             return runtime.status();
         },
         dispose(): void
         {
-            if (lease !== undefined)
-                clearTimeout(lease);
-            providerObserver?.disconnect();
-            providerRow?.remove();
-            if (keydownListenerAttached)
-            {
-                globalThis.document?.removeEventListener("keydown", onKeyDown, true);
-                keydownListenerAttached = false;
-            }
-            if (acpStoreUnsubscribe)
-            {
-                acpStoreUnsubscribe();
-                acpStoreUnsubscribe = undefined;
-            }
-            const aside = globalThis.document?.querySelector<HTMLElement>('aside[data-slot="sidebar"]');
-            if (aside)
-            {
-                for (const child of Array.from(aside.children) as HTMLElement[])
-                    child.style.display = "";
-            }
-            for (const group of globalThis.document?.querySelectorAll<HTMLElement>('[data-slot="sidebar-group"]') || [])
-                group.style.display = "";
-            for (const button of globalThis.document?.querySelectorAll<HTMLButtonElement>("button") || [])
-            {
-                if (button.parentElement?.className?.includes("max-w-[200px]")
-                    && button.getAttribute("aria-haspopup") === "menu")
-                {
-                    button.style.pointerEvents = "";
-                    button.style.cursor = "";
-                    button.removeAttribute("data-disabled");
-                    button.removeAttribute("aria-disabled");
-                    button.tabIndex = 0;
-                }
-            }
-            overrideStyle?.remove();
-            overrideStyle = undefined;
-            providerObserver = undefined;
-            providerRow = undefined;
+            if (disposed)
+                return;
+
+            disposed = true;
+            clearTimeout(lease);
+            observer?.disconnect();
+            if (observerFrame !== undefined)
+                cancelAnimationFrame(observerFrame);
+
+            globalThis.document?.removeEventListener("click", onClick, true);
+            target.__autonomShell?.dispose();
+            for (const sectionHeaders of headers.values())
+                for (const header of sectionHeaders.values())
+                    header.remove();
+
+            for (const button of globalThis.document?.querySelectorAll<HTMLElement>("button[data-autonom-item]") ?? [])
+                delete button.dataset.autonomItem;
+
+            requests.clear();
+            sources.clear();
+            scripts.clear();
             const active = groups.getActiveNavSurface(windowId);
-            const nativeItems = getManifest.call(manifest).items as NativeItem[];
-            content = { enabled: false, items: [], tabs: {} };
+            content = { enabled: false, sections: [] };
             mode = "devin-cloud";
-            generation++;
-            cachedManifest = undefined;
-            for (const instance of [...views.keys()])
+            for (const instance of views.keys())
                 removeView(instance);
+
             subscription.dispose();
             for (const saved of descriptors.reverse())
             {
                 if (saved.object[saved.name] !== saved.wrapper)
                     continue;
+
                 if (saved.descriptor)
                     Object.defineProperty(saved.object, saved.name, saved.descriptor);
                 else
                     delete saved.object[saved.name];
             }
-            const devinLogo = globalThis.document?.querySelector<SVGSVGElement>(
-                ".windsurf-welcome-container svg.absolute.bottom-full:not([data-autonom-logo])");
-            if (devinLogo)
-                devinLogo.style.display = "";
-            globalThis.document?.querySelector<SVGSVGElement>(".windsurf-welcome-container svg[data-autonom-logo]")?.remove();
-            for (const header of globalThis.document?.querySelectorAll<HTMLElement>("[data-autonom-section]") || [])
-                header.remove();
+
             if (active?.path?.startsWith("/autonom/"))
             {
-                const fallback = nativeItems.find((item) => item.id === active.id);
-                groups.setActiveNavSurface(windowId, fallback
-                    ? { id: fallback.id, path: fallback.path }
-                    : null);
+                const item = getManifest.call(manifest).items.find((entry: NativeItem) => entry.id === active.id);
+                groups.setActiveNavSurface(windowId, item ? { id: item.id, path: item.path } : null);
             }
+
             notify();
-            delete target.__autonomCenter;
+            if (target.__autonomCenter === runtime)
+                delete target.__autonomCenter;
         },
     };
     target.__autonomCenter = runtime;
-    if (content.enabled)
-        syncAutonomDomState();
+    runtime.heartbeat();
     return runtime;
 }
