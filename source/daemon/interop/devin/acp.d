@@ -6,7 +6,7 @@ import daemon.interop.execution;
 import daemon.interop.process;
 import daemon.storage;
 
-import core.stdc.errno : EAGAIN, EINTR, EWOULDBLOCK;
+import core.stdc.errno : errno, EAGAIN, EINTR, EWOULDBLOCK;
 import core.sys.posix.fcntl : O_CREAT, O_EXCL, O_RDWR;
 import core.thread : Thread;
 import core.time : MonoTime, msecs, seconds;
@@ -388,12 +388,10 @@ JSONValue controlRequest(
             deadline = MonoTime.currTime + 30.seconds;
         }
 
-        ptrdiff_t count;
-        try
-            count = connection.receive(buffer);
-        catch (SocketOSException error)
+        immutable count = connection.receive(buffer);
+        if (count == Socket.ERROR)
         {
-            if (error.errorCode == EAGAIN || error.errorCode == EWOULDBLOCK || error.errorCode == EINTR)
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             {
                 if (MonoTime.currTime >= deadline)
                     throw new BackendException("Relay control request timed out");
@@ -401,10 +399,10 @@ JSONValue controlRequest(
                 continue;
             }
 
-            throw new BackendException("Relay control request failed: "~error.msg);
+            throw new BackendException("Relay control request failed");
         }
 
-        if (count <= 0)
+        if (count == 0)
             throw new BackendException("Relay control connection closed");
 
         foreach (byte value; buffer[0..count])
