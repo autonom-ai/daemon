@@ -1,13 +1,12 @@
 module daemon.config;
 
-import daemon.router;
 import daemon.storage;
-import intuit.router : IRouter;
+import intuit.router : IRouter, OpenRouter;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
 
 import core.time : Duration, hours, minutes, seconds;
-import std.algorithm.searching : canFind;
+import std.algorithm.searching : canFind, startsWith;
 import std.array : join;
 import std.ascii : isDigit;
 import std.conv : to;
@@ -27,7 +26,7 @@ Duration parseDuration(string text, string name)
 
     long scale = 1;
     string digits = text;
-    char unit = text[$ - 1];
+    char unit = text[$-1];
     if (!isDigit(unit))
     {
         switch (unit)
@@ -51,7 +50,7 @@ Duration parseDuration(string text, string name)
             throw new Exception(name~" must be a duration such as 30m or 1h");
         }
 
-        digits = text[0 .. $ - 1];
+        digits = text[0..$-1];
     }
 
     long value;
@@ -114,6 +113,58 @@ string readThresholds(string text, string name)
         normalized ~= value.to!string;
 
     return normalized.join(",");
+}
+
+IRouter createRouter(YamlAlgebraic settings)
+{
+    if (settings.kind != YamlAlgebraic.Kind.object)
+        throw new Exception("Router configuration must be a mapping");
+
+    string[string] values;
+    foreach (pair; settings.object.pairs)
+    {
+        if (pair.key.kind != YamlAlgebraic.Kind.string)
+            throw new Exception("Router setting names must be strings");
+
+        string field = pair.key.get!string.idup;
+        if (field in values)
+            throw new Exception("Duplicate router setting: "~field);
+        if (pair.value.kind != YamlAlgebraic.Kind.string)
+            throw new Exception("Router settings must be strings");
+
+        string value = pair.value.get!string.idup;
+        if (value.canFind('\0'))
+            throw new Exception("Invalid router setting");
+
+        switch (field)
+        {
+        case "type", "key", "url", "name", "referer", "title":
+            values[field] = value;
+            break;
+
+        default:
+            throw new Exception("Unknown router setting: "~field);
+        }
+    }
+
+    foreach (field; ["type", "key", "url", "name"])
+    {
+        if (field !in values || !values[field].length)
+            throw new Exception("Router requires "~field);
+    }
+
+    string url = values["url"];
+    if (!((url.startsWith("https://") && url.length > 8) ||
+        (url.startsWith("http://") && url.length > 7)))
+        throw new Exception("Router URL must use HTTP or HTTPS");
+
+    if (values["type"] != "openrouter")
+        throw new Exception("Unsupported router type");
+
+    OpenRouter ret = new OpenRouter(values["key"], url, values["name"]);
+    ret.referer = values.get("referer", null);
+    ret.title = values.get("title", null);
+    return ret;
 }
 
 public:

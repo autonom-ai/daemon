@@ -6,7 +6,6 @@ import daemon.interop.execution;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.session;
 
-
 class DevinSession : Session
 {
 private:
@@ -53,14 +52,14 @@ public:
             if (bridge.observedActive(id))
                 throw new ConflictException("Session is already active");
 
-            bindExecution(bridge.resumeObserved(id, prompt, directory, model, mode));
+            bridge.resumeObserved(id, prompt, directory, model, mode);
             return;
         }
 
         if (isRunning() || bridge.online(id))
             throw new ConflictException("Session is already active");
 
-        bindExecution(bridge.resume(id, prompt, directory, model, null, mode));
+        bridge.resume(id, prompt, directory, model, null, mode);
     }
 
     override Execution steer(string prompt)

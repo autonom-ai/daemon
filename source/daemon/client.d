@@ -160,7 +160,7 @@ void clientTranscript(Request request, Output output)
     string session = execution is null ? id : execution.sessionId;
     if (execution is null && !bridge.access.managed(session))
     {
-        respond(output, JSONValue(["error": JSONValue("Session is not managed by Autonom")]), 404);
+        respondError(output, 404, "Session is not managed by Autonom");
         return;
     }
 
@@ -214,7 +214,7 @@ void clientModels(Request request, Output output)
         respond(output, parseJSON(catalog));
     }
     catch (Exception)
-        respond(output, JSONValue(["error": JSONValue("Could not retrieve the Devin model catalog")]), 503);
+        respondError(output, 503, "Could not retrieve the Devin model catalog");
 }
 
 private:

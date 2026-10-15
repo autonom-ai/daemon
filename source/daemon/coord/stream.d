@@ -122,7 +122,7 @@ private:
         if (tail)
         {
             size_t start = content.indexOf('\n');
-            content = start < 0 ? null : content[start + 1 .. $];
+            content = start < 0 ? null : content[start + 1..$];
         }
 
         Entry[] loaded;
@@ -136,7 +136,7 @@ private:
             }
         }
 
-        window = loaded.length <= MAX_ENTRIES ? loaded : loaded[$ - MAX_ENTRIES .. $];
+        window = loaded.length <= MAX_ENTRIES ? loaded : loaded[$-MAX_ENTRIES..$];
     }
 
 public:
@@ -158,7 +158,7 @@ public:
         if (position >= window.length)
             return null;
 
-        return window[position .. $];
+        return window[position..$];
     }
 
     void append(Entry entry)
@@ -173,6 +173,6 @@ public:
         file.flush();
         window ~= entry;
         if (window.length > MAX_ENTRIES)
-            window = window[$ - MAX_ENTRIES .. $];
+            window = window[$-MAX_ENTRIES..$];
     }
 }

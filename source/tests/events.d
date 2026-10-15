@@ -100,6 +100,20 @@ string[] promptTexts(string workspace)
     return ret;
 }
 
+void waitForPrompt(WakeFixture fixture, string needle)
+{
+    waitUntil(delegate bool()
+    {
+        try
+        {
+            string[] prompts = promptTexts(fixture.fixture.root);
+            return prompts.length && prompts[$-1].canFind(needle);
+        }
+        catch (Exception)
+            return false;
+    });
+}
+
 struct WakeFixture
 {
     Fixture fixture;
@@ -271,10 +285,7 @@ unittest
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, [marlow]);
 
     fixture.events.unread(marlow).length.should == 0;
-    waitUntil(delegate bool()
-    {
-        return invocations(fixture.fixture.root).length == 2;
-    });
+    waitForPrompt(fixture, "- ping from wren: hello");
     JSONValue[] calls = acpCalls(fixture.fixture.root);
     calls[$-2]["method"].str.should == "session/load";
     calls[$-2]["sessionId"].str.should == marlow.session.id;
@@ -307,11 +318,8 @@ unittest
     Room room = fixture.bus.createRoom("general", wren.name);
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, [marlow]);
 
-    waitUntil(delegate bool()
-    {
-        string[] calls = invocations(fixture.fixture.root);
-        return calls.length >= 3;
-    });
+    waitForPrompt(fixture, "- ping from wren: hello");
+    invocations(fixture.fixture.root).length.should == 3;
     string[] prompts = promptTexts(fixture.fixture.root);
     prompts[1].should == "Reply with exactly: OK";
     readText(buildPath(fixture.fixture.root, "compaction-thresholds.txt")).should == fixture.config.compactionThresholds;
@@ -333,10 +341,8 @@ unittest
     Room room = fixture.bus.createRoom("general", wren.name);
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, [marlow]);
 
-    waitUntil(delegate bool()
-    {
-        return invocations(fixture.fixture.root).length >= 3;
-    });
+    waitForPrompt(fixture, "- ping from wren: hello");
+    invocations(fixture.fixture.root).length.should == 3;
     string[] prompts = promptTexts(fixture.fixture.root);
     prompts[1].should == "Reply with exactly: OK";
     readText(buildPath(fixture.fixture.root, "compaction-thresholds.txt")).should == fixture.config.compactionThresholds;
@@ -362,10 +368,7 @@ unittest
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, [marlow]);
 
     fixture.events.unread(marlow).length.should == 0;
-    waitUntil(delegate bool()
-    {
-        return invocations(fixture.fixture.root).length == 2;
-    });
+    waitForPrompt(fixture, "This is a new session in wren's workspace.");
     JSONValue[] calls = acpCalls(fixture.fixture.root);
     size_t created;
     foreach (i, call; calls)
@@ -385,7 +388,6 @@ unittest
     }
 
     modelApplied.should == true;
-    promptTexts(fixture.fixture.root)[$-1].canFind("This is a new session in wren's workspace.").should == true;
 
     fixture.scheduler.adopt("adopted", "/elsewhere").should == false;
     fixture.scheduler.adopt("adopted", fixture.fixture.root).should == true;
@@ -456,11 +458,7 @@ unittest
 
     fixture.schedules.list(marlow).length.should == 0;
     fixture.events.unread(marlow).length.should == 0;
-    waitUntil(delegate bool()
-    {
-        return invocations(fixture.fixture.root).length == 2;
-    });
-    promptTexts(fixture.fixture.root)[$-1].canFind("- clock (scheduled wake)").should == true;
+    waitForPrompt(fixture, "- clock (scheduled wake)");
 
     fixture.scheduler.refresh();
     invocations(fixture.fixture.root).length.should == 2;
@@ -515,12 +513,9 @@ unittest
     invocations(fixture.fixture.root).length.should == 1;
 
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, null);
-    waitUntil(delegate bool()
-    {
-        return invocations(fixture.fixture.root).length == 2;
-    });
+    waitForPrompt(fixture, "- room general from wren: hello");
+    invocations(fixture.fixture.root).length.should == 2;
     string[] prompts = promptTexts(fixture.fixture.root);
-    prompts[$-1].canFind("- room general from wren: hello").should == true;
     prompts[$-1].canFind("You were woken by 1 event").should == true;
 
     fixture.scheduler.directed(marlow, postedEntry(wren, "psst"), wren, null);

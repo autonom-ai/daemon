@@ -47,7 +47,7 @@ void profileSession(Request request, Output output)
 
     Profile profile = profileStore.get(routeParameter!"/api/profiles/<name>/session"(request));
     if (profile is null)
-        respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
+        respondError(output, 404, "Profile not found");
     else if (request.method == Request.Method.Post)
     {
         string session = readField!"id"(request);
@@ -60,7 +60,7 @@ void profileSession(Request request, Output output)
     else if (profile.session !is null)
         respond(output, profile.session.toJSON());
     else
-        respond(output, JSONValue(["error": JSONValue("Profile has no session")]), 404);
+        respondError(output, 404, "Profile has no session");
 }
 
 private:

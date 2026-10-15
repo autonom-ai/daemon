@@ -13,14 +13,18 @@ import std.file;
 import std.json : JSONType, JSONValue;
 import std.typecons : Nullable;
 
-private Session lookupSession(string PATTERN)(Request request, Output output)
+private:
+
+Session lookupSession(string PATTERN)(Request request, Output output)
 {
     Session ret = bridge.findSession(routeParameter!PATTERN(request));
     if (ret is null)
-        respond(output, JSONValue(["error": JSONValue("Session not found")]), 404);
+        respondError(output, 404, "Session not found");
 
     return ret;
 }
+
+public:
 
 @priority(10) @endpoint @route!"/api/sessions/remove"
 void removeSessions(Request request, Output output)
@@ -88,7 +92,7 @@ void resumeSession(Request request, Output output)
     if (!acceptMethod(request, output, [Request.Method.Post]))
         return;
 
-    JSONValue data = readLaunch(request);
+    Launch launch = readLaunch(request);
     string id = routeParameter!"/api/sessions/<id>/resume"(request);
     if (!bridge.access.managed(id) && !bridge.observedSession(id))
         throw new ConflictException("Only sessions started or observed by Autonom may be resumed by Autonom");
@@ -103,10 +107,10 @@ void resumeSession(Request request, Output output)
         throw new ConflictException("Session is already active");
 
     session.resume(
-        data["prompt"].str,
-        data["directory"].str,
-        data["model"].str,
-        data["mode"].str
+        launch.prompt,
+        launch.directory,
+        launch.model,
+        launch.mode
     );
     respond(output, session.toJSON());
 }
@@ -159,7 +163,7 @@ void sessionLog(Request request, Output output)
         return;
 
     if (!exists(session.logPath))
-        respond(output, JSONValue(["error": JSONValue("Session log not found")]), 404);
+        respondError(output, 404, "Session log not found");
     else
         respond(output, JSONValue(["log": JSONValue(readText(session.logPath, 1024 * 1024))]));
 }

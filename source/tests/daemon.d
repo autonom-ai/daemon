@@ -520,10 +520,10 @@ unittest
             lock.close();
     }
 
+    flock(lock.fileno, LOCK_EX).should == 0;
     hookSession(fixture, "session-2");
     mkdirRecurse(buildPath(fixture.root, ".devin"));
     write(buildPath(fixture.root, ".devin", "policy.yml"), "rules:\n  - action: allow\n");
-    flock(lock.fileno, LOCK_EX).should == 0;
     JSONValue gate = JSONValue([
         "hook_event_name": JSONValue("PreToolUse"),
         "session_id": JSONValue("session-2"),
