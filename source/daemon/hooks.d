@@ -17,14 +17,13 @@ import std.json : JSONValue, JSONType;
 private:
 
 enum MCP_PREFIX = "mcp__autonom-coord__";
-enum ORCHESTRATE_PREFIX = "mcp__autonom-orchestrate__";
 enum MAX_INJECTED_EVENTS = 5;
 
 bool coordinationTool(string tool)
-    => tool.startsWith(MCP_PREFIX) || tool.startsWith(ORCHESTRATE_PREFIX);
+    => tool.startsWith(MCP_PREFIX);
 
 bool readsEvents(string tool)
-    => tool == MCP_PREFIX~"read_events" || tool == ORCHESTRATE_PREFIX~"read_events";
+    => tool == MCP_PREFIX~"read_events";
 
 JSONValue hookResponse()
     => JSONValue(cast(JSONValue[string])null);

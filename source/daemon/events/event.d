@@ -109,11 +109,6 @@ public:
         save(profile.name);
     }
 
-    void remove(string profileName)
-    {
-        pending.remove(profileName);
-    }
-
 private:
     Event[][string] pending;
 

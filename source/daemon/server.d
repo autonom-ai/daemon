@@ -8,7 +8,6 @@ import daemon.exception;
 import daemon.policy;
 import daemon.interop.devin;
 import daemon.interop.permission : PermissionStore;
-import daemon.worktree;
 import serverino;
 
 import core.sys.posix.signal : kill, SIGTERM;
@@ -36,7 +35,6 @@ EventStore events;
 ScheduleStore scheduleStore;
 Scheduler scheduler;
 PermissionStore permissions;
-WorktreeManager worktreeManager;
 
 void respond(Output output, JSONValue body, ushort status = 200)
 {
@@ -198,7 +196,6 @@ void stop(Request request, Output output)
     scheduler = new Scheduler(configuration, bridge, profileStore, events, scheduleStore);
     policy = new Policy(configuration);
     permissions = new PermissionStore();
-    worktreeManager = new WorktreeManager(configuration);
     refresh(Request.init);
     scheduler.start();
 }
