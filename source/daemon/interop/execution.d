@@ -60,14 +60,6 @@ void stopExecution(Request request, Output output)
 
 public:
 
-string[string] childEnvironment()
-    => Execution.childEnvironment();
-
-void signalExecution(Pid process, int signal)
-{
-    Execution.signal(process, signal);
-}
-
 enum SCRUB_PREFIXES = [
     "ACP_",
     "ELECTRON_",

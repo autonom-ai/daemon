@@ -312,14 +312,4 @@ public:
         rooms.remove(room.name);
         streams.remove(roomStream(room.name));
     }
-
-    void removeInbox(string profileName)
-    {
-        cursors.remove(profileName);
-        streams.remove(dmStream(profileName));
-        streams.remove(pingStream(profileName));
-        string path = inboxDir(profileName);
-        if (exists(path))
-            rmdirRecurse(path);
-    }
 }

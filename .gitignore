@@ -3,7 +3,6 @@ bin/
 .env
 test-workspace
 .agents/
-.autonom-worktrees/
 .playwright-mcp/
 __pycache__
 
