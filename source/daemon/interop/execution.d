@@ -33,7 +33,7 @@ void getExecution(Request request, Output output)
 
     Execution execution = bridge.execution(routeParameter!"/api/executions/<id>"(request));
     if (execution is null)
-        respond(output, JSONValue(["error": JSONValue("Execution not found")]), 404);
+        respondError(output, 404, "Execution not found");
     else
         respond(output, execution.toJSON());
 }
@@ -47,15 +47,13 @@ void stopExecution(Request request, Output output)
     Execution execution = bridge.execution(routeParameter!"/api/executions/<id>/stop"(request));
     if (execution is null)
     {
-        respond(output, JSONValue(["error": JSONValue("Execution not found")]), 404);
+        respondError(output, 404, "Execution not found");
         return;
     }
 
     execution.requestStop();
     respond(output, execution.toJSON(), 202);
 }
-
-public:
 
 enum ExecutionKind : string
 {

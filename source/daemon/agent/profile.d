@@ -17,7 +17,7 @@ void getProfile(Request request, Output output)
 
     Profile profile = profileStore.get(routeParameter!"/api/profiles/<name>"(request));
     if (profile is null)
-        respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
+        respondError(output, 404, "Profile not found");
     else
         respond(output, profile.toJSON());
 }
@@ -35,7 +35,6 @@ package(daemon.agent):
 
 public:
     const string name;
-    alias session this;
 
     Session session()
         => _session;

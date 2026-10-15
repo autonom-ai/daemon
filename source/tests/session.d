@@ -10,7 +10,7 @@ import unit_threaded : Name, Serial, should, shouldThrow;
 import core.sys.linux.sys.file : flock, LOCK_EX;
 import std.algorithm : canFind;
 import std.array : replicate;
-import std.conv : octal;
+import std.conv : octal, to;
 import std.file;
 import std.json : JSONValue, parseJSON;
 import std.path : buildPath;
@@ -18,6 +18,7 @@ import std.process : environment;
 import std.stdio : File;
 import std.string : splitLines;
 import std.traits : hasUDA;
+import std.uuid : randomUUID;
 
 private:
 
@@ -277,4 +278,37 @@ unittest
     recovered.execution.status.should == ExecutionStatus.Interrupted;
     recovered.status.should == SessionStatus.Failed;
     recovered.exitStatus.isNull.should == true;
+}
+
+@Name("Execution records retain their readable versions and interrupted state")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    mkdirRecurse(fixture.bridge.executionDir);
+    string[] ids;
+    foreach (recordVersion; [1, 2, 3])
+    {
+        string id = randomUUID().toString();
+        ids ~= id;
+        write(buildPath(fixture.bridge.executionDir, id~".json"),
+            `{"version":`~recordVersion.to!string~`,"id":"`~id~`","kind":"print",`~
+            `"workspace":"`~fixture.root~`","model":"","createdAt":"2026-10-15T00:00:00Z",`~
+            `"status":"running","sessionId":"session-`~recordVersion.to!string~`","exitStatus":null,"error":null`~
+            (recordVersion == 1 ? "" : `,"finishedAt":null`)~
+            (recordVersion == 3 ? `,"reply":null,"profile":"","mode":"","trusted":false}` : `}`));
+    }
+
+    Devin restarted = new Devin(fixture.config);
+    scope(exit)
+        restarted.close();
+
+    foreach (index, id; ids)
+    {
+        Execution execution = restarted.execution(id);
+        execution.status.should == ExecutionStatus.Interrupted;
+        execution.sessionId.should == "session-"~(index + 1).to!string;
+    }
 }

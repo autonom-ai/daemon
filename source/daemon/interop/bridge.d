@@ -37,9 +37,6 @@ private:
     Observed[string] observed;
     MonoTime[string] connections;
 
-    string[string] childEnvironment() const
-        => daemon.interop.process.childEnvironment();
-
 protected:
     abstract Session createSession(string id);
 
@@ -210,9 +207,9 @@ public:
         if (closed)
         {
             connections.remove(connection);
-            foreach (id, entry; observed)
+            foreach (id; observed.keys)
             {
-                if (entry.connection == connection)
+                if (observed[id].connection == connection)
                     observed.remove(id);
             }
             return;
@@ -233,15 +230,15 @@ public:
     void sweepObserved()
     {
         MonoTime cutoff = MonoTime.currTime - 30.seconds;
-        foreach (connection, seen; connections)
+        foreach (connection; connections.keys)
         {
-            if (seen < cutoff)
+            if (connections[connection] < cutoff)
                 connections.remove(connection);
         }
 
-        foreach (id, entry; observed)
+        foreach (id; observed.keys)
         {
-            if (entry.connection !in connections)
+            if (observed[id].connection !in connections)
                 observed.remove(id);
         }
     }

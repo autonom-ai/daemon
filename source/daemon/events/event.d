@@ -2,7 +2,6 @@ module daemon.events.event;
 
 import daemon.agent;
 import daemon.config;
-import daemon.coord.access : caller;
 import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
 import daemon.http;
 import daemon.runtime;
@@ -82,7 +81,7 @@ public:
 
         *found ~= event;
         if (found.length > MAX_EVENTS)
-            *found = (*found)[$ - MAX_EVENTS .. $];
+            *found = (*found)[$-MAX_EVENTS..$];
 
         save(profile.name);
     }

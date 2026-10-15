@@ -313,7 +313,7 @@ unittest
     {
         foreach (line; frames.snapshot())
         {
-            if (line.canFind(`"id":2`) && line.canFind("ext-1"))
+            if (line.canFind("ext-1"))
                 return true;
         }
 

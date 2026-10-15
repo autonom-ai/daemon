@@ -20,6 +20,19 @@ public:
 
 enum REPLY_LIMIT = 1024 * 1024;
 
+JSONValue promptParams(string sessionId, string prompt)
+    => JSONValue([
+        "sessionId": JSONValue(sessionId),
+        "prompt": JSONValue([JSONValue(["type": JSONValue("text"), "text": JSONValue(prompt)])])
+    ]);
+
+JSONValue optionParams(string sessionId, string configId, string value)
+    => JSONValue([
+        "sessionId": JSONValue(sessionId),
+        "configId": JSONValue(configId),
+        "value": JSONValue(value)
+    ]);
+
 string normalizeMode(string mode)
 {
     switch (mode)
@@ -174,12 +187,7 @@ ExecutionTask acpTask(
         bound = execution.sessionId;
         applyOptions(agent, created, bound, model, mode);
 
-        long[] pending = [
-            agent.send("session/prompt", JSONValue([
-                "sessionId": JSONValue(bound),
-                "prompt": JSONValue([JSONValue(["type": JSONValue("text"), "text": JSONValue(prompt)])])
-            ]))
-        ];
+        long[] pending = [agent.send("session/prompt", promptParams(bound, prompt))];
         live = true;
         execution.markSteerable();
 
@@ -196,13 +204,7 @@ ExecutionTask acpTask(
             {
                 try
                 {
-                    long sent = agent.send("session/prompt", JSONValue([
-                        "sessionId": JSONValue(bound),
-                        "prompt": JSONValue([JSONValue([
-                            "type": JSONValue("text"),
-                            "text": JSONValue(promptText)
-                        ])])
-                    ]));
+                    long sent = agent.send("session/prompt", promptParams(bound, promptText));
                     pending ~= sent;
                     steered[sent] = true;
                 }
@@ -315,26 +317,15 @@ ExecutionTask controlTask(
 )
 {
     return (Execution execution) {
-        if (mode.length || model.length)
-        {
-            if (mode.length)
-                controlRequest(socketPath, token, "session/set_config_option", JSONValue([
-                    "sessionId": JSONValue(sessionId),
-                    "configId": JSONValue("mode"),
-                    "value": JSONValue(mode)
-                ]), execution);
-            if (model.length)
-                controlRequest(socketPath, token, "session/set_config_option", JSONValue([
-                    "sessionId": JSONValue(sessionId),
-                    "configId": JSONValue("model"),
-                    "value": JSONValue(model)
-                ]), execution);
-        }
+        if (mode.length)
+            controlRequest(socketPath, token, "session/set_config_option",
+                optionParams(sessionId, "mode", mode), execution);
+        if (model.length)
+            controlRequest(socketPath, token, "session/set_config_option",
+                optionParams(sessionId, "model", model), execution);
 
-        JSONValue result = controlRequest(socketPath, token, "session/prompt", JSONValue([
-            "sessionId": JSONValue(sessionId),
-            "prompt": JSONValue([JSONValue(["type": JSONValue("text"), "text": JSONValue(prompt)])])
-        ]), execution);
+        JSONValue result = controlRequest(socketPath, token, "session/prompt",
+            promptParams(sessionId, prompt), execution);
 
         string reason = "stopReason" in result.object && result["stopReason"].type == JSONType.string ?
             result["stopReason"].str : null;
@@ -477,20 +468,14 @@ void applyOptions(AcpClient agent, JSONValue created, string sessionId, string m
     if (requestedMode.length)
     {
         validateOption(created, "mode", requestedMode);
-        agent.request("session/set_config_option", JSONValue([
-            "sessionId": JSONValue(sessionId),
-            "configId": JSONValue("mode"),
-            "value": JSONValue(requestedMode)
-        ]), 15.seconds);
+        agent.request("session/set_config_option",
+            optionParams(sessionId, "mode", requestedMode), 15.seconds);
     }
     if (model.length)
     {
         validateOption(created, "model", model);
-        agent.request("session/set_config_option", JSONValue([
-            "sessionId": JSONValue(sessionId),
-            "configId": JSONValue("model"),
-            "value": JSONValue(model)
-        ]), 15.seconds);
+        agent.request("session/set_config_option",
+            optionParams(sessionId, "model", model), 15.seconds);
     }
 }
 

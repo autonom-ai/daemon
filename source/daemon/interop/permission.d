@@ -29,7 +29,7 @@ void permission(Request request, Output output)
     Permission found = permissions.get(routeParameter!"/api/permissions/<id>"(request));
     if (found is null)
     {
-        respond(output, JSONValue(["error": JSONValue("Permission request not found")]), 404);
+        respondError(output, 404, "Permission request not found");
         return;
     }
 
@@ -37,7 +37,7 @@ void permission(Request request, Output output)
     if (!human && (request.method != Request.Method.Get ||
         request.header.read("x-autonom-session") != found.session))
     {
-        respond(output, JSONValue(["error": JSONValue("Permission request is not owned by this session")]), 403);
+        respondError(output, 403, "Permission request is not owned by this session");
         return;
     }
 

@@ -24,7 +24,7 @@ string canonicalRoomName(string name)
 {
     name = name.strip;
     if (name.length && name[0] == '#')
-        name = name[1 .. $];
+        name = name[1..$];
 
     if (!validName(name))
         throw new InvalidInputException("Invalid room name");
@@ -142,12 +142,12 @@ private:
         if (!position && target.entries.length > limit)
         {
             advance(profile.name, target.name, target.entries.length);
-            return target.entries[$ - limit .. $];
+            return target.entries[$-limit..$];
         }
 
         Entry[] ret = target.since(position);
         if (ret.length > limit)
-            ret = ret[0 .. limit];
+            ret = ret[0..limit];
 
         advance(profile.name, target.name, position + ret.length);
         return ret;
@@ -267,7 +267,7 @@ public:
         ret["name"] = JSONValue(room.name);
         ret["count"] = JSONValue(cast(long)entries.length);
         ret["unread"] = JSONValue(cast(long)unread(target, profile).length);
-        ret["lastTs"] = entries.length ? JSONValue(entries[$ - 1].timestamp) : JSONValue(null);
+        ret["lastTs"] = entries.length ? JSONValue(entries[$-1].timestamp) : JSONValue(null);
         return ret;
     }
 
@@ -308,10 +308,10 @@ public:
 
     void deleteRoom(Room room)
     {
+        string name = roomStream(room.name);
         rmdirRecurse(room.directory);
         rooms.remove(room.name);
-        streams.remove(roomStream(room.name));
-        string name = roomStream(room.name);
+        streams.remove(name);
         foreach (profile, ref positions; cursors)
         {
             if (positions.remove(name))
