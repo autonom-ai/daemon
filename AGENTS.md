@@ -21,7 +21,7 @@
 - The daemon owns one scheduler thread. It only watches due clock times in the coordination files and pokes `POST /api/schedules/refresh` over loopback; the single worker fires due events and launches wakes during its per-request refresh, so all state stays worker-owned.
 - `interop.devin.db` reads model, working directory, title, mode, timestamps, and the main conversation chain from the CLI SQLite database (`arsd-official:sqlite`, opened read-only at `sessions.db` beside `sessionLockDir`). Execution launch values are used only while a new session has no database row. Last activity is not a running-state signal; a foreign held session lock means `loaded`, not `online`.
 - `AUTONOM_CONFIG` selects the required YAML configuration and `AUTONOM_PORT` overrides the default loopback port 8080.
-- `templates/config.yml` is the starting configuration. `devinCommand` and `router` are required; `dataDir` defaults to the config directory and `sessionLockDir` to the Devin XDG data path. `compactOnResume` (boolean) forces compaction before every resume, `offlineStartAfter`/`offlineCompactAfter` accept durations such as `30m` or `1h` or integer seconds, and `repository` names the git repository used for teammate worktrees (defaults to the daemon's working directory).
+- `templates/config.yml` is the starting configuration. `devinCommand` and `router` are required; `dataDir` defaults to the config directory and `sessionLockDir` to the Devin XDG data path. `compactOnResume` (boolean) forces compaction before every resume, and `offlineStartAfter`/`offlineCompactAfter` accept durations such as `30m` or `1h` or integer seconds.
 - `daemon.router` supports `router.type: openrouter` with required `key`, `url`, and `name`; `referer` and `title` are optional. Missing or unsupported router settings fail startup; environment variables and `.env` files are not consulted for router keys.
 - Devin Desktop exports `ACP_BACKEND=windsurf`; unset it for direct CLI checks. The bridge scrubs host prefixes itself.
 - Sessions own their IDs: Serverino request strings can reference reused buffers and cannot be retained as cache keys.
@@ -45,23 +45,6 @@
 - Sessions keep their profile permanently, and removing a session clears the profile binding; lookups work by name or by session.
 - `human` is reserved: no session may register it, and it administers every room.
 
-# Worktrees
-
-- `daemon.worktree` owns per-teammate git worktrees: branches `autonom/<name>` at `.autonom-worktrees/<name>` inside the configured `repository` (defaults to the daemon's working directory), based on HEAD or an explicit `source` ref. Creating a worktree commits a `.gitignore` entry when the repository is clean.
-- `GET/POST /api/worktrees` list and create; `GET/DELETE /api/worktrees/<name>` inspect and remove (`force` query parameter discards uncommitted changes). Removing refuses while a merge involving the worktree is open. Worktree endpoints require the client capability.
-- `POST /api/worktrees/<name>/merge` merges `source` into `target`; a clean merge commits itself and returns `status: merged`. A conflict stages the merge, creates a room named `merge-<target>-<source>` owned by `human` with the involved profiles as members and admins, surfaces a room event for each, and returns `status: conflict` with the conflicted files.
-- `POST /api/worktrees/<name>/merge/abort` resets the target and destroys the conflict room; `.../merge/finish` commits the resolved merge and destroys the room, refusing while unmerged paths remain. Merge state persists in `dataDir/merges.json`.
-- git runs with a scrubbed environment and falls back to an `Autonom <autonom@localhost>` identity so auto-merges work in repositories without configured user identity.
-
-# Orchestration
-
-- `source/mcp/orchestrate.py` is the `autonom-orchestrate` MCP server: stdio JSON-RPC over the daemon's client capability (`dataDir/client.token`), because starting sessions and reading every execution needs control-plane access. It refuses to run without `AUTONOM_RUN_TOKEN`, so only Autonom-managed sessions can start it, and its tools are `team_*` (status, start, stop, wait, remove, worktree and merge helpers, message, models).
-- `dataDir` is discovered from `AUTONOM_DATA_DIR`, then the `dataDir` key in `AUTONOM_CONFIG` (or the XDG config path), then the config directory.
-- `team_start` creates the profile when missing, defaults the directory to the caller's workspace or a named worktree, defaults the model to the caller's model or `swe-2-medium`, and defaults the permission mode to `bypass`; workspace policy still screens every teammate tool call.
-- `team_remove` removes the session, waits for the removal execution, then deletes the profile and its inbox. Teammates reach the orchestrator through rooms, DMs, and pings using their own `autonom-coord` server.
-- `templates/skills/autonom-team/SKILL.md` teaches the orchestration workflow; workspace setup installs it at `.devin/skills/autonom-team/SKILL.md`.
-- Client write endpoints for orchestration: `DELETE /api/client/profiles/<name>` removes a stopped profile and its inbox; `POST /api/client/rooms/<name>/messages` posts as the human operator and can ping profiles.
-
 # Coordination
 
 - Coordination state lives under `dataDir/coord`: `rooms/<name>/{messages.jsonl,profiles.json}` and `inboxes/<profile>/{dms.jsonl,pings.jsonl,cursors.json,events.json,schedules.json}` plus `wakes.json`. Workspaces keep only `.devin/policy.yml` and `.devin/hooks.v1.json`.
@@ -70,7 +53,7 @@
 - Rooms are global and report themselves as unknown to profiles that cannot see them and to non-administrators; only the original owner changes admins.
 - Coordination endpoints take the caller's `session` as a query parameter and require a registered session: `GET/POST /api/rooms`, `GET/DELETE /api/rooms/<name>`, `GET/POST /api/rooms/<name>/messages`, `GET/POST /api/rooms/<name>/membership`, `POST /api/rooms/<name>/admins`, `DELETE /api/rooms/<name>/admins?profile=`, and `GET/POST /api/messages` (`source=dms|pings`).
 - Reading a stream advances the cursor past the entries returned, and a first read starts with the newest `limit` entries. Own posts are never unread; message text is capped at 4000 characters.
-- `PreToolUse` screens every tool call through the workspace policy, then blocks every tool while the session's profile has unread events, except `mcp__autonom-coord__read_events`; it injects `session_id` into `mcp__autonom-coord__*` and `mcp__autonom-orchestrate__*` input, adopts a freshly started session to its profile when its first hook arrives from the wake workspace, and fails closed when profile access cannot be verified. Unmanaged sessions are blocked from both Autonom MCP prefixes.
+- `PreToolUse` screens every tool call through the workspace policy, then blocks every tool while the session's profile has unread events, except `mcp__autonom-coord__read_events`; it injects `session_id` into `mcp__autonom-coord__*` input, adopts a freshly started session to its profile when its first hook arrives from the wake workspace, and fails closed when profile access cannot be verified. Unmanaged sessions are blocked from the Autonom MCP prefix.
 - `UserPromptSubmit` and `PostToolUse` inject an `additionalContext` reminder naming up to five unread events when the session's profile has any; unregistered sessions and sessions with no unread events get `{}`.
 
 # Events

@@ -276,20 +276,6 @@ void roomMessages(Request request, Output output)
     respond(output, posted(entry, targets), 201);
 }
 
-bool postRoomMessage(Request request, Output output, Room room, Profile profile)
-{
-    JSONValue data = readBody(request);
-    onlyFields(data, ["text", "ping"]);
-    Profile[] targets;
-    if (!profileList(pingNames(data), output, targets))
-        return false;
-
-    Entry entry = bus.post(room, profile, messageText(data), targets);
-    scheduler.posted(room, entry, profile, targets);
-    respond(output, posted(entry, targets), 201);
-    return true;
-}
-
 @endpoint @route!(matchesPath!"/api/rooms/<name>/membership")
 void roomMembership(Request request, Output output)
 {

@@ -13,7 +13,6 @@ import daemon.interop.devin.bridge;
 import daemon.interop.execution;
 import daemon.interop.permission;
 import daemon.interop.session;
-import daemon.worktree;
 import serverino;
 
 mixin ServerinoMain!(
@@ -29,6 +28,5 @@ mixin ServerinoMain!(
     daemon.interop.devin.bridge,
     daemon.interop.execution,
     daemon.interop.permission,
-    daemon.interop.session,
-    daemon.worktree
+    daemon.interop.session
 );

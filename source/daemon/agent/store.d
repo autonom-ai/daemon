@@ -396,43 +396,4 @@ public:
 
         save(nextAssignments, nextBindings, committed);
     }
-
-    void remove(Profile profile)
-    {
-        if (profile is null || profile.name == HUMAN_NAME)
-            throw new ProfileConflictException("The human profile cannot be removed");
-        if (profile.session !is null && (profile.session.isRunning() || bridge.online(profile.session.id)))
-            throw new ProfileConflictException("Profile is in use by an active session");
-
-        string path = buildPath(directory, profile.name);
-        if (exists(path))
-        {
-            if (isSymlink(path))
-                throw new Exception("Profile directory must not be a symlink");
-
-            rmdirRecurse(path);
-        }
-
-        string[string] nextAssignments = assignments.dup;
-        string[string] nextBindings = bindings.dup;
-        foreach (id, name; nextAssignments)
-        {
-            if (name == profile.name)
-                nextAssignments.remove(id);
-        }
-
-        nextBindings.remove(profile.name);
-        bool committed;
-        scope(exit)
-        {
-            if (committed)
-            {
-                assignments = nextAssignments;
-                bindings = nextBindings;
-                profiles.remove(profile.name);
-            }
-        }
-
-        save(nextAssignments, nextBindings, committed);
-    }
 }
