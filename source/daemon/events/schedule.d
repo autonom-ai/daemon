@@ -7,7 +7,8 @@ import daemon.coord.access : caller, onlyFields;
 import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
 import daemon.events.event : EventType, parseEventType;
 import daemon.exception;
-import daemon.server;
+import daemon.http;
+import daemon.runtime;
 import daemon.storage;
 import serverino;
 
@@ -42,6 +43,8 @@ void schedules(Request request, Output output)
     if (schedule.isNull)
         return;
 
+    if (scheduler !is null)
+        scheduler.publishNextDue();
     respond(output, schedule.get.toJSON(), 201);
 }
 
@@ -56,7 +59,12 @@ void schedule(Request request, Output output)
     if (removed.isNull)
         respond(output, JSONValue(["error": JSONValue("Schedule not found")]), 404);
     else
+    {
+        if (scheduler !is null)
+            scheduler.publishNextDue();
+
         respond(output, removed.get.toJSON());
+    }
 }
 
 @priority(10) @endpoint @route!"/api/schedules/refresh"
@@ -68,7 +76,6 @@ void refreshSchedules(Request request, Output output)
     if (readBody(request).object.length != 0)
         throw new InvalidInputException("Expected an empty JSON object");
 
-    scheduler.refresh();
     respond(output, JSONValue(cast(JSONValue[string])null));
 }
 
@@ -134,6 +141,21 @@ public:
         *found = remaining;
         save(profile.name);
         return Nullable!Schedule(ret);
+    }
+
+    long nextClock()
+    {
+        long ret = long.max;
+        foreach (profileSchedules; schedules)
+        {
+            foreach (schedule; profileSchedules)
+            {
+                if (schedule.type == EventType.Clock && schedule.next && schedule.next < ret)
+                    ret = schedule.next;
+            }
+        }
+
+        return ret;
     }
 
     Match[] due(SysTime now)

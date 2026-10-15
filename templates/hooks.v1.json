@@ -1,10 +1,10 @@
 {
-  "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/mcp/hook.py\"", "timeout": 20}]}],
-  "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/mcp/hook.py\"", "timeout": 20}]}],
-  "PermissionRequest": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/mcp/hook.py\"", "timeout": 250}]}],
-  "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/mcp/hook.py\"", "timeout": 20}]}],
-  "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/mcp/hook.py\"", "timeout": 20}]}],
-  "PostCompaction": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/mcp/hook.py\"", "timeout": 20}]}],
-  "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/mcp/hook.py\"", "timeout": 20}]}],
-  "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/mcp/hook.py\"", "timeout": 20}]}]
+  "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/daemon/interop/devin/hook.py\" --event PreToolUse", "timeout": 20}]}],
+  "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/daemon/interop/devin/hook.py\" --event PostToolUse", "timeout": 20}]}],
+  "PermissionRequest": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/daemon/interop/devin/hook.py\" --event PermissionRequest", "timeout": 250}]}],
+  "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/daemon/interop/devin/hook.py\" --event UserPromptSubmit", "timeout": 20}]}],
+  "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/daemon/interop/devin/hook.py\" --event Stop", "timeout": 20}]}],
+  "PostCompaction": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/daemon/interop/devin/hook.py\" --event PostCompaction", "timeout": 20}]}],
+  "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/daemon/interop/devin/hook.py\" --event SessionStart", "timeout": 20}]}],
+  "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "ulimit -v 2000000 && python3 \"{{AUTONOM_ROOT}}/source/daemon/interop/devin/hook.py\" --event SessionEnd", "timeout": 20}]}]
 }

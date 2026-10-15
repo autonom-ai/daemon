@@ -9,7 +9,7 @@ import daemon.events.schedule;
 import daemon.events.scheduler;
 import daemon.interop;
 import daemon.interop.devin;
-import daemon.interop.devin.db : SessionMetadata;
+import daemon.interop.metadata : SessionMetadata;
 import tests.common;
 import arsd.sqlite;
 import serverino : endpoint, route;
@@ -21,7 +21,7 @@ import std.algorithm.searching : canFind;
 import std.conv : octal, to;
 import std.datetime : Clock, UTC;
 import std.file;
-import std.json : JSONValue;
+import std.json : JSONValue, parseJSON;
 import std.path : buildPath;
 import std.string : split, splitLines, strip;
 import std.traits : hasUDA;
@@ -30,52 +30,11 @@ import std.typecons : Nullable;
 private:
 
 void installCli(Fixture fixture)
-{
-    write(fixture.config.devinCommand, `#!/bin/sh
-export_path=
-previous=
-prompt=
-for argument do
-    if [ "$previous" = --export ]; then export_path=$argument; fi
-    prompt=$argument
-    previous=$argument
-done
-printf '%s\n' "$@" >> invocations.txt
-printf -- '---\n' >> invocations.txt
-[ -n "$DEVIN_COMPACTION_THRESHOLDS" ] && printf '%s' "$DEVIN_COMPACTION_THRESHOLDS" > compaction-thresholds.txt
-[ "$prompt" = "Reply with exactly: OK" ] && exit 0
-case "$1" in
-    --print)
-        count=0
-        [ -f session-count.txt ] && count=$(cat session-count.txt)
-        count=$((count + 1))
-        printf '%s' "$count" > session-count.txt
-        printf '{"session_id":"session-%s"}' "$count" > "$export_path"
-        exit 0 ;;
-esac
-trap 'exit 0' TERM
-while :; do sleep 0.05; done
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
-}
+    => installFake(fixture);
 
 void installFailingCli(Fixture fixture)
 {
-    write(fixture.config.devinCommand, `#!/bin/sh
-export_path=
-previous=
-for argument do
-    if [ "$previous" = --export ]; then export_path=$argument; fi
-    previous=$argument
-done
-case "$1" in
-    --print)
-        printf '{"session_id":"failed-session"}' > "$export_path"
-        exit 0 ;;
-esac
-exit 7
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
+    write(buildPath(fixture.root, "fail-prompt"), "");
 }
 
 void writeSessionDatabase(
@@ -113,15 +72,32 @@ string[] invocations(string workspace)
     return ret;
 }
 
-bool argument(string call, string value)
+JSONValue[] acpCalls(string workspace)
 {
-    foreach (line; call.splitLines())
+    string path = buildPath(workspace, "acp-calls.jsonl");
+    if (!exists(path))
+        return null;
+
+    JSONValue[] ret;
+    foreach (line; readText(path).splitLines())
     {
-        if (line == value)
-            return true;
+        if (line.strip.length)
+            ret ~= parseJSON(line);
     }
 
-    return false;
+    return ret;
+}
+
+string[] promptTexts(string workspace)
+{
+    string[] ret;
+    foreach (call; acpCalls(workspace))
+    {
+        if ("method" in call.object && call["method"].str == "session/prompt")
+            ret ~= call["text"].str;
+    }
+
+    return ret;
 }
 
 struct WakeFixture
@@ -299,13 +275,15 @@ unittest
     {
         return invocations(fixture.fixture.root).length == 2;
     });
-    string[] calls = invocations(fixture.fixture.root);
-    argument(calls[1], "--resume").should == true;
-    argument(calls[1], marlow.session.id).should == true;
-    calls[1].canFind("Reply with exactly: OK").should == false;
-    calls[1].canFind("You were woken by 1 event").should == true;
-    calls[1].canFind("- ping from wren: hello").should == true;
-    calls[1].canFind("Continue your work.").should == true;
+    JSONValue[] calls = acpCalls(fixture.fixture.root);
+    calls[$-2]["method"].str.should == "session/load";
+    calls[$-2]["sessionId"].str.should == marlow.session.id;
+    calls[$-1]["method"].str.should == "session/prompt";
+    calls[$-1]["sessionId"].str.should == marlow.session.id;
+    calls[$-1]["text"].str.canFind("Reply with exactly: OK").should == false;
+    calls[$-1]["text"].str.canFind("You were woken by 1 event").should == true;
+    calls[$-1]["text"].str.canFind("- ping from wren: hello").should == true;
+    calls[$-1]["text"].str.canFind("Continue your work.").should == true;
 
     fixture.scheduler.adopt("stranger", fixture.fixture.root).should == false;
     fixture.scheduler.posted(room, postedEntry(wren, "again", room.name), wren, [marlow]);
@@ -334,15 +312,12 @@ unittest
         string[] calls = invocations(fixture.fixture.root);
         return calls.length >= 3;
     });
-    string[] calls = invocations(fixture.fixture.root);
-    argument(calls[1], "--resume").should == true;
-    argument(calls[1], marlow.session.id).should == true;
-    calls[1].canFind("Reply with exactly: OK").should == true;
+    string[] prompts = promptTexts(fixture.fixture.root);
+    prompts[1].should == "Reply with exactly: OK";
     readText(buildPath(fixture.fixture.root, "compaction-thresholds.txt")).should == fixture.config.compactionThresholds;
-    argument(calls[2], "--resume").should == true;
-    calls[2].canFind("Reply with exactly: OK").should == false;
-    calls[2].canFind("You were woken by 1 event").should == true;
-    calls[2].canFind("- ping from wren: hello").should == true;
+    prompts[2].canFind("Reply with exactly: OK").should == false;
+    prompts[2].canFind("You were woken by 1 event").should == true;
+    prompts[2].canFind("- ping from wren: hello").should == true;
 }
 
 @Name("compactOnResume forces compaction before every resume")
@@ -362,12 +337,11 @@ unittest
     {
         return invocations(fixture.fixture.root).length >= 3;
     });
-    string[] calls = invocations(fixture.fixture.root);
-    calls[1].canFind("Reply with exactly: OK").should == true;
+    string[] prompts = promptTexts(fixture.fixture.root);
+    prompts[1].should == "Reply with exactly: OK";
     readText(buildPath(fixture.fixture.root, "compaction-thresholds.txt")).should == fixture.config.compactionThresholds;
-    argument(calls[2], "--resume").should == true;
-    calls[2].canFind("Reply with exactly: OK").should == false;
-    calls[2].canFind("- ping from wren: hello").should == true;
+    prompts[2].canFind("Reply with exactly: OK").should == false;
+    prompts[2].canFind("- ping from wren: hello").should == true;
 }
 
 @Name("A stale ping starts a fresh session in the pinging workspace")
@@ -392,12 +366,26 @@ unittest
     {
         return invocations(fixture.fixture.root).length == 2;
     });
-    string[] calls = invocations(fixture.fixture.root);
-    argument(calls[1], "--print").should == true;
-    argument(calls[1], "--model").should == true;
-    argument(calls[1], "SWE-2").should == true;
-    argument(calls[1], "--resume").should == false;
-    calls[1].canFind("This is a new session in wren's workspace.").should == true;
+    JSONValue[] calls = acpCalls(fixture.fixture.root);
+    size_t created;
+    foreach (i, call; calls)
+    {
+        if ("method" in call.object && call["method"].str == "session/new")
+            created = i;
+    }
+
+    bool modelApplied;
+    foreach (call; calls[created + 1..$])
+    {
+        if (call["method"].str == "session/load")
+            modelApplied = false;
+        if (call["method"].str == "session/set_config_option" &&
+            call["configId"].str == "model" && call["value"].str == "SWE-2")
+            modelApplied = true;
+    }
+
+    modelApplied.should == true;
+    promptTexts(fixture.fixture.root)[$-1].canFind("This is a new session in wren's workspace.").should == true;
 
     fixture.scheduler.adopt("adopted", "/elsewhere").should == false;
     fixture.scheduler.adopt("adopted", fixture.fixture.root).should == true;
@@ -472,8 +460,7 @@ unittest
     {
         return invocations(fixture.fixture.root).length == 2;
     });
-    string[] calls = invocations(fixture.fixture.root);
-    calls[1].canFind("- clock (scheduled wake)").should == true;
+    promptTexts(fixture.fixture.root)[$-1].canFind("- clock (scheduled wake)").should == true;
 
     fixture.scheduler.refresh();
     invocations(fixture.fixture.root).length.should == 2;
@@ -532,9 +519,9 @@ unittest
     {
         return invocations(fixture.fixture.root).length == 2;
     });
-    string[] calls = invocations(fixture.fixture.root);
-    calls[1].canFind("- room general from wren: hello").should == true;
-    calls[1].canFind("You were woken by 1 event").should == true;
+    string[] prompts = promptTexts(fixture.fixture.root);
+    prompts[$-1].canFind("- room general from wren: hello").should == true;
+    prompts[$-1].canFind("You were woken by 1 event").should == true;
 
     fixture.scheduler.directed(marlow, postedEntry(wren, "psst"), wren, null);
     fixture.events.unread(marlow).length.should == 1;

@@ -2,28 +2,25 @@ module daemon.interop.execution;
 
 // TODO: Execution records should eventually be replaced by the CLI session database (daemon.interop.devin.db).
 
+import daemon.http;
+import daemon.interop.process;
 import daemon.interop.session;
-import daemon.server;
+import daemon.runtime;
 import daemon.storage;
 import serverino;
 
-import core.stdc.errno : errno, ESRCH, EAGAIN, EINTR;
-import core.sync.mutex;
-import core.sys.linux.sys.prctl : prctl, PR_SET_PDEATHSIG;
 import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_EXCL, O_RDWR;
-import core.sys.posix.signal : kill, SIGKILL, SIGTERM;
-import core.sys.posix.unistd : setpgid;
+import core.sys.posix.signal : SIGKILL, SIGTERM;
+import core.sync.mutex;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
 import std.conv : octal, to;
 import std.datetime : Clock, UTC;
-import std.exception : ErrnoException;
 import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : buildPath;
 import std.process;
 import std.stdio : File;
-import std.string : startsWith;
 import std.uuid;
 
 public:
@@ -60,16 +57,6 @@ void stopExecution(Request request, Output output)
 
 public:
 
-enum SCRUB_PREFIXES = [
-    "ACP_",
-    "ELECTRON_",
-    "OPENROUTER_API_KEY",
-    "VSCODE_",
-    "WINDSURF_",
-    "AUTONOM_RUN_",
-    "AUTONOM_CLIENT_"
-];
-
 enum ExecutionKind : string
 {
     Start = "start",
@@ -89,6 +76,18 @@ enum ExecutionStatus : string
     Interrupted = "interrupted"
 }
 
+struct TaskResult
+{
+    bool cancelled;
+    string error;
+    string reply;
+    JSONValue exitStatus = JSONValue(null);
+}
+
+alias ExecutionTask = TaskResult delegate(Execution execution);
+
+enum STEER_LIMIT = 32;
+
 class Execution
 {
 private:
@@ -99,6 +98,7 @@ private:
         string finishedAt;
         JSONValue exitStatus = JSONValue(null);
         string error;
+        string reply;
     }
 
     const string directory;
@@ -109,6 +109,10 @@ private:
     State _state;
     bool stopRequested;
     bool joined;
+    bool steerable;
+    size_t steerDepth;
+    string[] steering;
+    Duration _timeout = 120.seconds;
 
     State snapshot()
     {
@@ -159,7 +163,7 @@ private:
     JSONValue record(State state)
     {
         return JSONValue([
-            "version": JSONValue(2),
+            "version": JSONValue(3),
             "id": JSONValue(id),
             "kind": JSONValue(cast(string)kind),
             "workspace": JSONValue(workspace),
@@ -170,6 +174,7 @@ private:
             "sessionId": state.sessionId.length ? JSONValue(state.sessionId) : JSONValue(null),
             "exitStatus": state.exitStatus,
             "error": state.error.length ? JSONValue(state.error) : JSONValue(null),
+            "reply": state.reply.length ? JSONValue(state.reply) : JSONValue(null),
             "profile": JSONValue(profileName),
             "mode": JSONValue(mode),
             "trusted": JSONValue(trusted)
@@ -181,77 +186,31 @@ private:
         atomicWrite(buildPath(directory, id~".json"), record(_state).toString());
     }
 
-    void finish(int exitStatus, bool timedOut)
+    void appendLog()
     {
-        synchronized (mutex)
-        {
-            _state.exitStatus = JSONValue(exitStatus);
-            _state.status = stopRequested ? ExecutionStatus.Stopped :
-                exitStatus == 0 && !timedOut ? ExecutionStatus.Succeeded : ExecutionStatus.Failed;
-            _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
-            if (timedOut)
-                _state.error = "CLI command timed out";
-            else if (_state.status == ExecutionStatus.Failed)
-                _state.error = "CLI command failed (exit "~exitStatus.to!string~")";
+        if (!_state.sessionId.length || kind == ExecutionKind.Remove)
+            return;
 
-            if (_state.status == ExecutionStatus.Succeeded &&
-                (kind == ExecutionKind.Start || kind == ExecutionKind.Print))
-            {
-                JSONValue data = readJSON(exportPath, 16 * 1024 * 1024);
-                if (data.type != JSONType.object || "session_id" !in data.object ||
-                    data["session_id"].type != JSONType.string)
-                    throw new Exception("CLI did not export a session ID");
-                Session.validateId(data["session_id"].str);
-                if (_state.sessionId.length && _state.sessionId != data["session_id"].str)
-                    throw new Exception("CLI exported a different session ID");
+        File log = openFile(buildPath(logDirectory, _state.sessionId~".log"), O_RDWR | O_CREAT | O_APPEND);
+        scope(exit)
+            log.close();
 
-                _state.sessionId = data["session_id"].str.idup;
-            }
+        if (exists(outputPath))
+            log.write(readText(outputPath, 1024 * 1024));
+        if (exists(errorPath))
+            log.write(readText(errorPath, 1024 * 1024));
 
-            if (_state.sessionId.length && kind != ExecutionKind.Remove)
-            {
-                File log = openFile(buildPath(logDirectory, _state.sessionId~".log"), O_RDWR | O_CREAT | O_APPEND);
-                scope(exit)
-                    log.close();
-
-                log.write(readText(outputPath, 1024 * 1024));
-                log.write(readText(errorPath, 1024 * 1024));
-                log.flush();
-            }
-
-            save();
-        }
+        log.flush();
     }
 
-    void execute(
-        string[] arguments,
-        string[string] environment,
-        Duration timeout,
-        Execution prerequisite,
-        Execution dependency
-    )
+    void execute(ExecutionTask task, Execution prerequisite, Execution dependency)
     {
-        Pid process;
-        bool timedOut;
-        bool signalled;
-        bool forced;
-        typeof(tryWait(Pid.init)) result;
         try
         {
             if (prerequisite !is null)
                 prerequisite.stop();
             if (dependency !is null)
                 dependency.wait();
-
-            File output = openFile(outputPath, O_RDWR | O_CREAT | O_EXCL);
-            File errors = openFile(errorPath, O_RDWR | O_CREAT | O_EXCL);
-            File exported = openFile(exportPath, O_RDWR | O_CREAT | O_EXCL);
-            scope(exit)
-            {
-                output.close();
-                errors.close();
-                exported.close();
-            }
 
             synchronized (mutex)
             {
@@ -264,62 +223,38 @@ private:
                 }
             }
 
-            File source = File("/dev/null", "r");
-            scope(exit)
-                source.close();
-
-            Config options = Config.newEnv | Config.retainStdin | Config.retainStdout | Config.retainStderr;
-            options.preExecFunction = &createProcessGroup;
-            process = spawnProcess(
-                arguments,
-                source,
-                output,
-                errors,
-                environment,
-                options,
-                workspace.length ? workspace : null
-            );
-
-            MonoTime deadline = MonoTime.currTime + timeout;
-            while (!(result = tryWait(process)).terminated)
-            {
-                bool stopping;
-                synchronized (mutex)
-                    stopping = stopRequested;
-
-                if (!signalled && (stopping || MonoTime.currTime >= deadline))
-                {
-                    timedOut = !stopping;
-                    signal(process, SIGTERM);
-                    signalled = true;
-                    deadline = MonoTime.currTime + 5.seconds;
-                }
-                else if (signalled && !forced && MonoTime.currTime >= deadline)
-                {
-                    signal(process, SIGKILL);
-                    forced = true;
-                }
-
-                Thread.sleep(10.msecs);
-            }
-
-            finish(result.status, timedOut);
-        }
-        catch (Exception)
-        {
-            if (process !is null && !result.terminated)
-            {
-                signal(process, SIGKILL);
-                result.status = std.process.wait(process);
-                result.terminated = true;
-            }
-
+            TaskResult result = task(this);
             synchronized (mutex)
             {
-                _state.status = ExecutionStatus.Failed;
-                _state.exitStatus = result.terminated ? JSONValue(result.status) : JSONValue(null);
+                steerable = false;
+                steering = null;
+                _state.exitStatus = result.exitStatus;
+                _state.reply = result.reply;
                 _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
-                _state.error = "Could not complete execution or validate its session export";
+                if (result.cancelled || stopRequested)
+                    _state.status = ExecutionStatus.Stopped;
+                else if (result.error.length)
+                {
+                    _state.status = ExecutionStatus.Failed;
+                    _state.error = result.error;
+                }
+                else
+                    _state.status = ExecutionStatus.Succeeded;
+
+                save();
+            }
+
+            appendLog();
+        }
+        catch (Exception error)
+        {
+            synchronized (mutex)
+            {
+                steerable = false;
+                steering = null;
+                _state.status = stopRequested ? ExecutionStatus.Stopped : ExecutionStatus.Failed;
+                _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
+                _state.error = error.msg.idup;
                 try
                     save();
                 catch (Exception)
@@ -376,6 +311,69 @@ public:
         }
     }
 
+    package(daemon.interop) bool stopped()
+    {
+        synchronized (mutex)
+            return stopRequested;
+    }
+
+    package(daemon.interop) Duration timeout()
+        => _timeout;
+
+    package(daemon.interop) void markSteerable(bool value = true)
+    {
+        synchronized (mutex)
+            steerable = value;
+    }
+
+    package(daemon.interop) string[] takeSteering()
+    {
+        synchronized (mutex)
+        {
+            string[] ret = steering;
+            steering = null;
+            return ret;
+        }
+    }
+
+    bool enqueueSteer(string prompt)
+    {
+        synchronized (mutex)
+        {
+            if (!steerable || stopRequested || _state.status != ExecutionStatus.Running ||
+                steerDepth >= STEER_LIMIT)
+                return false;
+
+            steerDepth++;
+            steering ~= prompt.idup;
+            return true;
+        }
+    }
+
+    package(daemon.interop) void steerDone()
+    {
+        synchronized (mutex)
+            if (steerDepth)
+                steerDepth--;
+    }
+
+    package(daemon.interop) string[] closeSteering()
+    {
+        synchronized (mutex)
+        {
+            steerable = false;
+            string[] ret = steering;
+            steering = null;
+            return ret;
+        }
+    }
+
+    bool acceptingSteer()
+    {
+        synchronized (mutex)
+            return steerable;
+    }
+
     ExecutionStatus status()
         => snapshot.status;
 
@@ -391,58 +389,29 @@ public:
     bool running()
         => status == ExecutionStatus.Running || status == ExecutionStatus.Stopping;
 
-    string exportPath() const
-        => buildPath(directory, id~".export");
-
     string outputPath() const
         => buildPath(directory, id~".out");
 
     string errorPath() const
         => buildPath(directory, id~".err");
 
-    package(daemon.interop) static string[string] childEnvironment() nothrow
+    void start(
+        ExecutionTask task,
+        Duration timeout = 120.seconds,
+        Execution prerequisite = null,
+        Execution dependency = null
+    )
     {
-        string[string] ret;
-        try
-        {
-            ret = environment.toAA();
-            foreach (name; ret.keys)
-            {
-                foreach (prefix; SCRUB_PREFIXES)
-                {
-                    if (name.startsWith(prefix))
-                    {
-                        ret.remove(name);
-                        break;
-                    }
-                }
-            }
-        }
-        catch (Exception)
-        {
-        }
-
-        return ret;
-    }
-
-    package(daemon.interop) static bool createProcessGroup() nothrow @nogc @trusted
-    {
-        return setpgid(0, 0) == 0 && prctl(
-            PR_SET_PDEATHSIG,
-            SIGTERM,
-            0,
-            0,
-            0
-        ) == 0;
-    }
-
-    package(daemon.interop) static void signal(Pid process, int signal)
-    {
-        if (process !is null && process.processID > 0)
-        {
-            if (kill(-process.processID, signal) != 0 && errno != ESRCH)
-                throw new ErrnoException("Could not signal execution");
-        }
+        mkdirRecurse(directory);
+        setAttributes(directory, octal!"700");
+        mkdirRecurse(logDirectory);
+        setAttributes(logDirectory, octal!"700");
+        _timeout = timeout;
+        save();
+        monitor = new Thread({
+            execute(task, prerequisite, dependency);
+        });
+        monitor.start();
     }
 
     void start(
@@ -453,19 +422,11 @@ public:
         Execution dependency = null
     )
     {
-        mkdirRecurse(directory);
-        setAttributes(directory, octal!"700");
-        mkdirRecurse(logDirectory);
-        setAttributes(logDirectory, octal!"700");
         string[] owned = arguments.dup;
         foreach (ref argument; owned)
             argument = argument.idup;
 
-        save();
-        monitor = new Thread({
-            execute(owned, environment, timeout, prerequisite, dependency);
-        });
-        monitor.start();
+        start(processTask(owned, environment, workspace), timeout, prerequisite, dependency);
     }
 
     void requestStop()
@@ -504,8 +465,14 @@ public:
         State state = snapshot;
         JSONValue ret = record(state);
         ret.object.remove("version");
-        ret["reply"] = state.status == ExecutionStatus.Succeeded && kind == ExecutionKind.Print ?
-            JSONValue(readText(outputPath, 1024 * 1024)) : JSONValue(null);
+        if (state.reply.length)
+            ret["reply"] = JSONValue(state.reply);
+        else if (state.status == ExecutionStatus.Succeeded && kind == ExecutionKind.Print &&
+            exists(outputPath))
+            ret["reply"] = JSONValue(readText(outputPath, 1024 * 1024));
+        else
+            ret["reply"] = JSONValue(null);
+
         return ret;
     }
 
@@ -513,7 +480,8 @@ public:
     {
         JSONValue data = readJSON(buildPath(directory, id~".json"));
         if (data.type != JSONType.object || "version" !in data.object ||
-            (data["version"] != JSONValue(1) && data["version"] != JSONValue(2)))
+            (data["version"] != JSONValue(1) && data["version"] != JSONValue(2) &&
+            data["version"] != JSONValue(3)))
             throw new Exception("Invalid execution record");
 
         foreach (field; ["id", "kind", "workspace", "model", "createdAt", "status"])
@@ -531,9 +499,11 @@ public:
             throw new Exception("Invalid execution exit");
         if (!data["error"].isNull && data["error"].type != JSONType.string)
             throw new Exception("Invalid execution error");
-        if (data["version"] == JSONValue(2) &&
+        if (data["version"] != JSONValue(1) &&
             ("finishedAt" !in data.object || (!data["finishedAt"].isNull && data["finishedAt"].type != JSONType.string)))
             throw new Exception("Invalid execution finish");
+        if ("reply" in data.object && !data["reply"].isNull && data["reply"].type != JSONType.string)
+            throw new Exception("Invalid execution reply");
 
         Execution ret = new Execution(
             directory,
@@ -555,11 +525,13 @@ public:
         if ("trusted" in data.object &&
             (data["trusted"].type == JSONType.true_ || data["trusted"].type == JSONType.false_))
             ret.trusted = data["trusted"].boolean;
+        if ("reply" in data.object && !data["reply"].isNull)
+            ret._state.reply = data["reply"].str.idup;
 
         ret._state.status = parseStatus(data["status"].str);
         ret._state.exitStatus = data["exitStatus"];
         ret._state.error = data["error"].isNull ? null : data["error"].str;
-        if (data["version"] == JSONValue(2) && !data["finishedAt"].isNull)
+        if ("finishedAt" in data.object && !data["finishedAt"].isNull)
             ret._state.finishedAt = data["finishedAt"].str.idup;
 
         if (ret.running)
@@ -572,4 +544,87 @@ public:
 
         return ret;
     }
+}
+
+package(daemon.interop):
+
+ExecutionTask processTask(string[] arguments, string[string] environment, string workspace)
+{
+    return (Execution execution) {
+        Pid process;
+        bool timedOut;
+        bool signalled;
+        bool forced;
+        typeof(tryWait(Pid.init)) result;
+        try
+        {
+            File output = openFile(execution.outputPath, O_RDWR | O_CREAT | O_EXCL);
+            File errors = openFile(execution.errorPath, O_RDWR | O_CREAT | O_EXCL);
+            scope(exit)
+            {
+                output.close();
+                errors.close();
+            }
+
+            File source = File("/dev/null", "r");
+            scope(exit)
+                source.close();
+
+            Config options = Config.newEnv | Config.retainStdin | Config.retainStdout | Config.retainStderr;
+            options.preExecFunction = &createProcessGroup;
+            process = spawnProcess(
+                arguments,
+                source,
+                output,
+                errors,
+                environment,
+                options,
+                workspace.length ? workspace : null
+            );
+
+            MonoTime deadline = MonoTime.currTime + execution.timeout;
+            while (!(result = tryWait(process)).terminated)
+            {
+                bool stopping = execution.stopped;
+                if (!signalled && (stopping || MonoTime.currTime >= deadline))
+                {
+                    timedOut = !stopping;
+                    signal(process, SIGTERM);
+                    signalled = true;
+                    deadline = MonoTime.currTime + 5.seconds;
+                }
+                else if (signalled && !forced && MonoTime.currTime >= deadline)
+                {
+                    signal(process, SIGKILL);
+                    forced = true;
+                }
+
+                Thread.sleep(10.msecs);
+            }
+
+            TaskResult ret;
+            ret.exitStatus = JSONValue(result.status);
+            ret.cancelled = execution.stopped;
+            if (timedOut)
+            {
+                ret.cancelled = false;
+                ret.error = "CLI command timed out";
+            }
+            else if (result.status != 0)
+                ret.error = "CLI command failed (exit "~result.status.to!string~")";
+
+            return ret;
+        }
+        catch (Exception error)
+        {
+            if (process !is null && !result.terminated)
+            {
+                signal(process, SIGKILL);
+                result.status = std.process.wait(process);
+                result.terminated = true;
+            }
+
+            throw error;
+        }
+    };
 }

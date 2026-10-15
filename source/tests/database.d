@@ -1,6 +1,7 @@
 module tests.database;
 
 import daemon.interop.devin.db;
+import daemon.interop.metadata : SessionMetadata;
 import tests.common;
 import arsd.sqlite;
 import unit_threaded : Name, should;

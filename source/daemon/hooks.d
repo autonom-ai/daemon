@@ -1,12 +1,13 @@
 module daemon.hooks;
 
 import daemon.agent;
-import daemon.events.event : Event, EventType;
+import daemon.events.event : Event;
 import daemon.exception;
 import daemon.interop.execution;
 import daemon.interop.session;
 import daemon.policy;
-import daemon.server;
+import daemon.http;
+import daemon.runtime;
 import serverino;
 
 import std.algorithm.searching : startsWith;
@@ -33,7 +34,7 @@ bool acceptHook(Request request, Output output, string event, out JSONValue data
         return false;
     }
 
-    data = readBody(request);
+    data = readBody(request, 16 * 1024 * 1024);
     if ("hook_event_name" !in data.object || data["hook_event_name"].type != JSONType.string)
         throw new InvalidInputException("Expected a string hook_event_name");
     if (data["hook_event_name"].str != event)
@@ -73,7 +74,7 @@ JSONValue hookInput(JSONValue data)
     return data["tool_input"];
 }
 
-string hookDirectory(JSONValue data, string session, Request request)
+string hookDirectory(JSONValue data, string session)
 {
     if (!session.length)
         return null;
@@ -86,31 +87,6 @@ string hookDirectory(JSONValue data, string session, Request request)
         return bridge.sessionMetadata(session).directory;
     catch (Exception)
         return null;
-}
-
-bool blockedByEvents(string tool, string session, Output output)
-{
-    if (!session.length || tool == MCP_PREFIX~"read_events")
-        return false;
-
-    Profile profile;
-    try
-    {
-        if (events is null)
-            throw new Exception("Coordination is unavailable");
-        profile = profileStore.profileFor(session);
-    }
-    catch (Exception)
-    {
-        respond(output, block("Profile access could not be verified"));
-        return true;
-    }
-
-    if (profile is null || !events.unread(profile).length)
-        return false;
-
-    respond(output, block("You have unread events - read them first: call read_events"));
-    return true;
 }
 
 bool blockedByPolicy(string directory, string tool, JSONValue input, Output output)
@@ -137,24 +113,6 @@ bool blockedByPolicy(string directory, string tool, JSONValue input, Output outp
     {
         respond(output, block("Policy check failed: "~error.msg));
         return true;
-    }
-}
-
-string eventSummary(Event event)
-{
-    final switch (event.type)
-    {
-    case EventType.Ping:
-        return "ping from "~event.from;
-
-    case EventType.Room:
-        return "room "~event.room~" from "~event.from;
-
-    case EventType.DM:
-        return "dm from "~event.from;
-
-    case EventType.Clock:
-        return "clock";
     }
 }
 
@@ -232,10 +190,7 @@ void preToolUse(Request request, Output output)
     }
 
     string session = hookSession(data);
-    if (blockedByEvents(tool, session, output))
-        return;
-
-    string directory = hookDirectory(data, session, request);
+    string directory = hookDirectory(data, session);
     if (blockedByPolicy(directory, tool, hookInput(data), output))
         return;
 
