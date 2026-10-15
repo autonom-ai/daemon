@@ -1,8 +1,3 @@
 {
-  "mcpServers": {
-    "autonom-coord": {
-      "command": "python3",
-      "args": ["{{AUTONOM_ROOT}}/source/mcp/server.py"]
-    }
-  }
+  "mcpServers": {}
 }

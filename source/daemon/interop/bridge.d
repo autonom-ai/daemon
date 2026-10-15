@@ -3,6 +3,7 @@ module daemon.interop.bridge;
 import daemon.exception;
 import daemon.interop.access;
 import daemon.interop.execution;
+import daemon.interop.process;
 import daemon.interop.session;
 import daemon.storage;
 
@@ -10,7 +11,7 @@ import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_RDWR;
 import core.sys.posix.signal : SIGKILL;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
-import std.algorithm : any, endsWith, sort, startsWith;
+import std.algorithm : endsWith, sort;
 import std.array : join;
 import std.conv : to;
 import std.file;
@@ -22,13 +23,22 @@ import std.uuid;
 abstract class Bridge
 {
 private:
+    struct Observed
+    {
+        string connection;
+        string directory;
+        bool active;
+    }
+
     Session[string] sessions;
     Execution[string] executions;
     bool[string] collected;
     bool[string] removed;
+    Observed[string] observed;
+    MonoTime[string] connections;
 
     string[string] childEnvironment() const
-        => Execution.childEnvironment();
+        => daemon.interop.process.childEnvironment();
 
 protected:
     abstract Session createSession(string id);
@@ -51,13 +61,7 @@ protected:
         );
     }
 
-    Execution launch(
-        Execution execution,
-        string[] arguments,
-        Execution prerequisite = null,
-        Execution dependency = null,
-        string[string] environment = null
-    )
+    void checkCapacity()
     {
         size_t active;
         foreach (entry; executions)
@@ -65,6 +69,17 @@ protected:
 
         if (active >= 8)
             throw new ConflictException("Execution capacity reached");
+    }
+
+    Execution launchProcess(
+        Execution execution,
+        string[] arguments,
+        Execution prerequisite = null,
+        Execution dependency = null,
+        string[string] environment = null
+    )
+    {
+        checkCapacity();
         string[string] child = childEnvironment();
         child.remove("AUTONOM_CLIENT_TOKEN");
         child["AUTONOM_RUN_TOKEN"] = access.begin(execution);
@@ -82,19 +97,30 @@ protected:
         return execution;
     }
 
+    Execution launchTask(
+        Execution execution,
+        ExecutionTask task,
+        Execution prerequisite = null,
+        Execution dependency = null
+    )
+    {
+        checkCapacity();
+        execution.start(task, executionTimeout, prerequisite, dependency);
+        executions[execution.id] = execution;
+        return execution;
+    }
+
 public:
     Access access;
     Duration executionTimeout = 30 * 60.seconds;
     const string command;
     const string logDir;
     const string executionDir;
-    const string[] scrubPrefixes;
 
-    this(string command, string logDir, const string[] scrubPrefixes = null)
+    this(string command, string logDir)
     {
         this.command = command;
         this.logDir = logDir;
-        this.scrubPrefixes = scrubPrefixes;
         access = new Access(dirName(logDir));
         executionDir = buildPath(dirName(logDir), "executions");
         if ((exists(logDir) && isSymlink(logDir)) ||
@@ -134,8 +160,12 @@ public:
         if (id in removed)
             return null;
 
-        Session* found = id in sessions;
-        return found is null ? null : *found;
+        if (Session* found = id in sessions)
+            return *found;
+        if (id in observed)
+            return session(id);
+
+        return null;
     }
 
     Execution execution(string id)
@@ -147,6 +177,85 @@ public:
 
     bool isRemoved(string id)
         => (id in removed) !is null;
+
+    bool observedSession(string id)
+        => (id in observed) !is null;
+
+    bool observedActive(string id)
+    {
+        Observed* found = id in observed;
+        return found !is null && found.active;
+    }
+
+    string observedConnection(string id)
+    {
+        Observed* found = id in observed;
+        return found is null ? null : found.connection;
+    }
+
+    string observedDirectory(string id)
+    {
+        Observed* found = id in observed;
+        return found is null ? null : found.directory;
+    }
+
+    void observeConnection(string connection, string[] ids, string[string] directories,
+        bool[string] active, bool closed)
+    {
+        try
+            UUID(connection);
+        catch (Exception)
+            throw new InvalidInputException("Invalid connection ID");
+
+        if (closed)
+        {
+            connections.remove(connection);
+            foreach (id, entry; observed)
+            {
+                if (entry.connection == connection)
+                    observed.remove(id);
+            }
+            return;
+        }
+
+        connections[connection.idup] = MonoTime.currTime;
+        foreach (id; ids)
+        {
+            Session.validateId(id);
+            observed[id.idup] = Observed(
+                connection.idup,
+                directories.get(id, null),
+                active.get(id, false)
+            );
+        }
+    }
+
+    void sweepObserved()
+    {
+        MonoTime cutoff = MonoTime.currTime - 30.seconds;
+        foreach (connection, seen; connections)
+        {
+            if (seen < cutoff)
+                connections.remove(connection);
+        }
+
+        foreach (id, entry; observed)
+        {
+            if (entry.connection !in connections)
+                observed.remove(id);
+        }
+    }
+
+    string[] sessionIds()
+    {
+        bool[string] ids;
+        foreach (id; access.ids)
+            ids[id] = true;
+        foreach (id, entry; observed)
+            ids[id] = true;
+
+        return ids.keys;
+    }
 
     Execution[] listExecutions(string directory = null)
     {
@@ -172,6 +281,7 @@ public:
 
     string[] collect()
     {
+        sweepObserved();
         Execution[] ready;
         foreach (execution; executions)
         {
@@ -282,7 +392,7 @@ public:
         }
 
         Config options = Config.newEnv | Config.retainStdout | Config.retainStderr;
-        options.preExecFunction = &Execution.createProcessGroup;
+        options.preExecFunction = &createProcessGroup;
         Pid process = spawnProcess(
             [command]~arguments,
             File("/dev/null", "r"),
@@ -297,7 +407,7 @@ public:
         {
             if (!finished)
             {
-                Execution.signal(process, SIGKILL);
+                signal(process, SIGKILL);
                 wait(process);
             }
         }

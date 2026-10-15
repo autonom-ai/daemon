@@ -20,3 +20,5 @@ docs/*
 # Launcher build output and dependencies.
 source/launcher/node_modules/
 /dist/
+
+research/*

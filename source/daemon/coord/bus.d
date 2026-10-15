@@ -311,5 +311,11 @@ public:
         rmdirRecurse(room.directory);
         rooms.remove(room.name);
         streams.remove(roomStream(room.name));
+        string name = roomStream(room.name);
+        foreach (profile, ref positions; cursors)
+        {
+            if (positions.remove(name))
+                saveCursors(profile);
+        }
     }
 }

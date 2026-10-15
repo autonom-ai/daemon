@@ -5,9 +5,9 @@ import daemon.config;
 import daemon.coord;
 import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
 import daemon.events.event : Event, EventStore, EventType;
-import daemon.events.schedule : SCHEDULES_FILE, Schedule, ScheduleStore;
+import daemon.events.schedule : Schedule, ScheduleStore;
 import daemon.interop.devin;
-import daemon.interop.devin.db : SessionMetadata;
+import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.execution;
 import daemon.interop.session;
 import daemon.storage;
@@ -45,6 +45,7 @@ public:
         this.schedules = schedules;
         this.port = environment.get("AUTONOM_PORT", "8080");
         loadWakes();
+        publishNextDue();
     }
 
     void start()
@@ -81,6 +82,12 @@ public:
         }
 
         reconcile();
+        publishNextDue();
+    }
+
+    void publishNextDue()
+    {
+        atomicStore(nextDue, schedules.nextClock());
     }
 
     void posted(
@@ -231,6 +238,7 @@ private:
     PendingWake[] pendingWakes;
     Thread thread;
     shared bool stopping;
+    shared long nextDue = long.max;
     string port;
 
     string wakesPath() const
@@ -613,45 +621,6 @@ private:
         }
     }
 
-    long nextClock()
-    {
-        long ret = long.max;
-        string inboxes = buildPath(schedules.directory, "inboxes");
-        if (!exists(inboxes))
-            return ret;
-
-        foreach (DirEntry entry; dirEntries(inboxes, SpanMode.shallow))
-        {
-            if (!entry.isDir || entry.isSymlink)
-                continue;
-
-            string path = buildPath(entry.name, SCHEDULES_FILE);
-            if (!exists(path))
-                continue;
-
-            JSONValue data;
-            try
-                data = readJSON(path, 4 * 1024 * 1024);
-            catch (Exception)
-                continue;
-
-            if (data.type != JSONType.object || "schedules" !in data.object ||
-                data["schedules"].type != JSONType.array)
-                continue;
-
-            foreach (scheduleJSON; data["schedules"].array)
-            {
-                Schedule schedule;
-                if (!Schedule.parse(scheduleJSON, schedule))
-                    continue;
-                if (schedule.type == EventType.Clock && schedule.next && schedule.next < ret)
-                    ret = schedule.next;
-            }
-        }
-
-        return ret;
-    }
-
     void poke()
     {
         try
@@ -677,7 +646,7 @@ private:
             if (atomicLoad(stopping))
                 break;
 
-            if (nextClock() <= Clock.currTime(UTC()).stdTime / HECTONANOSECONDS_PER_MILLISECOND)
+            if (atomicLoad(nextDue) <= Clock.currTime(UTC()).stdTime / HECTONANOSECONDS_PER_MILLISECOND)
                 poke();
         }
     }
