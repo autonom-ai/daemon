@@ -19,12 +19,6 @@ private:
 enum MCP_PREFIX = "mcp__autonom-coord__";
 enum MAX_INJECTED_EVENTS = 5;
 
-bool coordinationTool(string tool)
-    => tool.startsWith(MCP_PREFIX);
-
-bool readsEvents(string tool)
-    => tool == MCP_PREFIX~"read_events";
-
 JSONValue hookResponse()
     => JSONValue(cast(JSONValue[string])null);
 
@@ -50,7 +44,7 @@ bool acceptHook(Request request, Output output, string event, out JSONValue data
     if (execution is null)
     {
         bool blocked = event == "PreToolUse" &&
-            (coordinationTool(hookTool(data)) || request.header.read("x-autonom-run").length ||
+            (hookTool(data).startsWith(MCP_PREFIX) || request.header.read("x-autonom-run").length ||
             bridge.access.managed(session));
         respond(output, blocked ? block("Only sessions started by Autonom may use Autonom tools") : hookResponse());
         return false;
@@ -96,7 +90,7 @@ string hookDirectory(JSONValue data, string session, Request request)
 
 bool blockedByEvents(string tool, string session, Output output)
 {
-    if (!session.length || readsEvents(tool))
+    if (!session.length || tool == MCP_PREFIX~"read_events")
         return false;
 
     Profile profile;
@@ -248,7 +242,7 @@ void preToolUse(Request request, Output output)
     if (session.length && directory.length)
         scheduler.adopt(session, directory);
 
-    if (coordinationTool(tool) && session.length)
+    if (tool.startsWith(MCP_PREFIX) && session.length)
     {
         respond(output, JSONValue([
             "hookSpecificOutput": JSONValue([
