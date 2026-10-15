@@ -9,7 +9,6 @@ import std.json : JSONType, JSONValue;
 import std.path : buildPath;
 import std.uni : sicmp;
 
-
 private:
 
 enum MEMBERSHIP_FILE = "profiles.json";

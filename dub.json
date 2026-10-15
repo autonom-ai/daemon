@@ -4,7 +4,7 @@
 			"excludedSourceFiles": [
 				"source/tests/**",
 				"source/evals/**",
-				"source/daemon/relay.d"
+				"source/daemon/relay/**"
 			],
 			"mainSourceFile": "source/daemon/app.d",
 			"name": "daemon",
@@ -20,7 +20,7 @@
 			},
 			"excludedSourceFiles": [
 				"source/daemon/app.d",
-				"source/daemon/relay.d",
+				"source/daemon/relay/**",
 				"source/evals/**"
 			],
 			"mainSourceFile": "bin/ut.d",
@@ -43,7 +43,7 @@
 				"source/tests/**",
 				"source/evals/**"
 			],
-			"mainSourceFile": "source/daemon/relay.d",
+			"mainSourceFile": "source/daemon/relay/package.d",
 			"name": "relay",
 			"sourcePaths": [
 				"source/daemon"
