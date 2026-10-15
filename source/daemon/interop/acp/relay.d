@@ -96,15 +96,26 @@ int runRelay(
         char[] consumeHead;
         string consumed;
         int state = injection is null ? FORWARDING : DECIDING;
+        shared(bool)* stopping = &aborted;
+        MonoTime stopAt;
         for (;;)
         {
-            if (atomicLoad(aborted))
+            if (stopping !is null && atomicLoad(*stopping))
+            {
+                stopping = null;
+                stopAt = MonoTime.currTime + 2.seconds;
+            }
+            if (stopping is null && MonoTime.currTime >= stopAt)
                 break;
 
             pollfd watch = pollfd(fromChildFd, POLLIN);
-            int ready = poll(&watch, 1, 100);
+            int ready = poll(&watch, 1, stopping is null ? 0 : 100);
             if (ready == 0)
+            {
+                if (stopping is null)
+                    break;
                 continue;
+            }
             if (ready < 0)
             {
                 if (errno == EINTR)
@@ -231,9 +242,9 @@ int runRelay(
 
                     ubyte[] leading = cast(ubyte[])head;
                     head = null;
-                    if (!writeBounded(outputFd, leading, &aborted) ||
-                        !writeBounded(outputFd, rest, &aborted) ||
-                        (ended && !writeBounded(outputFd, cast(ubyte[])"\n", &aborted)))
+                    if (!writeBounded(outputFd, leading, stopping) ||
+                        !writeBounded(outputFd, rest, stopping) ||
+                        (ended && !writeBounded(outputFd, cast(ubyte[])"\n", stopping)))
                     {
                         atomicStore(broken, true);
                         break;
@@ -249,8 +260,8 @@ int runRelay(
                     continue;
                 }
 
-                if (!writeBounded(outputFd, segment, &aborted) ||
-                    (ended && !writeBounded(outputFd, cast(ubyte[])"\n", &aborted)))
+                if (!writeBounded(outputFd, segment, stopping) ||
+                    (ended && !writeBounded(outputFd, cast(ubyte[])"\n", stopping)))
                 {
                     atomicStore(broken, true);
                     break;

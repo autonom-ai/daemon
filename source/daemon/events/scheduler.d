@@ -104,35 +104,18 @@ public:
             if (match.profile.name == from.name || !room.visible(match.profile.name))
                 continue;
 
-            batch[match.profile.name] ~= Event.create(
+            queue(batch, profiles, match.profile, Event.create(
                 EventType.Room,
                 entry.id,
                 from.name,
                 entry.text,
                 room.name,
                 match.schedule.id
-            );
-            profiles[match.profile.name] = match.profile;
+            ));
         }
 
-        foreach (target; targets)
-        {
-            if (target.name == from.name)
-                continue;
-
-            batch[target.name] ~= Event.create(
-                EventType.Ping,
-                entry.id,
-                from.name,
-                entry.text,
-                room.name,
-                pingSchedule(target, from.name)
-            );
-            profiles[target.name] = target;
-        }
-
-        foreach (name, events; batch)
-            deliver(profiles[name], events, from);
+        queuePings(batch, profiles, targets, from, entry, room.name);
+        deliverAll(batch, profiles, from);
     }
 
     void directed(
@@ -149,35 +132,18 @@ public:
             if (match.profile.name != to.name)
                 continue;
 
-            batch[match.profile.name] ~= Event.create(
+            queue(batch, profiles, match.profile, Event.create(
                 EventType.DM,
                 entry.id,
                 from.name,
                 entry.text,
                 null,
                 match.schedule.id
-            );
-            profiles[match.profile.name] = match.profile;
+            ));
         }
 
-        foreach (target; targets)
-        {
-            if (target.name == from.name)
-                continue;
-
-            batch[target.name] ~= Event.create(
-                EventType.Ping,
-                entry.id,
-                from.name,
-                entry.text,
-                null,
-                pingSchedule(target, from.name)
-            );
-            profiles[target.name] = target;
-        }
-
-        foreach (name, events; batch)
-            deliver(profiles[name], events, from);
+        queuePings(batch, profiles, targets, from, entry, null);
+        deliverAll(batch, profiles, from);
     }
 
     bool adopt(string session, string directory, string execution = null)
@@ -399,6 +365,43 @@ private:
         return null;
     }
 
+    static void queue(ref Event[][string] batch, ref Profile[string] profiles, Profile profile, Event event)
+    {
+        batch[profile.name] ~= event;
+        profiles[profile.name] = profile;
+    }
+
+    void queuePings(
+        ref Event[][string] batch,
+        ref Profile[string] profiles,
+        Profile[] targets,
+        Profile from,
+        Entry entry,
+        string room
+    )
+    {
+        foreach (target; targets)
+        {
+            if (target.name == from.name)
+                continue;
+
+            queue(batch, profiles, target, Event.create(
+                EventType.Ping,
+                entry.id,
+                from.name,
+                entry.text,
+                room,
+                pingSchedule(target, from.name)
+            ));
+        }
+    }
+
+    void deliverAll(Event[][string] batch, Profile[string] profiles, Profile from)
+    {
+        foreach (name, events; batch)
+            deliver(profiles[name], events, from);
+    }
+
     string durationText(long value)
     {
         if (value % 86400 == 0)
@@ -520,18 +523,13 @@ private:
 
         foreach (event; batch)
         {
-            stderr.writeln(
-                "autonom event_fired at=",
+            stderr.writefln(
+                "autonom event_fired at=%s profile=%s type=%s schedule=%s state=\"%s\" wake_in_flight=%s",
                 Clock.currTime(UTC()).toISOExtString(),
-                " profile=",
                 profile.name,
-                " type=",
                 cast(string)event.type,
-                " schedule=",
                 event.schedule.length ? event.schedule : "none",
-                " state=\"",
                 profileState,
-                "\" wake_in_flight=",
                 hasWakeInFlight
             );
         }
