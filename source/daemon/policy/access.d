@@ -3,7 +3,7 @@ module daemon.policy.access;
 import daemon.config;
 import daemon.exception;
 import daemon.policy.rule;
-import daemon.http : readBody, respond;
+import daemon.http : acceptMethod, onlyFields, readBody, respond, respondError;
 import daemon.runtime : policy;
 import intuit.response.decision;
 import intuit.router : IRouter, decisions;
@@ -11,7 +11,7 @@ import serverino;
 
 import core.time : MonoTime, seconds;
 import std.algorithm.searching : canFind;
-import std.file;
+import std.file : isDir;
 import std.json : JSONType, JSONValue;
 
 public:
@@ -19,24 +19,16 @@ public:
 @endpoint @route!"/api/policy/check"
 void checkPolicy(Request request, Output output)
 {
-    if (request.method != Request.Method.Post)
-    {
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    if (!acceptMethod(request, output, [Request.Method.Post]))
         return;
-    }
 
     JSONValue data = readBody(request);
+    onlyFields(data, ["directory", "tool", "input"]);
     if ("directory" !in data.object || "tool" !in data.object)
         throw new InvalidInputException("Expected directory and tool");
 
     if (data["directory"].type != JSONType.string || data["tool"].type != JSONType.string)
         throw new InvalidInputException("Directory and tool must be strings");
-
-    foreach (name; data.object.keys)
-    {
-        if (name != "directory" && name != "tool" && name != "input")
-            throw new InvalidInputException("Unexpected policy request field");
-    }
 
     if ("input" !in data.object)
         data["input"] = JSONValue.emptyObject;
@@ -136,7 +128,7 @@ public:
 
         if (input.type != JSONType.object)
             throw new InvalidInputException("Tool input must be an object");
-            
+
         PolicyFile policyFile = PolicyFile.loadRules(directory);
         foreach (rule; policyFile.rules)
         {

@@ -8,7 +8,6 @@ import daemon.http;
 import daemon.runtime;
 import serverino;
 
-import std.algorithm.searching : canFind, startsWith;
 import std.conv : to;
 import std.json : JSONType, JSONValue;
 import std.string : strip;
@@ -99,7 +98,7 @@ Profile profileByName(string name, Output output)
 {
     Profile ret = profileStore.get(name);
     if (ret is null)
-        respond(output, JSONValue(["error": JSONValue("Profile not found")]), 404);
+        respondError(output, 404, "Profile not found");
 
     return ret;
 }
@@ -119,78 +118,19 @@ bool profileList(string[] profileNames, Output output, out Profile[] targets)
     return true;
 }
 
-Room lookupRoom(string name, Profile profile, Output output)
+Room lookup(string name, Profile profile, Output output, bool delegate(Room room) access)
 {
     Room ret = bus.getRoom(name);
-    if (ret !is null && ret.visible(profile.name))
-        return ret;
-
-    respond(output, JSONValue(["error": JSONValue("Unknown room")]), 404);
-    return null;
-}
-
-Room lookupAdministered(string name, Profile profile, Output output)
-{
-    Room ret = bus.getRoom(name);
-    if (ret !is null && ret.administrator(profile.name))
-        return ret;
-
-    respond(output, JSONValue(["error": JSONValue("Unknown room")]), 404);
-    return null;
-}
-
-Room lookupOwned(string name, Profile profile, Output output)
-{
-    Room ret = bus.getRoom(name);
-    if (ret !is null && ret.originalOwner(profile.name))
-        return ret;
-
-    respond(output, JSONValue(["error": JSONValue("Unknown room")]), 404);
-    return null;
-}
-
-public:
-
-Profile caller(Request request)
-{
-    string session = request.get.read("session");
-    bool human = bridge.access.client(request.header.read("x-autonom-client"));
-    if (human && request.get.has("profile") &&
-        (request.path == "/api/events" || request.path == "/api/schedules" ||
-        request.path.startsWith("/api/schedules/")))
+    if (ret is null || !access(ret))
     {
-        Profile ret = profileStore.get(request.get.read("profile"));
-        if (ret is null)
-            throw new InvalidInputException("Unknown profile");
-
-        return ret;
+        respondError(output, 404, "Unknown room");
+        return null;
     }
-
-    if (!session.length)
-    {
-        if (human)
-            return profileStore.get(HUMAN_NAME);
-
-        throw new InvalidInputException("A session is required");
-    }
-    if (!human && bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
-        throw new InvalidInputException("Invalid managed session capability");
-
-    Profile ret = profileStore.profileFor(session);
-    if (ret is null)
-        throw new ConflictException("No profile is registered for this session");
 
     return ret;
 }
 
-void onlyFields(JSONValue data, string[] fields)
-{
-    foreach (name; data.object.keys)
-    {
-        if (!fields.canFind(name))
-            throw new InvalidInputException("Unexpected "~name~" field");
-    }
-}
+public:
 
 @endpoint @route!"/api/rooms"
 void rooms(Request request, Output output)
@@ -227,7 +167,7 @@ void room(Request request, Output output)
     string name = routeParameter!"/api/rooms/<name>"(request);
     if (request.method == Request.Method.Get)
     {
-        Room found = lookupRoom(name, profile, output);
+        Room found = lookup(name, profile, output, (room) => room.visible(profile.name));
         if (found is null)
             return;
 
@@ -235,7 +175,7 @@ void room(Request request, Output output)
         return;
     }
 
-    Room found = lookupAdministered(name, profile, output);
+    Room found = lookup(name, profile, output, (room) => room.administrator(profile.name));
     if (found is null)
         return;
 
@@ -250,7 +190,8 @@ void roomMessages(Request request, Output output)
         return;
 
     Profile profile = caller(request);
-    Room room = lookupRoom(routeParameter!"/api/rooms/<name>/messages"(request), profile, output);
+    Room room = lookup(routeParameter!"/api/rooms/<name>/messages"(request), profile, output,
+        (room) => room.visible(profile.name));
     if (room is null)
         return;
 
@@ -287,7 +228,7 @@ void roomMembership(Request request, Output output)
     string name = routeParameter!"/api/rooms/<name>/membership"(request);
     if (request.method == Request.Method.Get)
     {
-        Room found = lookupRoom(name, profile, output);
+        Room found = lookup(name, profile, output, (room) => room.visible(profile.name));
         if (found is null)
             return;
 
@@ -295,7 +236,7 @@ void roomMembership(Request request, Output output)
         return;
     }
 
-    Room room = lookupAdministered(name, profile, output);
+    Room room = lookup(name, profile, output, (room) => room.administrator(profile.name));
     if (room is null)
         return;
 
@@ -329,7 +270,8 @@ void roomAdmins(Request request, Output output)
         return;
 
     Profile profile = caller(request);
-    Room room = lookupOwned(routeParameter!"/api/rooms/<name>/admins"(request), profile, output);
+    Room room = lookup(routeParameter!"/api/rooms/<name>/admins"(request), profile, output,
+        (room) => room.originalOwner(profile.name));
     if (room is null)
         return;
 

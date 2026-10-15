@@ -1,6 +1,8 @@
 module daemon.http;
 
+import daemon.agent;
 import daemon.exception;
+import daemon.runtime;
 import serverino;
 
 import std.algorithm : canFind, endsWith, startsWith;
@@ -19,6 +21,11 @@ void respond(Output output, JSONValue body, ushort status = 200)
     output ~= body.toString();
 }
 
+void respondError(Output output, ushort status, string message)
+{
+    respond(output, JSONValue(["error": JSONValue(message)]), status);
+}
+
 bool acceptMethod(Request request, Output output, Request.Method[] methods)
 {
     if (methods.canFind(request.method))
@@ -29,7 +36,7 @@ bool acceptMethod(Request request, Output output, Request.Method[] methods)
         names ~= method.to!string.toUpper;
 
     output.addHeader("allow", names.join(", "));
-    respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    respondError(output, 405, "Method not allowed");
     return false;
 }
 
@@ -71,28 +78,53 @@ JSONValue readBody(Request request, size_t limit = 64 * 1024)
     return ret;
 }
 
-JSONValue readLaunch(Request request)
+struct Launch
 {
-    JSONValue ret = readBody(request);
-    if ("prompt" !in ret.object || "directory" !in ret.object)
+    string prompt;
+    string directory;
+    string model;
+    string profile;
+    string mode;
+    bool trusted;
+}
+
+Launch readLaunch(Request request)
+{
+    JSONValue data = readBody(request);
+    if ("prompt" !in data.object || "directory" !in data.object)
         throw new InvalidInputException("Expected prompt and directory");
-    foreach (name, value; ret.object)
+    onlyFields(data, ["prompt", "directory", "model", "profile", "mode", "trusted"]);
+
+    Launch ret;
+    foreach (name, value; data.object)
     {
-        if (name == "trusted" && (value.type == JSONType.true_ || value.type == JSONType.false_))
+        if (name == "trusted")
+        {
+            if (value.type != JSONType.true_ && value.type != JSONType.false_)
+                throw new InvalidInputException("Invalid session launch field");
+            ret.trusted = value.boolean;
             continue;
-        if ((name != "prompt" && name != "directory" && name != "model" && name != "profile" && name != "mode") ||
-            value.type != JSONType.string)
+        }
+        if (value.type != JSONType.string)
             throw new InvalidInputException("Invalid session launch field");
+        switch (name)
+        {
+        case "prompt":
+            ret.prompt = value.str;
+            break;
+        case "directory":
+            ret.directory = value.str;
+            break;
+        case "model":
+            ret.model = value.str;
+            break;
+        case "profile":
+            ret.profile = value.str;
+            break;
+        default:
+            ret.mode = value.str;
+        }
     }
-
-    foreach (field; ["model", "profile", "mode"])
-    {
-        if (field !in ret.object)
-            ret[field] = JSONValue("");
-    }
-
-    if ("trusted" !in ret.object)
-        ret["trusted"] = JSONValue(false);
 
     return ret;
 }
@@ -106,4 +138,45 @@ string readField(string FIELD)(Request request)
         throw new InvalidInputException(FIELD~" must be a string");
 
     return data[FIELD].str;
+}
+
+void onlyFields(JSONValue data, string[] fields)
+{
+    foreach (name; data.object.keys)
+    {
+        if (!fields.canFind(name))
+            throw new InvalidInputException("Unexpected "~name~" field");
+    }
+}
+
+Profile caller(Request request)
+{
+    string session = request.get.read("session");
+    bool human = bridge.access.client(request.header.read("x-autonom-client"));
+    if (human && request.get.has("profile") &&
+        (request.path == "/api/events" || request.path == "/api/schedules" ||
+        request.path.startsWith("/api/schedules/")))
+    {
+        Profile ret = profileStore.get(request.get.read("profile"));
+        if (ret is null)
+            throw new InvalidInputException("Unknown profile");
+
+        return ret;
+    }
+
+    if (!session.length)
+    {
+        if (human)
+            return profileStore.get(HUMAN_NAME);
+
+        throw new InvalidInputException("A session is required");
+    }
+    if (!human && bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
+        throw new InvalidInputException("Invalid managed session capability");
+
+    Profile ret = profileStore.profileFor(session);
+    if (ret is null)
+        throw new ConflictException("No profile is registered for this session");
+
+    return ret;
 }

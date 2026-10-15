@@ -423,12 +423,17 @@ private:
                 continue;
             }
 
-            (new Thread({
-                scope(exit)
-                    atomicOp!"-="(serving, 1);
-                serve(connection);
-            })).start();
+            serveAsync(connection);
         }
+    }
+
+    void serveAsync(Socket socket)
+    {
+        (new Thread({
+            scope(exit)
+                atomicOp!"-="(serving, 1);
+            serve(socket);
+        })).start();
     }
 
     void serve(Socket socket)

@@ -1,15 +1,8 @@
 module daemon.server;
 
-import daemon.agent;
-import daemon.config;
-import daemon.coord;
-import daemon.events;
 import daemon.exception;
 import daemon.http;
-import daemon.policy;
 import daemon.runtime;
-import daemon.interop.devin;
-import daemon.interop.permission : PermissionStore;
 import serverino;
 
 import core.sys.posix.signal : kill, SIGTERM;
@@ -29,26 +22,23 @@ public:
 @endpoint @route!"/api/health"
 void health(Request request, Output output)
 {
-    if (request.method == Request.Method.Get)
-        respond(output, JSONValue([
-            "status": JSONValue(stopping ? "stopping" : "ok"),
-            "pid": JSONValue(ServerinoProcess.daemonPID),
-            "workerPid": JSONValue(thisProcessID),
-            "controlFile": JSONValue(bridge.access.tokenPath),
-            "configFile": JSONValue(configuration.path)
-        ]), stopping ? 503 : 200);
-    else
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    if (!acceptMethod(request, output, [Request.Method.Get]))
+        return;
+
+    respond(output, JSONValue([
+        "status": JSONValue(stopping ? "stopping" : "ok"),
+        "pid": JSONValue(ServerinoProcess.daemonPID),
+        "workerPid": JSONValue(thisProcessID),
+        "controlFile": JSONValue(bridge.access.tokenPath),
+        "configFile": JSONValue(configuration.path)
+    ]), stopping ? 503 : 200);
 }
 
 @endpoint @route!"/api/stop"
 void stop(Request request, Output output)
 {
-    if (request.method != Request.Method.Post)
-    {
-        respond(output, JSONValue(["error": JSONValue("Method not allowed")]), 405);
+    if (!acceptMethod(request, output, [Request.Method.Post]))
         return;
-    }
 
     if (readBody(request).object.length != 0)
         throw new InvalidInputException("Expected an empty JSON object");
@@ -103,7 +93,7 @@ void authorize(Request request, Output output)
         request.path.startsWith("/api/permissions/");
     if (!coordination || request.path == "/api/schedules/refresh" ||
         bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
-        respond(output, JSONValue(["error": JSONValue("Autonom access requires a managed session capability")]), 403);
+        respondError(output, 403, "Autonom access requires a managed session capability");
 }
 
 @endpoint @priority(100)
@@ -135,8 +125,6 @@ void refresh(Request request)
 {
     ushort status = cast(InvalidInputException)error ? 400 : cast(ConflictException)error ? 409 :
         cast(BackendException)error ? 503 : 500;
-    respond(output, JSONValue([
-        "error": JSONValue(status == 500 ? "Internal server error" : error.msg)
-    ]), status);
+    respondError(output, status, status == 500 ? "Internal server error" : error.msg);
     return true;
 }

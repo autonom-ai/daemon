@@ -41,8 +41,8 @@ void sessions(Request request, Output output)
         respond(output, JSONValue(bridge.sessionIds()));
     else
     {
-        JSONValue data = readLaunch(request);
-        string profileName = data["profile"].str.toLower;
+        Launch launch = readLaunch(request);
+        string profileName = launch.profile.toLower;
         if (profileName.length)
         {
             if (!validName(profileName) || profileName == "human")
@@ -60,11 +60,11 @@ void sessions(Request request, Output output)
         }
 
         respond(output, bridge.start(
-            data["prompt"].str,
-            data["directory"].str,
-            data["model"].str,
-            data["mode"].str,
-            data["trusted"].boolean,
+            launch.prompt,
+            launch.directory,
+            launch.model,
+            launch.mode,
+            launch.trusted,
             profileName
         ).toJSON(), 202);
     }
@@ -76,8 +76,8 @@ void printSession(Request request, Output output)
     if (!acceptMethod(request, output, [Request.Method.Post]))
         return;
 
-    JSONValue data = readLaunch(request);
-    respond(output, bridge.print(data["prompt"].str, data["directory"].str, data["model"].str).toJSON(), 202);
+    Launch launch = readLaunch(request);
+    respond(output, bridge.print(launch.prompt, launch.directory, launch.model).toJSON(), 202);
 }
 
 @endpoint @route!"/api/acp/observe"

@@ -3,7 +3,6 @@ module daemon.events.schedule;
 import daemon.agent;
 import daemon.config;
 import daemon.coord;
-import daemon.coord.access : caller, onlyFields;
 import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
 import daemon.events.event : EventType, parseEventType;
 import daemon.exception;
@@ -57,7 +56,7 @@ void schedule(Request request, Output output)
     Profile profile = caller(request);
     Nullable!Schedule removed = scheduleStore.remove(profile, routeParameter!"/api/schedules/<id>"(request));
     if (removed.isNull)
-        respond(output, JSONValue(["error": JSONValue("Schedule not found")]), 404);
+        respondError(output, 404, "Schedule not found");
     else
     {
         if (scheduler !is null)
@@ -401,7 +400,7 @@ Nullable!Schedule readSchedule(Profile profile, JSONValue data, Output output)
         Room found = bus.getRoom(data["room"].str);
         if (found is null || !found.visible(profile.name))
         {
-            respond(output, JSONValue(["error": JSONValue("Unknown room")]), 404);
+            respondError(output, 404, "Unknown room");
             return Nullable!Schedule.init;
         }
 
