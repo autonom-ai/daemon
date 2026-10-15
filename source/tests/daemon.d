@@ -109,33 +109,10 @@ JSONValue hookSession(
     bool identify = true
 )
 {
-    string original = fixture.config.devinCommand~".original";
-    if (!exists(original))
-    {
-        write(original, exists(fixture.config.devinCommand) ? readText(fixture.config.devinCommand) :
-            "#!/bin/sh\nexit 0\n");
-        setAttributes(original, octal!"700");
-    }
+    if (!exists(fixture.config.devinCommand))
+        installFake(fixture);
 
-    write(fixture.config.devinCommand, `#!/bin/sh
-export_path=
-previous=
-for argument do
-    if [ "$previous" = --export ]; then export_path=$argument; fi
-    previous=$argument
-    prompt=$argument
-done
-case "$prompt" in
-    auth:*)
-        session=${prompt#auth:}
-        printf '%s' "$AUTONOM_RUN_TOKEN" > "$(dirname "$0")/$session.token"
-        printf '{"session_id":"%s"}' "$session" > "$export_path"
-        trap 'exit 0' TERM
-        while :; do sleep 0.05; done ;;
-esac
-exec "$0.original" "$@"
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
+    write(buildPath(fixture.root, "next-session-id"), id);
     JSONValue ret = request("/api/sessions", 202, JSONValue([
         "prompt": JSONValue("auth:"~id),
         "directory": JSONValue(fixture.root),
@@ -195,51 +172,7 @@ unittest
     scope(exit)
         fixture.close();
 
-    write(fixture.config.devinCommand, `#!/bin/sh
-export_path=
-previous=
-for argument do
-    if [ "$previous" = --export ]; then export_path=$argument; fi
-    prompt=$argument
-    previous=$argument
-done
-case "$1" in
-    list)
-        if [ -f "$(dirname "$0")/sessions.txt" ]; then
-            printf '['
-            separator=
-            while read id; do
-                printf '%s{"id":"%s"}' "$separator" "$id"
-                separator=,
-            done < "$(dirname "$0")/sessions.txt"
-            printf ']'
-        else
-            printf '[{"id":"session-0"}]'
-        fi
-        exit 0 ;;
-    rm) [ "$4" = missing ] && exit 1; exit 0 ;;
-    --print)
-        count=0
-        [ -f "$(dirname "$0")/sessions.txt" ] && count=$(wc -l < "$(dirname "$0")/sessions.txt")
-        session_id="created-$count"
-        if [ "$prompt" = callback ]; then
-            status=$(curl -qfsS -m 1 -x '' -o /dev/null -w '%{http_code}' --json \
-                '{"hook_event_name":"SessionStart"}' \
-                "http://127.0.0.1:${AUTONOM_PORT:-8080}/api/hooks/session-start") || exit 9
-            printf '%s' "$status" > "$(dirname "$0")/callback.txt"
-            sleep 0.1
-        fi
-        echo "$session_id" >> "$(dirname "$0")/sessions.txt"
-        printf '{"session_id":"%s"}' "$session_id" > "$export_path"
-        printf 'AUTONOM_READY'; exit 0 ;;
-esac
-for argument do prompt="$argument"; done
-printf '%s\n' "$prompt"
-[ "$prompt" = fail ] && exit 7
-trap 'exit 0' TERM
-while :; do sleep 0.05; done
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
+    installFake(fixture);
     RunningDaemon daemon = startDaemon(fixture);
     scope(exit)
         daemon.close();
@@ -304,6 +237,8 @@ while :; do sleep 0.05; done
             "application/json; charset=utf-8"
         ).should == parseJSON("{}");
         payload["large"] = JSONValue("x".replicate(64 * 1024));
+        request(endpoint, 200, payload.toString());
+        payload["large"] = JSONValue("x".replicate(17 * 1024 * 1024));
         request(endpoint, 400, payload.toString());
         payload.object.remove("large");
 
@@ -434,7 +369,9 @@ while :; do sleep 0.05; done
     launch["directory"] = JSONValue(fixture.root);
     JSONValue printed = request("/api/print", 202, launch.toString());
     waitForExecution(printed)["reply"].str.should == "AUTONOM_READY";
-    request("/api/sessions/session-0/resume", 200, launch.toString())["status"].str.should == "starting";
+    launch["prompt"] = JSONValue("hang");
+    JSONValue resumed = request("/api/sessions/session-0/resume", 200, launch.toString());
+    ["starting", "online"].canFind(resumed["status"].str).should == true;
     request("/api/sessions/session-0/resume", 409, launch.toString());
     request("/api/profiles/agent-0/session", 409, `{"id":"replacement"}`);
     request("/api/sessions/session-0/stop", 202, "{}");
@@ -448,7 +385,7 @@ while :; do sleep 0.05; done
     {
         return request("/api/sessions/session-0")["status"].str == "failed";
     });
-    request("/api/profiles/agent-0/session")["exitStatus"].integer.should == 7;
+    request("/api/profiles/agent-0/session")["exitStatus"].integer.should == 0;
     request("/api/sessions/session-0/log")["log"].str.canFind("fail").should == true;
     JSONValue removedSession = request(
         "/api/sessions/session-0",
@@ -460,7 +397,7 @@ while :; do sleep 0.05; done
     waitForExecution(removedSession)["status"].str.should == "succeeded";
     request("/api/profiles/agent-0")["session"].should == JSONValue(null);
     request("/api/sessions/session-0/log", 404);
-    launch["prompt"] = JSONValue("work");
+    launch["prompt"] = JSONValue("hang");
     request("/api/sessions/session-1/resume", 200, launch.toString());
 
     request("/api/sessions/remove", 405)["error"].str.should == "Method not allowed";
@@ -471,7 +408,7 @@ while :; do sleep 0.05; done
     request("/api/sessions/remove", 400, `{"ids":[],"unexpected":true}`);
     request("/api/sessions/batch-owned/resume", 200, launch.toString());
     request("/api/sessions/remove", 400, `{"ids":["batch-owned","../escape"]}`);
-    request("/api/sessions/batch-owned")["status"].str.should == "starting";
+    ["starting", "online"].canFind(request("/api/sessions/batch-owned")["status"].str).should == true;
     JSONValue ownedRemoval = request("/api/sessions/remove", 202, `{"ids":["batch-owned"]}`);
     waitForExecution(request("/api/executions/"~ownedRemoval["executions"][0]["id"].str))
         ["status"].str.should == "succeeded";

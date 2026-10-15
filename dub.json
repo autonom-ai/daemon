@@ -3,7 +3,8 @@
 		{
 			"excludedSourceFiles": [
 				"source/tests/**",
-				"source/evals/**"
+				"source/evals/**",
+				"source/daemon/relay.d"
 			],
 			"mainSourceFile": "source/daemon/app.d",
 			"name": "daemon",
@@ -19,12 +20,14 @@
 			},
 			"excludedSourceFiles": [
 				"source/daemon/app.d",
+				"source/daemon/relay.d",
 				"source/evals/**"
 			],
 			"mainSourceFile": "bin/ut.d",
 			"name": "unit",
 			"preBuildCommands": [
 				"$DUB build --compiler=$DC --config=daemon",
+				"$DUB build --compiler=$DC --config=relay",
 				"$DUB run unit-threaded@2.2.6 -c gen_ut_main -- -f bin/ut.d source/tests"
 			],
 			"sourcePaths": [
@@ -35,15 +38,17 @@
 			"targetType": "executable"
 		},
 		{
-			"mainSourceFile": "source/evals/app.d",
-			"name": "eval",
-			"preBuildCommands": [
-				"$DUB build --compiler=$DC --config=daemon"
+			"excludedSourceFiles": [
+				"source/daemon/app.d",
+				"source/tests/**",
+				"source/evals/**"
 			],
+			"mainSourceFile": "source/daemon/relay.d",
+			"name": "relay",
 			"sourcePaths": [
-				"source/evals"
+				"source/daemon"
 			],
-			"targetName": "autonom-eval",
+			"targetName": "autonom-acp",
 			"targetType": "executable"
 		}
 	],

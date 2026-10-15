@@ -107,6 +107,18 @@ public:
     }
 }
 
+void installFake(Fixture fixture)
+{
+    import std.conv : octal;
+    import std.file : getcwd, setAttributes;
+
+    write(fixture.config.devinCommand, "#!/bin/sh\n"~
+        `export AUTONOM_FAKE_DIR="`~fixture.root~`"`~"\n"~
+        `export AUTONOM_FAKE_LOCKDIR="`~fixture.config.sessionLockDir~`"`~"\n"~
+        `exec python3 "`~buildPath(getcwd(), "source", "tests", "fakeagent.py")~`" "$@"`~"\n");
+    setAttributes(fixture.config.devinCommand, octal!"700");
+}
+
 void waitUntil(bool delegate() condition, Duration timeout = 5.seconds)
 {
     MonoTime deadline = MonoTime.currTime + timeout;

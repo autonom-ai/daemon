@@ -7,12 +7,14 @@ import daemon.exception;
 import daemon.interop.devin.db : readSessionMessages;
 import daemon.interop.execution;
 import daemon.interop.session;
-import daemon.server;
+import daemon.http;
+import daemon.runtime;
 import daemon.storage;
 import serverino;
 
+import core.time : MonoTime, seconds;
 import std.algorithm : sort;
-import std.file : exists, getSize;
+import std.file : exists;
 import std.json : JSONType, JSONValue, parseJSON;
 
 public:
@@ -51,7 +53,7 @@ void clientState(Request request, Output output)
         ret["profiles"].array ~= record;
     }
 
-    foreach (id; bridge.access.ids)
+    foreach (id; bridge.sessionIds())
     {
         Session session = bridge.findSession(id);
         if (session is null)
@@ -180,8 +182,6 @@ void clientTranscript(Request request, Output output)
     if (execution !is null)
     {
         ret["execution"] = execution.toJSON();
-        if (!ret["messages"].array.length && exists(execution.exportPath) && getSize(execution.exportPath))
-            ret["messages"] = exportedMessages(execution);
         if (!ret["messages"].array.length && !execution.running && exists(execution.outputPath))
         {
             ret["messages"].array ~= JSONValue([
@@ -200,13 +200,27 @@ void clientModels(Request request, Output output)
     if (!acceptMethod(request, output, [Request.Method.Get]))
         return;
 
+    if (modelsCatalog.length && MonoTime.currTime - modelsFetched < 60.seconds)
+    {
+        respond(output, parseJSON(modelsCatalog));
+        return;
+    }
+
     try
-        respond(output, parseJSON(bridge.run(["models", "list", "--format", "json"])));
+    {
+        string catalog = bridge.run(["models", "list", "--format", "json"]);
+        modelsCatalog = catalog.idup;
+        modelsFetched = MonoTime.currTime;
+        respond(output, parseJSON(catalog));
+    }
     catch (Exception)
         respond(output, JSONValue(["error": JSONValue("Could not retrieve the Devin model catalog")]), 503);
 }
 
 private:
+
+string modelsCatalog;
+MonoTime modelsFetched;
 
 Entry[] conversation(string profile)
 {
@@ -225,34 +239,5 @@ Entry[] conversation(string profile)
 
     ret.sort!((left, right) => left.timestamp != right.timestamp ? left.timestamp < right.timestamp :
         left.from == HUMAN_NAME && right.from != HUMAN_NAME);
-    return ret;
-}
-
-JSONValue exportedMessages(Execution execution)
-{
-    JSONValue ret = JSONValue.emptyArray;
-    JSONValue data = readJSON(execution.exportPath, 16 * 1024 * 1024);
-    if (data.type != JSONType.object || "steps" !in data.object || data["steps"].type != JSONType.array)
-        return ret;
-
-    foreach (step; data["steps"].array)
-    {
-        if (step.type != JSONType.object || "source" !in step.object || step["source"].type != JSONType.string ||
-            step["source"].str == "system")
-            continue;
-
-        JSONValue message = JSONValue.emptyObject;
-        message["role"] = JSONValue(step["source"].str == "agent" ? "assistant" : step["source"].str);
-        foreach (field; ["message", "tool_calls", "observation", "reasoning_content", "timestamp"])
-        {
-            if (field in step.object)
-                message[field == "message" ? "content" : field] = step[field];
-        }
-
-        ret.array ~= message;
-        if (ret.array.length == 500)
-            break;
-    }
-
     return ret;
 }

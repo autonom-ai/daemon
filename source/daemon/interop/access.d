@@ -96,10 +96,13 @@ public:
                 return null;
 
             ret.identify(session);
-            remember(session, ret.trusted);
         }
+        if (ret.sessionId != session)
+            return null;
+        if (bind && started && !managed(session))
+            remember(session, ret.trusted);
 
-        return ret.sessionId == session && managed(session) ? ret : null;
+        return managed(session) ? ret : null;
     }
 
     void remember(string id, bool trusted = false)

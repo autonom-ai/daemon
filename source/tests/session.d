@@ -21,37 +21,6 @@ import std.traits : hasUDA;
 
 private:
 
-void installCli(Fixture fixture)
-{
-    write(fixture.config.devinCommand, `#!/bin/sh
-printf '%s\n' "$@" > arguments.txt
-for argument do prompt="$argument"; done
-[ "$prompt" = fail ] && exit 7
-trap 'exit 0' TERM
-while :; do sleep 0.05; done
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
-}
-
-void installStartCli(Fixture fixture)
-{
-    write(fixture.config.devinCommand, `#!/bin/sh
-export_path=
-previous=
-for argument do
-    if [ "$previous" = --export ]; then export_path=$argument; fi
-    previous=$argument
-done
-case "$1" in
-    --print)
-        printf 'first reply'
-        printf '{"session_id":"fresh-session"}' > "$export_path" ;;
-esac
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
-}
-
-
 @Name("Session cleanup declares its module-level HTTP endpoint")
 unittest
 {
@@ -111,7 +80,8 @@ unittest
     scope(exit)
         fixture.close();
 
-    installStartCli(fixture);
+    installFake(fixture);
+    write(buildPath(fixture.root, "next-session-id"), "fresh-session");
     Execution execution = fixture.bridge.start("create work", fixture.root, "SWE-2");
     execution.wait();
     execution.status.should == ExecutionStatus.Succeeded;
@@ -119,55 +89,64 @@ unittest
     Session session = fixture.bridge.session(execution.sessionId);
     fixture.bridge.collect();
     session.status.should == SessionStatus.Offline;
-    readText(buildPath(fixture.bridge.logDir, "fresh-session.log")).should == "first reply";
+    readText(buildPath(fixture.bridge.logDir, "fresh-session.log")).canFind("create work").should == true;
+    readText(buildPath(fixture.root, "invocations.txt")).canFind("--print").should == false;
+    readText(buildPath(fixture.root, "invocations.txt")).canFind("--export").should == false;
 }
 
-@Name("Session start fails without an exported backend session ID")
+@Name("Session start fails when the agent rejects session creation")
 unittest
 {
     Fixture fixture = Fixture.create();
     scope(exit)
         fixture.close();
 
-    write(fixture.config.devinCommand, `#!/bin/sh
-printf 'no session'
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
+    installFake(fixture);
+    write(buildPath(fixture.root, "fail-new"), "");
     Execution execution = fixture.bridge.start("create work", fixture.root);
     execution.wait();
     execution.status.should == ExecutionStatus.Failed;
     execution.sessionId.length.should == 0;
 }
 
-@Name("Session resumes with a supplied model and literal prompt arguments")
+@Name("Session resumes through ACP with a supplied model and literal prompt")
 unittest
 {
     Fixture fixture = Fixture.create();
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     Session session = fixture.bridge.session("session-1");
     scope(exit)
         session.stop();
 
     string prompt = "--model dangerous; $(touch forbidden)";
-    session.resume(prompt, fixture.root, "SWE-2");
+    session.resume("hang", fixture.root, "SWE-2");
     waitUntil(delegate bool()
     {
-        return exists(buildPath(fixture.root, "arguments.txt"));
+        return session.status == SessionStatus.Online;
     });
-    readText(buildPath(fixture.root, "arguments.txt")).splitLines.should == [
-        "--resume",
-        "session-1",
-        "--print",
-        "--model",
-        "SWE-2",
-        "--export",
-        session.execution.exportPath,
-        "--",
-        prompt
-    ];
+    waitUntil(delegate bool()
+    {
+        return session.execution.acceptingSteer;
+    });
+    session.steer(prompt);
+    waitUntil(delegate bool()
+    {
+        if (!exists(buildPath(fixture.root, "acp-calls.jsonl")))
+            return false;
+
+        return readText(buildPath(fixture.root, "acp-calls.jsonl")).canFind(prompt);
+    });
+    session.stop();
+    string calls = readText(buildPath(fixture.root, "acp-calls.jsonl"));
+    calls.canFind(`"session/load"`).should == true;
+    calls.canFind(`"sessionId": "session-1"`).should == true;
+    calls.canFind(`"configId": "model"`).should == true;
+    calls.canFind(`"value": "SWE-2"`).should == true;
+    calls.canFind(prompt).should == true;
+    readText(buildPath(fixture.root, "invocations.txt")).canFind("--print").should == false;
     exists(buildPath(fixture.root, "forbidden")).should == false;
 }
 
@@ -178,12 +157,12 @@ unittest
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     Session session = fixture.store.register("marlow", "session-1").session;
     scope(exit)
         session.stop();
 
-    session.resume("work", fixture.root);
+    session.resume("hang", fixture.root);
     session.resume("work", fixture.root).shouldThrow!Exception();
     fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflictException();
 }
@@ -195,15 +174,15 @@ unittest
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     Session session = fixture.bridge.session("session-1");
     scope(exit)
         session.stop();
 
-    session.resume("work", fixture.root);
+    session.resume("hang", fixture.root);
     session.stop();
     session.status.should == SessionStatus.Offline;
-    session.resume("again", fixture.root);
+    session.resume("hang", fixture.root);
     session.isRunning().should == true;
 }
 
@@ -214,11 +193,8 @@ unittest
     scope(exit)
         fixture.close();
 
-    write(fixture.config.devinCommand, `#!/bin/sh
-printenv > environ.tmp && mv environ.tmp environ.txt
-while :; do sleep 0.05; done
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
+    installFake(fixture);
+    write(buildPath(fixture.root, "want-environ"), "");
 
     Session session = fixture.bridge.session("session-1");
     scope(exit)
@@ -238,7 +214,7 @@ while :; do sleep 0.05; done
         environment.remove("WINDSURF_IDE_TYPE");
     }
 
-    session.resume("work", fixture.root);
+    session.resume("hang", fixture.root);
     waitUntil(delegate bool()
     {
         return exists(buildPath(fixture.root, "environ.txt"));
@@ -250,14 +226,14 @@ while :; do sleep 0.05; done
     spawned.canFind("PATH=").should == true;
 }
 
-@Name("Session exposes a failed CLI exit independently of online status")
+@Name("Session exposes a failed agent turn independently of online status")
 unittest
 {
     Fixture fixture = Fixture.create();
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     Session session = fixture.bridge.session("session-1");
     scope(exit)
         session.stop();
@@ -267,7 +243,7 @@ unittest
     {
         return session.status == SessionStatus.Failed;
     });
-    session.exitStatus.get.should == 7;
+    session.exitStatus.get.should == 0;
 }
 
 @Name("Bridge marks an execution interrupted when its recorded process was lost")
@@ -277,9 +253,9 @@ unittest
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     Session session = fixture.bridge.session("session-1");
-    session.resume("work", fixture.root);
+    session.resume("hang", fixture.root);
     waitUntil(delegate bool()
     {
         return session.isRunning();

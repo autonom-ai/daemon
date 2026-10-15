@@ -1,9 +1,10 @@
 module daemon.interop.session;
 
 import daemon.exception;
-import daemon.interop.devin.db : SessionMetadata;
+import daemon.http;
 import daemon.interop.execution;
-import daemon.server;
+import daemon.interop.metadata : SessionMetadata;
+import daemon.runtime;
 import daemon.storage;
 import serverino;
 
@@ -89,11 +90,16 @@ void resumeSession(Request request, Output output)
 
     JSONValue data = readLaunch(request);
     string id = routeParameter!"/api/sessions/<id>/resume"(request);
-    if (!bridge.access.managed(id))
-        throw new ConflictException("Only sessions started by Autonom may be resumed by Autonom");
+    if (!bridge.access.managed(id) && !bridge.observedSession(id))
+        throw new ConflictException("Only sessions started or observed by Autonom may be resumed by Autonom");
 
     Session session = bridge.session(id);
-    if (session.isRunning() || bridge.online(id))
+    if (bridge.observedSession(id))
+    {
+        if (bridge.observedActive(id))
+            throw new ConflictException("Session is already active");
+    }
+    else if (session.isRunning() || bridge.online(id))
         throw new ConflictException("Session is already active");
 
     session.resume(
@@ -103,6 +109,27 @@ void resumeSession(Request request, Output output)
         data["mode"].str
     );
     respond(output, session.toJSON());
+}
+
+@endpoint @route!(matchesPath!"/api/sessions/<id>/steer")
+void steerSession(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Post]))
+        return;
+
+    JSONValue data = readBody(request);
+    if (data.object.length != 1 || "prompt" !in data.object || data["prompt"].type != JSONType.string)
+        throw new InvalidInputException("Expected only the prompt field");
+
+    string id = routeParameter!"/api/sessions/<id>/steer"(request);
+    if (!bridge.access.managed(id) && !bridge.observedSession(id))
+        throw new ConflictException("Only sessions started or observed by Autonom may be steered");
+
+    Session session = lookupSession!"/api/sessions/<id>/steer"(request, output);
+    if (session is null)
+        return;
+
+    respond(output, session.steer(data["prompt"].str).toJSON(), 202);
 }
 
 @endpoint @route!(matchesPath!"/api/sessions/<id>/stop")
@@ -219,6 +246,8 @@ public:
         string model = null,
         string mode = null
     );
+
+    abstract Execution steer(string prompt);
 
     abstract void requestStop();
 

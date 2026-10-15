@@ -2,8 +2,8 @@ module daemon.interop.devin.session;
 
 import daemon.exception;
 import daemon.interop.devin.bridge;
-import daemon.interop.devin.db : SessionMetadata;
 import daemon.interop.execution;
+import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.session;
 
 
@@ -29,6 +29,8 @@ public:
 
         if (isRunning())
             return bridge.online(id) ? SessionStatus.Online : SessionStatus.Starting;
+        if (bridge.observedActive(id))
+            return SessionStatus.Online;
         if (bridge.online(id))
             return SessionStatus.Loaded;
 
@@ -46,16 +48,30 @@ public:
         string mode = null
     )
     {
+        if (bridge.observedSession(id))
+        {
+            if (bridge.observedActive(id))
+                throw new ConflictException("Session is already active");
+
+            bindExecution(bridge.resumeObserved(id, prompt, directory, model, mode));
+            return;
+        }
+
         if (isRunning() || bridge.online(id))
             throw new ConflictException("Session is already active");
 
         bindExecution(bridge.resume(id, prompt, directory, model, null, mode));
     }
 
+    override Execution steer(string prompt)
+        => bridge.steer(id, prompt);
+
     override void requestStop()
     {
         if (isRunning())
             execution.requestStop();
+        else if (bridge.observedActive(id))
+            bridge.cancelObserved(id);
         else if (bridge.online(id))
             throw new ConflictException("Cannot stop a session owned by another process");
     }

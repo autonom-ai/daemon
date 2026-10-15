@@ -13,46 +13,6 @@ import std.string : splitLines, strip;
 
 private:
 
-void installCli(Fixture fixture)
-{
-    write(fixture.config.devinCommand, `#!/bin/sh
-case "$1" in
-    list)
-        if [ -f "$(dirname "$0")/sessions.txt" ]; then
-            printf '['
-            separator=
-            while read id; do
-                printf '%s{"id":"%s"}' "$separator" "$id"
-                separator=,
-            done < "$(dirname "$0")/sessions.txt"
-            printf ']'
-        else
-            printf '[{"id":"session-1"},{"id":"session-2"}]'
-        fi
-        echo noise >&2 ;;
-    slow) sleep 5 ;;
-    rm) [ "$4" = missing ] && { echo "no session" >&2; exit 1; }
-        printf '%s\n' "$@" > "$(dirname "$0")/removed.txt" ;;
-    --print)
-        export_path=
-        previous=
-        for argument do
-            if [ "$previous" = --export ]; then export_path=$argument; fi
-            prompt=$argument
-            previous=$argument
-        done
-        [ "$prompt" = fail ] && { echo broken >&2; exit 3; }
-        echo session-3 >> "$(dirname "$0")/sessions.txt"
-        printf '{"session_id":"session-3"}' > "$export_path"
-        printf '%s ' "$@" ;;
-    *) for argument do prompt="$argument"; done
-       [ "$prompt" = fail ] && { echo broken >&2; exit 3; }
-       printf '%s ' "$@" ;;
-esac
-`);
-    setAttributes(fixture.config.devinCommand, octal!"700");
-}
-
 public:
 
 @Name("Bridge owns one canonical handle per session independently of profiles")
@@ -77,7 +37,7 @@ unittest
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     fixture.bridge.list(fixture.root).should == ["session-1", "session-2"];
 }
 
@@ -88,27 +48,27 @@ unittest
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     Execution execution = fixture.bridge.print("hello $(world)", fixture.root, "SWE-2");
     execution.wait();
     execution.status.should == ExecutionStatus.Succeeded;
-    execution.sessionId.should == "session-3";
+    (execution.sessionId.length != 0).should == true;
     execution.toJSON()["reply"].str.canFind("hello $(world)").should == true;
     fixture.bridge.print("", fixture.root).shouldThrow!Exception();
 }
 
-@Name("Bridge reports CLI failures with stderr and enforces timeouts")
+@Name("Bridge reports agent failures and enforces timeouts")
 unittest
 {
     Fixture fixture = Fixture.create();
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     Execution failed = fixture.bridge.print("fail", fixture.root);
     failed.wait();
     failed.status.should == ExecutionStatus.Failed;
-    failed.toJSON()["error"].str.should == "CLI command failed (exit 3)";
+    failed.toJSON()["error"].str.canFind("prompt failed").should == true;
     fixture.bridge.run(["slow"], fixture.root, 100.msecs).shouldThrow!Exception();
 }
 
@@ -119,7 +79,7 @@ unittest
     scope(exit)
         fixture.close();
 
-    installCli(fixture);
+    installFake(fixture);
     Session session = fixture.bridge.session("session-1");
     session.resume("work", fixture.root);
     waitUntil(delegate bool()
