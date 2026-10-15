@@ -4,6 +4,7 @@ import daemon.interop.acp : ACP_INJECT_PREFIX;
 import daemon.relay.control;
 
 import core.atomic : atomicOp;
+import core.stdc.errno : errno, EINTR;
 import core.sync.condition : Condition;
 import core.sync.mutex : Mutex;
 import core.thread : Thread;
@@ -225,8 +226,15 @@ private:
             while (line.length < CONTROL_LIMIT)
             {
                 immutable count = socket.receive(buffer);
-                if (count <= 0)
+                if (count == 0)
                     return;
+                if (count == Socket.ERROR)
+                {
+                    if (errno == EINTR)
+                        continue;
+
+                    return;
+                }
 
                 foreach (byte value; buffer[0..count])
                 {

@@ -61,7 +61,8 @@ enum ExecutionKind : string
     Print = "print",
     Resume = "resume",
     Compact = "compact",
-    Remove = "remove"
+    Remove = "remove",
+    Acp = "acp"
 }
 
 enum ExecutionStatus : string
@@ -132,6 +133,8 @@ private:
             return ExecutionKind.Compact;
         case "remove":
             return ExecutionKind.Remove;
+        case "acp":
+            return ExecutionKind.Acp;
         default:
             throw new Exception("Invalid execution kind");
         }
