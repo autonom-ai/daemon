@@ -3,7 +3,8 @@ import { resolveDesktopBinary } from "../../desktop";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile }
+    from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -278,6 +279,129 @@ test("uninstall refuses to restore a stale-generation CLI backup", async () =>
         await assert.rejects(execute("bash", [installer, "--uninstall", "--app", app], { env }),
             /previous Desktop build/);
         assert.deepEqual(await readFile(join(root, "bin/devin-desktop")), stub);
+    }
+    finally
+    {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("a retained wrapper over a new package refuses to reinstall with a stale backup", async () =>
+{
+    const { root, app, env, manifestPath } = await fixture();
+    try
+    {
+        await execute("bash", [installer, "--no-build", "--app", app], { env });
+        const stub = await readFile(join(root, "bin/devin-desktop"));
+        const record = await recordOf(root);
+        await writeFile(join(app, "out/vs/workbench/workbench.desktop.main.js"), "vendor hot update");
+        await track(manifestPath, app, join(root, "bin/devin-desktop"));
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        manifest.files[join(root, "bin/devin-desktop")].digest = sha256(UPDATED_CLI);
+        await writeFile(manifestPath, JSON.stringify(manifest));
+        await assert.rejects(execute("bash", [installer, "--no-build", "--app", app], { env }),
+            /packaged CLI|cannot be proven/);
+        assert.deepEqual(await readFile(join(root, "bin/devin-desktop")), stub);
+        assert.deepEqual(await readFile(join(root, "bin/devin-desktop.autonom.orig")),
+            Buffer.from(ORIGINAL_CLI));
+        assert.deepEqual(await recordOf(root), record);
+        await assert.rejects(readdir(join(root, "autonom/tracked-builds")), { code: "ENOENT" });
+    }
+    finally
+    {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("a newer package with the same workbench refuses the stale-generation backup", async () =>
+{
+    const { root, env, manifestPath } = await fixture();
+    try
+    {
+        await execute("bash", [installer, "--no-build", "--app", join(root, "resources/app")], { env });
+        const stub = await readFile(join(root, "bin/devin-desktop"));
+        const record = await recordOf(root);
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        manifest.distro = "e".repeat(64);
+        manifest.files[join(root, "bin/devin-desktop")].digest = sha256(UPDATED_CLI);
+        await writeFile(manifestPath, JSON.stringify(manifest));
+        await assert.rejects(execute("bash", [installer, "--no-build", "--app",
+            join(root, "resources/app")], { env }), /packaged CLI|cannot be proven/);
+        await assert.rejects(execute("bash", [installer, "--uninstall", "--app",
+            join(root, "resources/app")], { env }), /previous Desktop build|cannot be proven/);
+        assert.deepEqual(await readFile(join(root, "bin/devin-desktop")), stub);
+        assert.deepEqual(await recordOf(root), record);
+    }
+    finally
+    {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("a missing recorded backup refuses install and uninstall before any mutation", async () =>
+{
+    const { root, app, env } = await fixture();
+    try
+    {
+        await execute("bash", [installer, "--no-build", "--app", app], { env });
+        const stub = await readFile(join(root, "bin/devin-desktop"));
+        const record = await recordOf(root);
+        await rm(join(root, "bin/devin-desktop.autonom.orig"));
+        await assert.rejects(execute("bash", [installer, "--no-build", "--app", app], { env }),
+            /backup is missing/);
+        await assert.rejects(execute("bash", [installer, "--uninstall", "--app", app], { env }),
+            /backup is missing/);
+        assert.deepEqual(await readFile(join(root, "bin/devin-desktop")), stub);
+        assert.deepEqual(await recordOf(root), record);
+    }
+    finally
+    {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("a symlinked install target refuses without writing outside it", async () =>
+{
+    const { root, app, env } = await fixture();
+    try
+    {
+        const outside = join(root, "outside");
+        await mkdir(outside);
+        await mkdir(join(root, "autonom"), { recursive: true });
+        await symlink(outside, join(root, "autonom/bin"));
+        await assert.rejects(execute("bash", [installer, "--no-build", "--app", app], { env }),
+            /symlinked path/);
+        assert.deepEqual(await readdir(outside), []);
+        assert.deepEqual(await readdir(join(root, "autonom")), ["bin"]);
+        assert.deepEqual(await readFile(join(root, "bin/devin-desktop")), Buffer.from(ORIGINAL_CLI));
+        await assert.rejects(readFile(join(root, "autonom/install.json")), { code: "ENOENT" });
+    }
+    finally
+    {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("a late record write failure restores the CLI, backup, record, and payload", async () =>
+{
+    const { root, app, env } = await fixture();
+    try
+    {
+        await execute("bash", [installer, "--no-build", "--app", app], { env });
+        const record = await recordOf(root);
+        await packageUpdate(root, UPDATED_CLI);
+        await mkdir(join(root, "autonom/tracked-builds"), { recursive: true });
+        await chmod(join(root, "autonom"), 0o555);
+        await assert.rejects(execute("bash", [installer, "--no-build", "--app", app], { env }),
+            /read-only|Installation failed/);
+        assert.deepEqual(await readFile(join(root, "bin/devin-desktop")), Buffer.from(UPDATED_CLI));
+        assert.deepEqual(await readFile(join(root, "bin/devin-desktop.autonom.orig")),
+            Buffer.from(ORIGINAL_CLI));
+        assert.deepEqual(await recordOf(root), record);
+        assert.deepEqual(await readdir(join(root, "autonom/tracked-builds")), []);
+        assert.deepEqual(await readFile(join(root, "autonom/dist/launcher.js")),
+            await readFile(join(repository, "dist/launcher.js")));
+        await chmod(join(root, "autonom"), 0o755);
     }
     finally
     {

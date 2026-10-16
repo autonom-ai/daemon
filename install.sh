@@ -61,10 +61,84 @@ def digest(content):
     return hashlib.sha256(content).hexdigest()
 
 
+staged = []
+created = []
+created_dirs = []
+staged_paths = set()
+created_paths = set()
+staging = None
+
+
+def guard(path):
+
+    for ancestor in (path, *path.parents):
+        if ancestor == desktop:
+            return
+        if ancestor.is_symlink():
+            raise SystemExit(f"Refusing to write through a symlinked path: {ancestor}")
+
+
+def stage(path):
+
+    global staging
+    guard(path)
+    if path in staged_paths or path in created_paths:
+        return
+    if staging is None:
+        staging = Path(tempfile.mkdtemp(prefix=".autonom-rollback-", dir=desktop))
+    if path.is_symlink():
+        snap = staging / f"snap-{len(staged)}"
+        os.symlink(os.readlink(path), snap)
+        staged.append((snap, path))
+        staged_paths.add(path)
+    elif path.exists():
+        snap = staging / f"snap-{len(staged)}"
+        shutil.copy2(path, snap)
+        staged.append((snap, path))
+        staged_paths.add(path)
+    else:
+        created.append(path)
+        created_paths.add(path)
+
+
+def rollback():
+
+    for snap, path in reversed(staged):
+        if os.path.lexists(snap):
+            try:
+                os.replace(snap, path)
+            except OSError:
+                pass
+    for path in created:
+        try:
+            if os.path.lexists(path):
+                path.unlink()
+        except OSError:
+            pass
+    for directory in created_dirs:
+        shutil.rmtree(directory, ignore_errors=True)
+    if staging is not None:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def finish():
+
+    global staging
+    if staging is not None:
+        shutil.rmtree(staging, ignore_errors=True)
+        staging = None
+
+
 def write(path, content, mode=0o644):
 
-    if path.exists() or path.is_symlink():
-        read(path)
+    stage(path)
+    parent = path.parent
+    chain = []
+    while not parent.exists() and parent != desktop:
+        chain.append(parent)
+        parent = parent.parent
+    if chain:
+        created_dirs.append(chain[-1])
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
     try:
@@ -128,7 +202,12 @@ def package_expected(node, path):
     except json.JSONDecodeError:
         return None
     expected = result.get("expected")
-    return expected if isinstance(expected, str) else None
+    owner = result.get("packageId")
+    if not isinstance(expected, str):
+        return None
+    if identity.get("packageId") and owner != identity.get("packageId"):
+        return None
+    return expected
 
 
 def load_record():
@@ -177,9 +256,12 @@ if saved and saved["version"] == 1 \
 known = saved is not None and current in (tracked["originalHash"], tracked["stubHash"])
 genuine = expected_cli is not None and current == expected_cli
 foreign = saved is not None and not known and not genuine
+wrapper = saved is not None and current == tracked["stubHash"]
 same_generation = saved is not None and (
     saved["version"] == 1 and identity.get("source") == "pin"
-    or saved["version"] == 2 and saved["build"].get("workbenchHash") == identity.get("workbenchHash"))
+    or saved["version"] == 2 and saved["build"] == identity)
+backup_is_packaged = backup_bytes is not None and expected_cli is not None \
+    and digest(backup_bytes) == expected_cli
 
 
 def build_line():
@@ -212,16 +294,50 @@ elif args.uninstall:
         print("Autonom launcher is not installed; nothing to restore.")
     elif foreign:
         raise SystemExit("The Devin Desktop CLI changed outside Autonom; refusing to overwrite it.")
-    elif current == tracked["stubHash"]:
-        if not same_generation and (expected_cli is None or digest(backup_bytes) != expected_cli):
-            raise SystemExit("The CLI backup belongs to a previous Desktop build; refusing to restore it.")
-        write(entrypoint, backup_bytes, backup.stat().st_mode & 0o777)
+    elif wrapper:
+        if backup_bytes is None:
+            raise SystemExit("The recorded CLI backup is missing; refusing to restore.")
+        if not same_generation:
+            if expected_cli is None:
+                raise SystemExit("The Desktop build changed and the packaged CLI cannot be proven; "
+                                 "refusing to restore the recorded backup.")
+            if not backup_is_packaged:
+                raise SystemExit("The CLI backup belongs to a previous Desktop build; refusing to restore it.")
+        elif expected_cli is not None and not backup_is_packaged:
+            raise SystemExit("The recorded CLI backup is not the packaged CLI for this build; "
+                             "refusing to restore it.")
+        try:
+            write(entrypoint, backup_bytes, backup.stat().st_mode & 0o777)
+            finish()
+        except SystemExit:
+            rollback()
+            raise
+        except OSError as error:
+            rollback()
+            raise SystemExit(f"Uninstall failed: {error}")
         print("Restored the Devin Desktop CLI byte-for-byte. Original backups and inert launcher files retained.")
     else:
         print("The Devin Desktop CLI is already the vendor original; nothing to restore.")
 else:
     if foreign:
         raise SystemExit("The Devin Desktop CLI changed outside Autonom; refusing to overwrite it.")
+    if wrapper:
+        if backup_bytes is None:
+            raise SystemExit("The recorded CLI backup is missing; refusing to reinstall over it.")
+        if not same_generation:
+            if expected_cli is None:
+                raise SystemExit("The Desktop build changed but the packaged CLI cannot be proven; "
+                                 "refusing to touch the retained Autonom wrapper.")
+            if not backup_is_packaged:
+                raise SystemExit("The recorded CLI backup is not the packaged CLI for this Desktop "
+                                 "build; refusing to reuse it.")
+        elif expected_cli is not None and not backup_is_packaged:
+            raise SystemExit("The recorded CLI backup is not the packaged CLI for this Desktop "
+                             "build; refusing to reuse it.")
+    elif saved and expected_cli is not None and tracked["originalHash"] != expected_cli:
+        if same_generation or not genuine:
+            raise SystemExit("The Devin Desktop CLI does not match the packaged bytes for this "
+                             "build; refusing to reuse stale vendor bytes.")
     files = [
         "dist/launcher.js",
         "dist/runtime.js",
@@ -239,13 +355,12 @@ else:
     node_path = subprocess.check_output([node, "-p", "process.execPath"], text=True).strip()
     stub = ("#!/bin/sh\nexec " + shlex.quote(node_path) + " "
             + shlex.quote(str(payload / "dist/launcher.js")) + ' "$@"\n').encode()
-    original_hash = tracked["originalHash"] if known else current
+    original_hash = tracked["originalHash"] if known and not genuine else current
     next_record = {
         "version": 2,
         "build": identity,
         "cli": {"originalHash": original_hash, "stubHash": digest(stub), "backupPath": str(backup)},
     }
-    moved = False
     try:
         for file in files:
             source = repository / file
@@ -255,25 +370,26 @@ else:
             write(archive / "install.json", json.dumps(saved["raw"], indent=2).encode() + b"\n")
             if backup_bytes is not None:
                 write(archive / "devin-desktop.orig", backup_bytes)
-        if not backup.exists() or not known:
+        stage(entrypoint)
+        stage(backup)
+        if current == original_hash \
+                and (backup_bytes is None or digest(backup_bytes) != original_hash):
             os.replace(entrypoint, backup)
-            moved = True
         write(entrypoint, stub, 0o755)
         write(record, json.dumps(next_record, indent=2).encode() + b"\n")
+        finish()
+    except SystemExit:
+        rollback()
+        raise
     except PermissionError:
-        if moved and not entrypoint.exists() and backup.exists():
-            try:
-                os.replace(backup, entrypoint)
-            except OSError:
-                pass
+        rollback()
         raise SystemExit("Installation is read-only. After building as your normal user, run: sudo bash install.sh --no-build")
     except OSError as error:
-        if moved and not entrypoint.exists() and backup.exists():
-            try:
-                os.replace(backup, entrypoint)
-            except OSError:
-                pass
+        rollback()
         raise SystemExit(f"Installation failed: {error}")
+    except Exception:
+        rollback()
+        raise
     print(f"Installed Autonom launcher in {payload}.")
     print("Quit Desktop once, then run devin-desktop. Arguments and terminal output are unchanged from node dist/launcher.js.")
     print("Rollback: bash install.sh --uninstall (use the same --app path and permissions).")
