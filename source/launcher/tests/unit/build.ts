@@ -47,19 +47,21 @@ function lookup(app: string, options: {
     algorithm?: number;
     digests?: Record<string, string>;
     links?: Set<string>;
+    configs?: Set<string>;
 } = {}): PackageLookup
 {
+    const files = new Map(
+        ["package.json", "product.json", "out/main.js", WORKBENCH]
+            .map((file) => [join(app, file), {
+                digest: options.digests?.[file] ?? sha256(""),
+                linkTo: options.links?.has(file) ? "/elsewhere" : "",
+                config: options.configs?.has(file) ?? false,
+            }]),
+    );
     return async (path: string): Promise<PackageInfo | undefined> =>
     {
-        if (path !== join(app, "package.json"))
+        if (!files.has(path))
             return undefined;
-        const files = new Map(
-            ["package.json", "product.json", "out/main.js", WORKBENCH]
-                .map((file) => [join(app, file), {
-                    digest: options.digests?.[file] ?? sha256(""),
-                    linkTo: options.links?.has(file) ? "/elsewhere" : "",
-                }]),
-        );
         return {
             id: PACKAGE_ID,
             distro: DISTRO,
@@ -158,6 +160,30 @@ test("a file modified after packaging fails the recorded digest", async () =>
     {
         const digests = { [WORKBENCH]: "0".repeat(64) };
         await assert.rejects(verifyDesktopBuild(app, lookup(app, { digests })), /does not match/);
+    }
+    finally
+    {
+        await rm(app, { recursive: true, force: true });
+    }
+});
+
+test("a package config file tolerates local edits while executables stay byte-exact", async () =>
+{
+    const app = await fixture();
+    try
+    {
+        const digests = Object.fromEntries(await Promise.all(
+            ["package.json", "product.json", "out/main.js", WORKBENCH].map(async (file) =>
+                [file, sha256(await readFile(join(app, file), "utf8"))])));
+        const edited = JSON.parse(await readFile(join(app, "product.json"), "utf8"));
+        edited.checksums = { stale: true };
+        await writeFile(join(app, "product.json"), JSON.stringify(edited));
+        const identity = await verifyDesktopBuild(app,
+            lookup(app, { digests, configs: new Set(["product.json"]) }));
+        assert.equal(identity.source, "package");
+        digests["out/main.js"] = "0".repeat(64);
+        await assert.rejects(verifyDesktopBuild(app,
+            lookup(app, { digests, configs: new Set(["product.json"]) })), /does not match/);
     }
     finally
     {
