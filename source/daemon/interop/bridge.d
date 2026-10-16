@@ -37,6 +37,12 @@ private:
     Observed[string] observed;
     MonoTime[string] connections;
 
+    void dropObserved(string id)
+    {
+        observed.remove(id);
+        access.revokeMcp(id);
+    }
+
 protected:
     abstract Session createSession(string id);
 
@@ -210,12 +216,13 @@ public:
             foreach (id; observed.keys)
             {
                 if (observed[id].connection == connection)
-                    observed.remove(id);
+                    dropObserved(id);
             }
             return;
         }
 
         connections[connection.idup] = MonoTime.currTime;
+        bool[string] listed;
         foreach (id; ids)
         {
             Session.validateId(id);
@@ -224,7 +231,26 @@ public:
                 directories.get(id, null),
                 active.get(id, false)
             );
+            listed[id.idup] = true;
         }
+        foreach (id; observed.keys)
+        {
+            if (observed[id].connection == connection && id !in listed)
+                dropObserved(id);
+        }
+    }
+
+    void admitObserved(string connection, string id, string directory)
+    {
+        Session.validateId(id);
+        connections[connection.idup] = MonoTime.currTime;
+        Observed* found = id in observed;
+        observed[id.idup] = Observed(
+            connection.idup,
+            directory.length ? directory :
+                found !is null && found.connection == connection ? found.directory : null,
+            found !is null && found.connection == connection && found.active
+        );
     }
 
     void sweepObserved()
@@ -239,7 +265,7 @@ public:
         foreach (id; observed.keys)
         {
             if (observed[id].connection !in connections)
-                observed.remove(id);
+                dropObserved(id);
         }
     }
 

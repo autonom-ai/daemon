@@ -19,7 +19,9 @@ enum SCRUB_PREFIXES = [
     "VSCODE_",
     "WINDSURF_",
     "AUTONOM_RUN_",
-    "AUTONOM_CLIENT_"
+    "AUTONOM_CLIENT_",
+    "AUTONOM_MCP_",
+    "AUTONOM_RELAY_"
 ];
 
 string[string] childEnvironment() nothrow

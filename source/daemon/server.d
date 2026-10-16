@@ -82,6 +82,13 @@ void authorize(Request request, Output output)
     if (bridge.access.client(request.header.read("x-autonom-client")))
         return;
 
+    if (request.path.startsWith("/api/mcp/"))
+    {
+        if (!bridge.access.mcpSession(request.header.read("x-autonom-mcp")).length)
+            respondError(output, 403, "Autonom access requires a managed session capability");
+        return;
+    }
+
     string session = request.header.read("x-autonom-session");
     if (!session.length)
         session = request.get.read("session");
@@ -91,8 +98,13 @@ void authorize(Request request, Output output)
         request.path == "/api/messages" || request.path == "/api/events" ||
         request.path == "/api/schedules" || request.path.startsWith("/api/schedules/") ||
         request.path.startsWith("/api/permissions/");
-    if (!coordination || request.path == "/api/schedules/refresh" ||
-        bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
+    bool granted = bridge.authenticate(request.header.read("x-autonom-run"), session) !is null;
+    if (!granted)
+    {
+        string bound = bridge.access.mcpSession(request.header.read("x-autonom-mcp"));
+        granted = bound.length && (!session.length || bound == session);
+    }
+    if (!coordination || request.path == "/api/schedules/refresh" || !granted)
         respondError(output, 403, "Autonom access requires a managed session capability");
 }
 

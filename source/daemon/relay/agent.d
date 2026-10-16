@@ -1,6 +1,7 @@
 module daemon.relay.agent;
 
 import daemon.interop.acp : ACP_INJECT_PREFIX;
+import daemon.interop.mcp : injectCoord;
 import daemon.relay.control;
 
 import core.atomic : atomicOp;
@@ -86,6 +87,8 @@ private:
     string port;
     Tracked[string] inflight;
     ObservedSession[string] sessions;
+    string[string] pending;
+    string[string] admitted;
     shared int serving;
     shared bool halted;
     RelayControl control;
@@ -108,12 +111,19 @@ private:
         return null;
     }
 
+    struct Admission
+    {
+        string token;
+        string directory;
+    }
+
     void post(bool closed)
     {
         if (!token.length)
             return;
 
         JSONValue[] listed;
+        Admission[string] retries;
         synchronized (mutex)
         {
             foreach (entry; sessions)
@@ -123,6 +133,8 @@ private:
                     "directory": JSONValue(entry.directory),
                     "active": JSONValue(entry.active != 0)
                 ]);
+                if (auto issued = entry.id in admitted)
+                    retries[entry.id] = Admission(*issued, entry.directory);
             }
         }
 
@@ -145,6 +157,54 @@ private:
         catch (Exception)
         {
         }
+
+        if (!closed)
+        {
+            foreach (id, entry; retries)
+                admit(id, entry.token, entry.directory);
+        }
+    }
+
+    bool admit(string session, string issued, string directory)
+    {
+        if (!token.length || !session.length || !issued.length)
+            return false;
+
+        JSONValue body = JSONValue([
+            "connection": JSONValue(connection),
+            "session": JSONValue(session),
+            "token": JSONValue(issued),
+            "directory": JSONValue(directory)
+        ]);
+        try
+        {
+            HTTP request = HTTP("http://127.0.0.1:"~port~"/api/acp/admit");
+            request.proxy = "";
+            request.connectTimeout = 1.seconds;
+            request.operationTimeout = 2.seconds;
+            request.addRequestHeader("x-autonom-client", token);
+            request.setPostData(body.toString(), "application/json");
+            request.onReceive = (ubyte[] data) => data.length;
+            request.perform();
+            return request.statusLine.code == 200;
+        }
+        catch (Exception)
+            return false;
+    }
+
+    static string secret()
+    {
+        string ret;
+        foreach (_; 0..2)
+        {
+            foreach (character; randomUUID().toString())
+            {
+                if (character != '-')
+                    ret ~= character;
+            }
+        }
+
+        return ret;
     }
 
     void heartbeatLoop()
@@ -397,8 +457,46 @@ public:
     bool hasControl()
         => control !is null;
 
+    bool linked()
+        => token.length != 0;
+
     RelayControl injection()
         => control;
+
+    string rewrite(string frame)
+    {
+        if (!token.length)
+            return frame;
+
+        JSONValue message;
+        try
+            message = parseJSON(frame);
+        catch (Exception)
+            return frame;
+
+        if (message.type != JSONType.object || "method" !in message.object ||
+            message["method"].type != JSONType.string)
+            return frame;
+
+        string method = message["method"].str;
+        if (method != "session/new" && method != "session/load")
+            return frame;
+        if ("id" !in message.object)
+            return frame;
+        if ("params" !in message.object || message["params"].type != JSONType.object)
+            message.object["params"] = JSONValue.emptyObject;
+
+        string issued = secret();
+        synchronized (mutex)
+        {
+            string idKey = key(message["id"]);
+            if (idKey.length && pending.length < INFLIGHT_LIMIT)
+                pending[idKey] = issued;
+        }
+
+        message["params"] = injectCoord(message["params"], port, issued);
+        return message.toString();
+    }
 
     void begin()
     {
@@ -463,14 +561,31 @@ public:
         if (!idKey.length)
             return;
 
+        string admittedId;
+        string admittedToken;
+        string admittedDirectory;
         synchronized (mutex)
         {
+            Tracked tracked;
             Tracked* found = idKey in inflight;
+            if (found !is null)
+            {
+                tracked = *found;
+                inflight.remove(idKey);
+            }
+            string issued;
+            if (string* given = idKey in pending)
+            {
+                issued = *given;
+                pending.remove(idKey);
+            }
             if (found is null)
-                return;
+            {
+                if (!issued.length)
+                    return;
 
-            Tracked tracked = *found;
-            inflight.remove(idKey);
+                tracked = Tracked("session/new", null, null);
+            }
             bool outcome = "result" in message.object && !message["result"].isNull;
             if (tracked.method == "session/prompt" && tracked.sessionId in sessions)
             {
@@ -485,11 +600,25 @@ public:
                     message["result"]["sessionId"].type == JSONType.string ?
                     message["result"]["sessionId"].str : tracked.sessionId;
                 if (id.length)
+                {
                     sessions[id.idup] = ObservedSession(id.idup, tracked.directory, 0);
+                    if (issued.length)
+                    {
+                        admitted[id.idup] = issued;
+                        admittedId = id;
+                        admittedToken = issued;
+                        admittedDirectory = tracked.directory;
+                    }
+                }
             }
             if (tracked.method == "session/delete" && outcome && tracked.sessionId.length)
+            {
                 sessions.remove(tracked.sessionId);
+                admitted.remove(tracked.sessionId);
+            }
         }
+        if (admittedId.length)
+            admit(admittedId, admittedToken, admittedDirectory);
         poke();
     }
 

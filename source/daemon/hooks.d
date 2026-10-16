@@ -41,6 +41,10 @@ bool acceptHook(Request request, Output output, string event, out JSONValue data
     Execution execution = bridge.authenticate(request.header.read("x-autonom-run"), session, true);
     if (execution is null)
     {
+        string bound = bridge.access.mcpSession(request.header.read("x-autonom-mcp"));
+        if (bound.length && bound == session)
+            return true;
+
         bool blocked = event == "PreToolUse" &&
             (hookTool(data).startsWith(MCP_PREFIX) || request.header.read("x-autonom-run").length ||
             bridge.access.managed(session));
@@ -79,6 +83,10 @@ string hookDirectory(JSONValue data, string session)
     Session found = bridge.findSession(session);
     if (found !is null && found.execution !is null && found.execution.workspace.length)
         return found.execution.workspace;
+
+    string observed = bridge.observedDirectory(session);
+    if (observed.length)
+        return observed;
 
     try
         return bridge.sessionMetadata(session).directory;

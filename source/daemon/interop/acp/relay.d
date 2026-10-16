@@ -9,6 +9,7 @@ import core.sys.posix.poll : poll, pollfd, POLLIN;
 import core.sys.posix.unistd : close, pipe, read, write;
 import core.thread : Thread;
 import core.time : MonoTime, msecs, seconds;
+import std.algorithm : canFind, countUntil;
 import std.process : Config, Pid, ProcessPipes, Redirect, pipeProcess, tryWait;
 import std.stdio : File, stdin, stdout;
 
@@ -17,6 +18,7 @@ public:
 enum ACP_INJECT_PREFIX = "autonom:";
 
 alias RelayObserver = void delegate(bool clientToAgent, string frame);
+alias RelayRewriter = string delegate(string frame);
 
 interface RelayInjection
 {
@@ -33,7 +35,8 @@ int runRelay(
     RelayObserver observer = null,
     RelayInjection injection = null,
     File input = stdin,
-    File output = stdout
+    File output = stdout,
+    RelayRewriter rewriter = null
 )
 {
     Config options = Config.newEnv;
@@ -279,6 +282,46 @@ int runRelay(
     Thread clientToAgent = new Thread({
         ubyte[8192] buffer;
         bool boundary = true;
+        char[] head;
+        bool inspecting;
+        bool aligned()
+            => boundary && !head.length && !inspecting;
+        void flushHead()
+        {
+            if (!head.length)
+                return;
+
+            ubyte[] bytes = cast(ubyte[])head;
+            head = null;
+            if (!writeBounded(toChildFd, bytes, &aborted))
+                atomicStore(broken, true);
+            else if (observed !is null)
+                clientTap.feed(observed, true, bytes);
+        }
+        void emitHead()
+        {
+            string frame = head.idup;
+            head = null;
+            inspecting = false;
+            if (frame.length && frame[$-1] == '\n')
+                frame = frame[0..$-1];
+            string outgoing = frame;
+            try
+            {
+                string replaced = rewriter(frame);
+                if (replaced.length)
+                    outgoing = replaced;
+            }
+            catch (Exception)
+            {
+            }
+
+            ubyte[] bytes = cast(ubyte[])(outgoing~"\n");
+            if (!writeBounded(toChildFd, bytes, &aborted))
+                atomicStore(broken, true);
+            else if (observed !is null)
+                clientTap.feed(observed, true, bytes);
+        }
         for (;;)
         {
             if (atomicLoad(drained) || atomicLoad(broken) || atomicLoad(aborted))
@@ -288,7 +331,7 @@ int runRelay(
             int ready = poll(fds.ptr, 2, 50);
             if (ready == 0)
             {
-                if (boundary && injection !is null)
+                if (aligned() && injection !is null)
                     injectPending(injection, toChildFd, &aborted);
 
                 continue;
@@ -314,17 +357,70 @@ int runRelay(
             if (count == 0)
                 break;
 
-            if (!writeBounded(toChildFd, buffer[0..count], &aborted))
-                break;
+            if (rewriter is null)
+            {
+                if (!writeBounded(toChildFd, buffer[0..count], &aborted))
+                    break;
 
-            if (observed !is null)
-                clientTap.feed(observed, true, buffer[0..count]);
+                if (observed !is null)
+                    clientTap.feed(observed, true, buffer[0..count]);
 
-            boundary = buffer[count - 1] == '\n';
-            if (boundary && injection !is null)
+                boundary = buffer[count - 1] == '\n';
+            }
+            else
+            {
+                ubyte[] data = buffer[0..count];
+                while (data.length)
+                {
+                    if (!inspecting)
+                    {
+                        size_t want = data.countUntil(cast(ubyte)'\n') + 1;
+                        if (!want)
+                            want = data.length;
+                        if (head.length < REWRITE_PREFIX_LIMIT)
+                            want = want > REWRITE_PREFIX_LIMIT - head.length ?
+                                REWRITE_PREFIX_LIMIT - head.length : want;
+                        head ~= cast(char[])data[0..want];
+                        data = data[want..$];
+                        bool complete = head.length && head[$-1] == '\n';
+                        if (head.length < REWRITE_PREFIX_LIMIT && !complete)
+                            continue;
+                        if (candidateFrame(head))
+                        {
+                            inspecting = true;
+                            if (complete)
+                                emitHead();
+                        }
+                        else
+                            flushHead();
+                        continue;
+                    }
+
+                    ptrdiff_t newline = data.countUntil(cast(ubyte)'\n');
+                    if (newline < 0)
+                    {
+                        head ~= cast(char[])data;
+                        data = null;
+                        if (head.length > CONSUME_FRAME_LIMIT)
+                        {
+                            flushHead();
+                            inspecting = false;
+                        }
+                        continue;
+                    }
+
+                    head ~= cast(char[])data[0..newline];
+                    data = data[newline + 1..$];
+                    emitHead();
+                }
+
+                boundary = buffer[count - 1] == '\n';
+            }
+            if (aligned() && injection !is null)
                 injectPending(injection, toChildFd, &aborted);
         }
 
+        flushHead();
         io.toChild.close();
     });
 
@@ -385,6 +481,10 @@ private:
 
 enum CONSUME_PREFIX_LIMIT = 8 * 1024;
 enum CONSUME_FRAME_LIMIT = 4 * 1024 * 1024;
+enum REWRITE_PREFIX_LIMIT = CONSUME_PREFIX_LIMIT;
+
+bool candidateFrame(const(char)[] head)
+    => head.canFind("\"session/new\"") || head.canFind("\"session/load\"");
 
 void injectPending(RelayInjection injection, int toChildFd, shared(bool)* aborted)
 {
