@@ -1,0 +1,218 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+export const DESKTOP_VERSION = "1.126.0";
+export const DESKTOP_COMMIT = "fcf7ba39e6150055fad817f8716385b4d320d46d";
+export const WORKBENCH_HASH = "da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d";
+export const DESKTOP_MAIN = "./out/main.js";
+
+const MAX_METADATA_BYTES = 1024 * 1024;
+const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
+const MAX_PACKAGE_OUTPUT_BYTES = 32 * 1024 * 1024;
+const PACKAGE_QUERY_TIMEOUT_MS = 20000;
+const SHA256_DIGEST_ALGORITHM = 8;
+const WORKBENCH_FILE = "out/vs/workbench/workbench.desktop.main.js";
+const PACKAGE_FILES = ["package.json", "product.json", "out/main.js", WORKBENCH_FILE];
+
+export type BuildIdentity = {
+    version: string;
+    commit: string;
+    distro: string;
+    workbenchHash: string;
+    source: "pin" | "package";
+    packageId?: string;
+};
+
+export type PackageFile = {
+    digest: string;
+    linkTo: string;
+};
+
+export type PackageInfo = {
+    id: string;
+    distro: string;
+    digestAlgorithm: number;
+    files: Map<string, PackageFile>;
+};
+
+export type PackageLookup = (path: string) => Promise<PackageInfo | undefined>;
+
+export type PackageFileCheck = {
+    path: string;
+    sha256: string;
+    expected: string | null;
+    packageId?: string;
+    distro?: string;
+};
+
+const execute = promisify(execFile);
+
+async function rpmQuery(args: string[]): Promise<string>
+{
+    const result = await execute("rpm", args, {
+        maxBuffer: MAX_PACKAGE_OUTPUT_BYTES,
+        timeout: PACKAGE_QUERY_TIMEOUT_MS,
+        windowsHide: true,
+    });
+    return result.stdout;
+}
+
+export async function rpmPackageLookup(path: string): Promise<PackageInfo | undefined>
+{
+    let id: string;
+    try
+    {
+        id = (await rpmQuery(["-qf", "--qf", "%{NEVRA}", "--", path])).trim();
+        if (!id || id.includes("\n"))
+            return undefined;
+    }
+    catch
+    {
+        return undefined;
+    }
+
+    const header = await rpmQuery(["-q", "--qf", "%{FILEDIGESTALGO}\n[%{PACKAGEDIGESTALGOS}:%{PACKAGEDIGESTS}\n]", id]);
+    const lines = header.split("\n").filter((line) => line.trim());
+    const digestAlgorithm = Number(lines[0]);
+    const distro = lines.slice(1).find((line) => line.startsWith(`${SHA256_DIGEST_ALGORITHM}:`))
+        ?.split(":", 2)[1] ?? "";
+    const dump = await rpmQuery(["-q", "--dump", id]);
+    const files = new Map<string, PackageFile>();
+    for (const line of dump.split("\n"))
+    {
+        const fields = line.trimEnd().split(" ");
+        if (fields.length < 11)
+            continue;
+        const file = fields.slice(0, -10).join(" ");
+        const tail = fields.slice(-10);
+        if (file)
+            files.set(file, { digest: tail[2]!, linkTo: tail[9] === "X" ? "" : tail[9]! });
+    }
+    return { id, distro, digestAlgorithm, files };
+}
+
+async function fileDigest(path: string, limit: number): Promise<string>
+{
+    const descriptor = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try
+    {
+        const attributes = await descriptor.stat();
+        if (!attributes.isFile() || attributes.size > limit)
+            throw new Error(`${path} is not a bounded regular file.`);
+        const hash = createHash("sha256");
+        for await (const chunk of descriptor.createReadStream({ autoClose: false }))
+            hash.update(chunk as Buffer);
+        return hash.digest("hex");
+    }
+    finally
+    {
+        await descriptor.close();
+    }
+}
+
+async function readMetadata(path: string): Promise<Record<string, unknown>>
+{
+    const descriptor = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try
+    {
+        const attributes = await descriptor.stat();
+        if (!attributes.isFile() || attributes.size > MAX_METADATA_BYTES)
+            throw new Error("The Desktop build metadata is not a bounded regular file.");
+        const parsed: unknown = JSON.parse(await descriptor.readFile("utf8"));
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+            throw new Error("Invalid Desktop build metadata.");
+        return parsed as Record<string, unknown>;
+    }
+    finally
+    {
+        await descriptor.close();
+    }
+}
+
+async function requirePackageFile(info: PackageInfo, path: string): Promise<string>
+{
+    const entry = info.files.get(path);
+    if (!entry || entry.linkTo)
+        throw new Error(`${path} is not a regular file shipped by ${info.id}.`);
+    const actual = await fileDigest(path, MAX_BUNDLE_BYTES);
+    if (actual !== entry.digest)
+        throw new Error(`${path} does not match the ${info.id} package digest.`);
+    return actual;
+}
+
+export async function verifyDesktopBuild(
+    appRoot: string,
+    lookup: PackageLookup = rpmPackageLookup,
+): Promise<BuildIdentity>
+{
+    const metadata = await readMetadata(join(appRoot, "package.json"));
+    const product = await readMetadata(join(appRoot, "product.json"));
+    if (metadata.version !== DESKTOP_VERSION || metadata.main !== DESKTOP_MAIN
+        || product.commit !== DESKTOP_COMMIT)
+        throw new Error(`Unsupported Devin Desktop build. The Command Center requires version ${DESKTOP_VERSION} and its pinned commit.`);
+    const workbenchHash = await fileDigest(join(appRoot, WORKBENCH_FILE), MAX_BUNDLE_BYTES);
+    if (workbenchHash === WORKBENCH_HASH)
+        return { version: DESKTOP_VERSION, commit: DESKTOP_COMMIT, distro: "", workbenchHash, source: "pin" };
+    const info = await lookup(join(appRoot, "package.json"));
+    if (!info)
+        throw new Error("The native Desktop host bundle is not the verified pristine build. Restore it before launching.");
+    if (info.digestAlgorithm !== SHA256_DIGEST_ALGORITHM)
+        throw new Error(`Desktop package ${info.id} uses an unsupported file digest algorithm.`);
+    for (const file of PACKAGE_FILES)
+        await requirePackageFile(info, join(appRoot, file));
+    return {
+        version: DESKTOP_VERSION,
+        commit: DESKTOP_COMMIT,
+        distro: info.distro,
+        workbenchHash,
+        source: "package",
+        packageId: info.id,
+    };
+}
+
+export async function verifyPackageFile(
+    path: string,
+    lookup: PackageLookup = rpmPackageLookup,
+): Promise<PackageFileCheck>
+{
+    const sha256 = await fileDigest(path, MAX_BUNDLE_BYTES);
+    const info = await lookup(path);
+    if (!info)
+        return { path, sha256, expected: null };
+    if (info.digestAlgorithm !== SHA256_DIGEST_ALGORITHM)
+        throw new Error(`Desktop package ${info.id} uses an unsupported file digest algorithm.`);
+    const entry = info.files.get(path);
+    const expected = entry && !entry.linkTo ? entry.digest : null;
+    return { path, sha256, expected, packageId: info.id, distro: info.distro };
+}
+
+async function main(): Promise<number>
+{
+    const args = process.argv.slice(2);
+    if (args.length === 1 && args[0] !== "--file")
+    {
+        console.log(JSON.stringify(await verifyDesktopBuild(args[0]!)));
+        return 0;
+    }
+    if (args.length === 2 && args[0] === "--file")
+    {
+        console.log(JSON.stringify(await verifyPackageFile(args[1]!)));
+        return 0;
+    }
+    console.error("usage: build.js <app> | build.js --file <path>");
+    return 2;
+}
+
+if (require.main === module)
+    main().then((code) =>
+    {
+        process.exitCode = code;
+    }, (error: unknown) =>
+    {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+    });

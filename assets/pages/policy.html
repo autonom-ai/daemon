@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; img-src data:; form-action 'none';">
+    <title>Policy</title>
+    <style>
+        :root {
+            --bg-page: #121212;
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --card-bg: rgba(255, 255, 255, 0.025);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --row-border: rgba(255, 255, 255, 0.05);
+            --accent-emerald: #10b981;
+            --pill-active-bg: rgba(255, 255, 255, 0.08);
+            --pill-active-border: rgba(255, 255, 255, 0.12);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-page);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 36px 44px 60px 44px;
+            -webkit-font-smoothing: antialiased;
+        }
+        .container { max-width: 960px; margin: 0 auto; }
+        .breadcrumb {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .breadcrumb span.current { color: var(--text-primary); font-weight: 500; }
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.015em;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+        p.subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 12px;
+        }
+        .pills {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pill {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid transparent;
+            border-radius: 9999px;
+            padding: 5px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .pill:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.04); }
+        .pill.active {
+            background: var(--pill-active-bg);
+            color: var(--text-primary);
+            border-color: var(--pill-active-border);
+        }
+        .btn-primary {
+            background: #ffffff;
+            color: #111827;
+            border: none;
+            border-radius: 6px;
+            padding: 7px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.15s ease;
+        }
+        .btn-primary:hover { background: #e5e7eb; }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-primary);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
+        .callout {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-left: 3px solid #10b981;
+            border-radius: 8px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 28px;
+            gap: 16px;
+        }
+        .callout-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .callout-icon {
+            color: #34d399;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+        }
+        .callout-title {
+            font-size: 13.5px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+        .callout-desc {
+            font-size: 12.5px;
+            color: var(--text-secondary);
+        }
+        .section-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            margin-top: 28px;
+        }
+        .card-group {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .card-row {
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--row-border);
+            gap: 16px;
+        }
+        .card-row:last-child { border-bottom: none; }
+        .card-row-info { flex: 1; }
+        .card-row-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-row-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.45;
+        }
+        .badge {
+            font-size: 11px;
+            font-weight: 500;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.25);
+        }
+        .badge-green {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+        .badge-red {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+        .badge-neutral {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <span>Autonom</span>
+            <span>/</span>
+            <span class="current">Policy</span>
+        </div>
+        <h1>Workspace Policy</h1>
+        <p class="subtitle">Deterministic tool screening, permission rules, and AI decision gates.</p>
+
+        <div class="callout">
+            <div class="callout-content">
+                <div class="callout-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                </div>
+                <div>
+                    <div class="callout-title">PreToolUse enforcement active</div>
+                    <div class="callout-desc">Tool calls are screened on every invocation regardless of permission mode (including bypass).</div>
+                </div>
+            </div>
+            <button class="btn-secondary" onclick="alert('Workspace policy reloaded.');">Verify Rules</button>
+        </div>
+
+        <div class="toolbar">
+            <div class="pills">
+                <button class="pill active" onclick="filterRules(this, 'all')">All Rules (3)</button>
+                <button class="pill" onclick="filterRules(this, 'screen')">Screen</button>
+                <button class="pill" onclick="filterRules(this, 'allow')">Allow</button>
+                <button class="pill" onclick="filterRules(this, 'deny')">Deny</button>
+            </div>
+            <button class="btn-primary" onclick="openPolicyFile()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                Edit policy.yml
+            </button>
+        </div>
+
+        <div class="section-title">Active Screening Rules</div>
+        <div class="card-group" id="rules-group">
+            <div class="card-row" data-rule="screen">
+                <div class="card-row-info">
+                    <div class="card-row-title">
+                        Screen tool calls with Mercury Decide
+                        <span class="badge">SCREEN</span>
+                    </div>
+                    <div class="card-row-desc">Evaluates tool input questions using model <code>inception/mercury-decide:free</code> with probability threshold <code>0.5</code>.</div>
+                </div>
+            </div>
+            <div class="card-row" data-rule="allow">
+                <div class="card-row-info">
+                    <div class="card-row-title">
+                        Allow Read-Only Investigation Tools
+                        <span class="badge-green">ALLOW</span>
+                    </div>
+                    <div class="card-row-desc">Unscreened direct execution for safe filesystem and codebase inspection tools: <code>view_file</code>, <code>list_dir</code>, <code>search_web</code>.</div>
+                </div>
+            </div>
+            <div class="card-row" data-rule="deny">
+                <div class="card-row-info">
+                    <div class="card-row-title">
+                        Fallback Protection Rule
+                        <span class="badge-red">DENY</span>
+                    </div>
+                    <div class="card-row-desc">First-match wins. Any unmatched or unrecognized tool call is automatically rejected by the security boundary.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">Policy Governance & Limits</div>
+        <div class="card-group">
+            <div class="card-row">
+                <div class="card-row-info">
+                    <div class="card-row-title">Configuration Path</div>
+                    <div class="card-row-desc">Stored at <code>.devin/policy.yml</code> in workspace root. Files reload dynamically on every tool evaluation.</div>
+                </div>
+            </div>
+            <div class="card-row">
+                <div class="card-row-info">
+                    <div class="card-row-title">Model Decision Timeout</div>
+                    <div class="card-row-desc">Synchronous screening checks are strictly bounded to 8 seconds; timeouts fail closed with <code>denied: true</code>.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let vscode = null;
+        try {
+            if (typeof acquireVsCodeApi === "function") {
+                vscode = acquireVsCodeApi();
+            }
+        } catch {}
+
+        function filterRules(btn, type) {
+            document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+            if (btn) btn.classList.add("active");
+            document.querySelectorAll("#rules-group .card-row").forEach(row => {
+                if (type === "all" || row.dataset.rule === type) {
+                    row.style.display = "";
+                } else {
+                    row.style.display = "none";
+                }
+            });
+        }
+
+        function openPolicyFile() {
+            if (vscode) {
+                vscode.postMessage({ reqId: "open-policy", action: "editPolicy" });
+            }
+        }
+    </script>
+</body>
+</html>
