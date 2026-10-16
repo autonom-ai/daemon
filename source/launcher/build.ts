@@ -134,13 +134,14 @@ async function readMetadata(path: string): Promise<Record<string, unknown>>
     }
 }
 
-async function requirePackageFile(info: PackageInfo, path: string): Promise<string>
+async function requirePackageFile(info: PackageInfo, path: string,
+    mutableConfig = false): Promise<string>
 {
     const entry = info.files.get(path);
     if (!entry || entry.linkTo)
         throw new Error(`${path} is not a regular file shipped by ${info.id}.`);
     const actual = await fileDigest(path, MAX_BUNDLE_BYTES);
-    if (actual !== entry.digest && !entry.config)
+    if (actual !== entry.digest && !(mutableConfig && entry.config))
         throw new Error(`${path} does not match the ${info.id} package digest.`);
     return actual;
 }
@@ -164,7 +165,7 @@ export async function verifyDesktopBuild(
     if (info.digestAlgorithm !== SHA256_DIGEST_ALGORITHM)
         throw new Error(`Desktop package ${info.id} uses an unsupported file digest algorithm.`);
     for (const file of PACKAGE_FILES)
-        await requirePackageFile(info, join(appRoot, file));
+        await requirePackageFile(info, join(appRoot, file), file === "product.json");
     return {
         version: DESKTOP_VERSION,
         commit: DESKTOP_COMMIT,

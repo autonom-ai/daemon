@@ -184,6 +184,11 @@ test("a package config file tolerates local edits while executables stay byte-ex
         digests["out/main.js"] = "0".repeat(64);
         await assert.rejects(verifyDesktopBuild(app,
             lookup(app, { digests, configs: new Set(["product.json"]) })), /does not match/);
+        await assert.rejects(verifyDesktopBuild(app,
+            lookup(app, { digests, configs: new Set(["product.json", "out/main.js"]) })),
+            /does not match/);
+        await assert.rejects(verifyDesktopBuild(app, lookup(app, { digests })),
+            /does not match/);
     }
     finally
     {
