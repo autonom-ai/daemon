@@ -1,9 +1,14 @@
 # Autonom Research Notes
 
-These files record the codebase and repository-style research requested for
-the `interactive-acp` branch. They describe evidence at revision
-`08a8af4bb4321021c3f4ef4f167ea14d55c23dc1` (2026-10-16); they are not
-implementation documentation or a refactor plan.
+The evidence files below describe the codebase at revision
+`08a8af4bb4321021c3f4ef4f167ea14d55c23dc1` on `interactive-acp` (2026-10-16).
+The plan and dispositions follow that research and the user's subsequent
+clarifications; they describe proposed changes, not an implemented refactor.
+
+- [Simplification plan](plan.md) — clarified requirements, architectural
+  decisions, integration gates, sequencing, and acceptance criteria.
+- [File and folder dispositions](disposition.md) — keep, simplify, fold,
+  replace, and remove recommendations for the complete baseline inventory.
 
 - [Architecture review](review.md) — ownership boundaries, integration
   observations, the user-provided design lens, and questions the source does
@@ -19,8 +24,8 @@ implementation documentation or a refactor plan.
 - [Reference style study](reference-style.md) — observed code examples from
   this repository, `intuit`, `selenium`, Insurgent Client, and Devin Better
   ACP.
-- [Style-rules revision](style-rules-revision.md) — replacement draft for the
-  user's global conventions, with D access/attribute edge cases and evidence
+- [Adopted style revision](style-rules-revision.md) — user-approved replacement
+  for the removed older rules, with D access/attribute edge cases and evidence
   from `intuit`, `selenium`, Webull SDK, Akashi, Insurgent API/client, and Apps.
 - [Verification snapshot](verification.md) — commands/results at the audited
   revision and the limits of what they establish.

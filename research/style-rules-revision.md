@@ -1,8 +1,9 @@
-# Code Style Rules - Replacement Draft
+# Code Style Rules - Adopted Revision
 
-This is a complete replacement draft for the older global rules at
-`~/.codeium/windsurf/memories/global_rules.md`. It is research material in
-this repository; it has **not** modified or replaced that external file.
+The user adopted this revision during the Autonom planning review. It
+supersedes the older global rules, which the user confirms were outdated and
+have been removed. This document is the style baseline for the refactor, not
+merely an optional draft. No external configuration is modified by this review.
 
 The goal is consistent, readable code that feels native to its language and
 to the repositories it belongs to. These are defaults, not reasons to fight
