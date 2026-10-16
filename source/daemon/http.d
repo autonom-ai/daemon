@@ -164,6 +164,10 @@ Profile caller(Request request)
         return ret;
     }
 
+    string bound = bridge.access.mcpSession(request.header.read("x-autonom-mcp"));
+    if (bound.length)
+        session = bound;
+
     if (!session.length)
     {
         if (human)
@@ -171,7 +175,8 @@ Profile caller(Request request)
 
         throw new InvalidInputException("A session is required");
     }
-    if (!human && bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
+    if (!human && !bound.length &&
+        bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
         throw new InvalidInputException("Invalid managed session capability");
 
     Profile ret = profileStore.profileFor(session);

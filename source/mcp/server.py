@@ -1,9 +1,11 @@
 """autonom-coord MCP server.
 
 Speaks the Model Context Protocol over stdio and proxies tool calls to the
-autonom daemon's HTTP API. The Devin session hook injects ``session_id`` into
-every tool input, and the daemon resolves the calling profile from it. A tool
-call starts the daemon when it is not already listening.
+autonom daemon's HTTP API. Managed sessions receive a daemon-issued
+``AUTONOM_MCP_TOKEN`` in their server environment; the daemon resolves it to
+the owning session, so tool arguments never carry a session ID. Unmanaged
+processes advertise no tools. A tool call starts the daemon when it is not
+already listening.
 """
 
 import contextvars
@@ -26,8 +28,7 @@ START_TIMEOUT_SECONDS = 20
 START_POLL_SECONDS = 0.25
 SESSION_CONTEXT = contextvars.ContextVar("autonom_session", default="")
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-
-SESSION = {"type": "string", "description": "Injected by the Devin session hook."}
+RESOLVED_SESSION = None
 
 SOURCES = ["room", "dms", "pings"]
 
@@ -35,7 +36,7 @@ TOOLS = [
     {
         "name": "get_profiles",
         "description": "List existing profiles and the sessions registered to them.",
-        "inputSchema": {"type": "object", "properties": {"session_id": SESSION}},
+        "inputSchema": {"type": "object"},
     },
     {
         "name": "get_profile_status",
@@ -44,7 +45,6 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Profile name to check."},
-                "session_id": SESSION,
             },
         },
     },
@@ -55,7 +55,6 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Profile name to register."},
-                "session_id": SESSION,
             },
             "required": ["name"],
         },
@@ -75,7 +74,6 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": "Profile names to ping.",
                 },
-                "session_id": SESSION,
             },
             "required": ["text"],
         },
@@ -90,7 +88,6 @@ TOOLS = [
                 "source": {"type": "string", "enum": SOURCES, "description": "Which stream to read."},
                 "room": {"type": "string", "description": "Room to read when source is room."},
                 "limit": {"type": "integer", "description": "Maximum entries to return (default 50)."},
-                "session_id": SESSION,
             },
             "required": ["source"],
         },
@@ -99,7 +96,7 @@ TOOLS = [
         "name": "read_events",
         "description": "Read and clear your pending events: pings, scheduled room or dm activity, "
         "and clock wakes. Use this when a tool call is blocked by unread events.",
-        "inputSchema": {"type": "object", "properties": {"session_id": SESSION}},
+        "inputSchema": {"type": "object"},
     },
     {
         "name": "schedule",
@@ -114,7 +111,6 @@ TOOLS = [
                 "room": {"type": "string", "description": "Room to watch when type is room."},
                 "at": {"type": "string", "description": "ISO-8601 wake time when type is clock."},
                 "every": {"type": "integer", "description": "Seconds between wakes when type is clock."},
-                "session_id": SESSION,
             },
             "required": ["type"],
         },
@@ -122,7 +118,7 @@ TOOLS = [
     {
         "name": "list_schedules",
         "description": "List this profile's schedules.",
-        "inputSchema": {"type": "object", "properties": {"session_id": SESSION}},
+        "inputSchema": {"type": "object"},
     },
     {
         "name": "cancel_schedule",
@@ -131,7 +127,6 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "id": {"type": "string", "description": "Schedule id to cancel."},
-                "session_id": SESSION,
             },
             "required": ["id"],
         },
@@ -139,7 +134,7 @@ TOOLS = [
     {
         "name": "list_rooms",
         "description": "List visible rooms with message counts, unread counts, and last activity.",
-        "inputSchema": {"type": "object", "properties": {"session_id": SESSION}},
+        "inputSchema": {"type": "object"},
     },
     {
         "name": "create_room",
@@ -148,7 +143,6 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "The room name to create."},
-                "session_id": SESSION,
             },
             "required": ["name"],
         },
@@ -161,7 +155,6 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "The room name to delete."},
-                "session_id": SESSION,
             },
             "required": ["name"],
         },
@@ -179,7 +172,6 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": "Profile names allowed in the room, or null for everyone.",
                 },
-                "session_id": SESSION,
             },
             "required": ["name"],
         },
@@ -192,7 +184,6 @@ TOOLS = [
             "properties": {
                 "name": {"type": "string", "description": "The room to change."},
                 "profile": {"type": "string", "description": "The profile to add as an admin."},
-                "session_id": SESSION,
             },
             "required": ["name", "profile"],
         },
@@ -205,7 +196,6 @@ TOOLS = [
             "properties": {
                 "name": {"type": "string", "description": "The room to change."},
                 "profile": {"type": "string", "description": "The admin to remove."},
-                "session_id": SESSION,
             },
             "required": ["name", "profile"],
         },
@@ -303,7 +293,7 @@ def call(method, path, body=None, query=None):
         method=method,
         headers={
             "content-type": "application/json",
-            "x-autonom-run": os.environ.get("AUTONOM_RUN_TOKEN", ""),
+            "x-autonom-mcp": os.environ.get("AUTONOM_MCP_TOKEN", ""),
             "x-autonom-session": SESSION_CONTEXT.get(),
         },
     )
@@ -327,15 +317,24 @@ def call(method, path, body=None, query=None):
             ) from failure
 
 
-def session(arguments):
-    if not os.environ.get("AUTONOM_RUN_TOKEN"):
+def session():
+    global RESOLVED_SESSION
+    if not os.environ.get("AUTONOM_MCP_TOKEN"):
         raise ToolError("Only sessions started by Autonom may use Autonom tools")
+    if RESOLVED_SESSION is None:
+        resolved = None
+        try:
+            resolved = call("GET", "/api/mcp/session")
+        except ToolError:
+            pass
 
-    value = arguments.get("session_id")
-    if not isinstance(value, str) or not value:
-        raise ToolError("No session ID; the autonom hooks are not installed for this session")
+        caller = resolved.get("id") if isinstance(resolved, dict) else None
+        if not isinstance(caller, str) or not caller:
+            raise ToolError("Only sessions started by Autonom may use Autonom tools")
 
-    return value
+        RESOLVED_SESSION = caller
+
+    return RESOLVED_SESSION
 
 
 def room(arguments):
@@ -363,7 +362,7 @@ def profile_of(caller):
 
 
 def dispatch(name, arguments):
-    caller = session(arguments)
+    caller = session()
     if name == "get_profiles":
         return call("GET", "/api/profiles")
     if name == "get_profile_status":
@@ -443,7 +442,11 @@ def call_tool(name, arguments):
     if not isinstance(arguments, dict):
         return {"content": [{"type": "text", "text": "Tool arguments must be an object"}], "isError": True}
 
-    token = SESSION_CONTEXT.set(arguments.get("session_id", ""))
+    try:
+        token = SESSION_CONTEXT.set(session())
+    except ToolError as failure:
+        return {"content": [{"type": "text", "text": str(failure)}], "isError": True}
+
     try:
         result = dispatch(name, arguments)
         return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
@@ -489,7 +492,7 @@ def handle(request):
     if method == "ping":
         return success(request_id, {})
     if method == "tools/list":
-        return success(request_id, {"tools": TOOLS if os.environ.get("AUTONOM_RUN_TOKEN") else []})
+        return success(request_id, {"tools": TOOLS if os.environ.get("AUTONOM_MCP_TOKEN") else []})
     if method == "tools/call":
         return success(
             request_id,

@@ -7,7 +7,7 @@ import daemon.relay.agent;
 import std.file : read;
 import std.path : buildPath;
 import std.process : environment;
-import std.stdio : stderr;
+import std.stdio : stderr, stdin, stdout;
 import std.string : startsWith, strip;
 import std.uuid : randomUUID;
 
@@ -24,6 +24,7 @@ int main(string[] args)
     }
 
     RelayAgent agent;
+    string dataDir;
     if (configPath.length)
     {
         try
@@ -36,6 +37,7 @@ int main(string[] args)
                 connection,
                 buildPath(config.dataDir, "acp", connection~".sock")
             );
+            dataDir = config.dataDir;
         }
         catch (Exception error)
         {
@@ -50,16 +52,23 @@ int main(string[] args)
     string[string] child = environment.toAA;
     foreach (name; child.keys)
     {
-        if (name.startsWith("AUTONOM_CLIENT_") || name.startsWith("AUTONOM_RUN_"))
+        if (name.startsWith("ACP_") || name.startsWith("AUTONOM_CLIENT_") ||
+            name.startsWith("AUTONOM_RUN_") || name.startsWith("AUTONOM_MCP_") ||
+            name.startsWith("AUTONOM_RELAY_"))
             child.remove(name);
     }
+    if (dataDir.length)
+        child["AUTONOM_DATA_DIR"] = dataDir;
 
     int status = runRelay(
         [devin, "acp"],
         child,
         null,
         (bool clientToAgent, string frame) { agent.frame(clientToAgent, frame); },
-        agent.injection
+        agent.injection,
+        stdin,
+        stdout,
+        agent.linked() ? &agent.rewrite : null
     );
     agent.close();
     return status;

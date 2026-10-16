@@ -33,12 +33,31 @@ def block(reason):
     return {"decision": "block", "reason": reason}
 
 
+def mcp_token(session):
+    directory = os.environ.get("AUTONOM_DATA_DIR", "")
+    if not directory or not isinstance(session, str) or not session:
+        return ""
+
+    path = os.path.join(directory, "mcp", session + ".token")
+    if not os.path.exists(path):
+        return ""
+
+    try:
+        with open(path) as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
 def call(method, path, body=None, session=None):
     headers = {"x-autonom-run": os.environ.get("AUTONOM_RUN_TOKEN", "")}
     if session is None and isinstance(body, dict):
         session = body.get("session_id")
     if isinstance(session, str) and session:
         headers["x-autonom-session"] = session
+        token = mcp_token(session)
+        if token:
+            headers["x-autonom-mcp"] = token
     data = json.dumps(body).encode() if body is not None else None
     if data is not None:
         headers["content-type"] = "application/json"
@@ -110,7 +129,8 @@ def run():
             raise HookError("Invalid hook input")
 
         event = data.get("hook_event_name")
-        if not os.environ.get("AUTONOM_RUN_TOKEN"):
+        session = data.get("session_id")
+        if not os.environ.get("AUTONOM_RUN_TOKEN") and not mcp_token(session):
             coordination = str(data.get("tool_name") or "").startswith(COORDINATION_PREFIXES)
             result = block(
                 "Only sessions started by Autonom may use Autonom tools") if coordination else {}

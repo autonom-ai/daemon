@@ -20,7 +20,7 @@
 			},
 			"excludedSourceFiles": [
 				"source/daemon/app.d",
-				"source/daemon/relay/**",
+				"source/daemon/relay/package.d",
 				"source/evals/**"
 			],
 			"mainSourceFile": "bin/ut.d",
