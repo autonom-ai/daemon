@@ -33,7 +33,7 @@ await Promise.all([
     }),
     build({
         ...common,
-        entryPoints: [join(launcher, "build.ts")],
+        entryPoints: [join(launcher, "buildcli.ts")],
         outfile: join(dist, "build.js"),
         platform: "node",
         format: "cjs",

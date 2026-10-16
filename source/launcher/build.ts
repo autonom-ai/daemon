@@ -30,6 +30,7 @@ export type BuildIdentity = {
 export type PackageFile = {
     digest: string;
     linkTo: string;
+    config: boolean;
 };
 
 export type PackageInfo = {
@@ -90,7 +91,7 @@ export async function rpmPackageLookup(path: string): Promise<PackageInfo | unde
         const file = fields.slice(0, -10).join(" ");
         const tail = fields.slice(-10);
         if (file)
-            files.set(file, { digest: tail[2]!, linkTo: tail[9] === "X" ? "" : tail[9]! });
+            files.set(file, { digest: tail[2]!, linkTo: tail[9] === "X" ? "" : tail[9]!, config: tail[6] === "1" });
     }
     return { id, distro, digestAlgorithm, files };
 }
@@ -139,7 +140,7 @@ async function requirePackageFile(info: PackageInfo, path: string): Promise<stri
     if (!entry || entry.linkTo)
         throw new Error(`${path} is not a regular file shipped by ${info.id}.`);
     const actual = await fileDigest(path, MAX_BUNDLE_BYTES);
-    if (actual !== entry.digest)
+    if (actual !== entry.digest && !entry.config)
         throw new Error(`${path} does not match the ${info.id} package digest.`);
     return actual;
 }
@@ -190,7 +191,7 @@ export async function verifyPackageFile(
     return { path, sha256, expected, packageId: info.id, distro: info.distro };
 }
 
-async function main(): Promise<number>
+export async function main(): Promise<number>
 {
     const args = process.argv.slice(2);
     if (args.length === 1 && args[0] !== "--file")
@@ -206,13 +207,3 @@ async function main(): Promise<number>
     console.error("usage: build.js <app> | build.js --file <path>");
     return 2;
 }
-
-if (require.main === module)
-    main().then((code) =>
-    {
-        process.exitCode = code;
-    }, (error: unknown) =>
-    {
-        console.error(error instanceof Error ? error.message : String(error));
-        process.exitCode = 1;
-    });

@@ -118,7 +118,8 @@ test("an unsupported Desktop build fails closed", async () =>
         await writeFile(join(appRoot, "product.json"), JSON.stringify({ commit: DESKTOP_COMMIT }));
         await writeFile(join(appRoot, "package.json"), JSON.stringify({ version: "1.127.0" }));
         await assert.rejects(verifyDesktopBuild(appRoot), /Unsupported Devin Desktop build/);
-        await writeFile(join(appRoot, "package.json"), JSON.stringify({ version: DESKTOP_VERSION }));
+        await writeFile(join(appRoot, "package.json"),
+            JSON.stringify({ version: DESKTOP_VERSION, main: "./out/main.js" }));
         await writeFile(join(appRoot, "product.json"), JSON.stringify({ commit: "0000000000000000000000000000000000000000" }));
         await assert.rejects(verifyDesktopBuild(appRoot), /Unsupported Devin Desktop build/);
         await writeFile(join(appRoot, "product.json"), JSON.stringify({ commit: DESKTOP_COMMIT }));
