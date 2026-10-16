@@ -30,7 +30,7 @@ if args and args[0] == "-qf":
     sys.exit(0)
 if len(args) >= 2 and args[0] == "-q" and args[1] == "--dump":
     for path, entry in manifest["files"].items():
-        print(f"{path} 0 0 {entry['digest']} 0100644 root root 0 0 0 X")
+        print(f"{path} 0 0 {entry['digest']} 0100644 root root {int(entry.get('config', False))} 0 0 X")
     sys.exit(0)
 if len(args) >= 2 and args[0] == "-q":
     sys.stdout.write(f"8\\n8:{manifest['distro']}\\n")
@@ -73,7 +73,7 @@ async function fixture(): Promise<Fixture>
 
 async function track(manifestPath: string, app: string, cli: string): Promise<void>
 {
-    const files: Record<string, { digest: string; nevra: string }> = {};
+    const files: Record<string, { digest: string; nevra: string; config?: boolean }> = {};
     for (const file of [
         join(app, "package.json"),
         join(app, "product.json"),
@@ -81,7 +81,7 @@ async function track(manifestPath: string, app: string, cli: string): Promise<vo
         join(app, "out/vs/workbench/workbench.desktop.main.js"),
         cli,
     ])
-        files[file] = { digest: sha256(await readFile(file)), nevra: NEVRA };
+        files[file] = { digest: sha256(await readFile(file)), nevra: NEVRA, config: file.endsWith("product.json") };
     await writeFile(manifestPath, JSON.stringify({ distro: DISTRO, files }));
 }
 
