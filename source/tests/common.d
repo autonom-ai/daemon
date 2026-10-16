@@ -28,7 +28,8 @@ JSONValue request(
     HTTP.Method method = HTTP.Method.undefined,
     string runToken = null,
     string session = null,
-    bool control = true
+    bool control = true,
+    string mcpToken = null
 )
 {
     HTTP client = HTTP("http://127.0.0.1:18080"~path);
@@ -42,6 +43,8 @@ JSONValue request(
         client.addRequestHeader("x-autonom-run", runToken);
     if (session.length)
         client.addRequestHeader("x-autonom-session", session);
+    if (mcpToken.length)
+        client.addRequestHeader("x-autonom-mcp", mcpToken);
     if (!runToken.length && control && path.startsWith("/api/hooks/") && data.length)
     {
         try

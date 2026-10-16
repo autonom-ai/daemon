@@ -1,8 +1,10 @@
 module daemon.interop.devin.acp;
 
 import daemon.exception;
+import daemon.interop.access : Access;
 import daemon.interop.acp;
 import daemon.interop.execution;
+import daemon.interop.mcp : injectCoord;
 import daemon.interop.process;
 import daemon.storage;
 
@@ -66,12 +68,16 @@ ExecutionTask acpTask(
     string model,
     string mode,
     string[string] environment,
-    string runToken
+    string runToken,
+    string port,
+    string dataDir,
+    Access access
 )
 {
     return (Execution execution) {
         string[string] child = childEnvironment();
         child.remove("AUTONOM_CLIENT_TOKEN");
+        child["AUTONOM_DATA_DIR"] = dataDir;
         if (runToken.length)
             child["AUTONOM_RUN_TOKEN"] = runToken;
         foreach (name, value; environment)
@@ -161,23 +167,24 @@ ExecutionTask acpTask(
             "clientInfo": JSONValue(["name": JSONValue("autonom"), "version": JSONValue("1")])
         ]), 30.seconds);
 
+        string mcpToken = access.mint();
         JSONValue created;
         if (sessionId.length)
         {
-            created = agent.request("session/load", JSONValue([
+            created = agent.request("session/load", injectCoord(JSONValue([
                 "sessionId": JSONValue(sessionId),
                 "cwd": JSONValue(directory),
                 "mcpServers": JSONValue.emptyArray
-            ]), 60.seconds);
+            ]), port, mcpToken), 60.seconds);
             if ("sessionId" in created.object && created["sessionId"].str != sessionId)
                 throw new Exception("Agent loaded a different session");
         }
         else
         {
-            created = agent.request("session/new", JSONValue([
+            created = agent.request("session/new", injectCoord(JSONValue([
                 "cwd": JSONValue(directory),
                 "mcpServers": JSONValue.emptyArray
-            ]), 60.seconds);
+            ]), port, mcpToken), 60.seconds);
             if ("sessionId" !in created.object || created["sessionId"].type != JSONType.string)
                 throw new Exception("Agent did not return a session");
 
@@ -185,10 +192,11 @@ ExecutionTask acpTask(
         }
 
         bound = execution.sessionId;
+        access.admitMcp(mcpToken, bound);
         applyOptions(agent, created, bound, model, mode);
 
-        long[] pending = [agent.send("session/prompt", promptParams(bound, prompt))];
         live = true;
+        long[] pending = [agent.send("session/prompt", promptParams(bound, prompt))];
         execution.markSteerable();
 
         bool[long] steered;

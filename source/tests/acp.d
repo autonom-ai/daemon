@@ -1,6 +1,8 @@
 module tests.acp;
 
 import daemon.interop.acp;
+import daemon.interop.mcp : MCP_SERVER_NAME, injectCoord;
+import daemon.relay.agent;
 import tests.common;
 import unit_threaded : Name, Serial, should, shouldThrow;
 
@@ -9,7 +11,7 @@ import core.sys.posix.unistd : read;
 import core.thread : Thread;
 import core.time : msecs, seconds;
 import std.algorithm : canFind, endsWith;
-import std.array : join, replicate;
+import std.array : join, replicate, split;
 import std.file;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.path : buildPath;
@@ -141,6 +143,106 @@ unittest
     }
 
     runRelay(["/bin/false"], null, null, null, null, input, output).should == 1;
+}
+
+@Name("Relay rewrites session frames while forwarding other traffic unchanged")
+unittest
+{
+    string sessionNew = `{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}`;
+    string sessionLoad = `{"jsonrpc":"2.0","id":3,"method":"session/load","params":{"sessionId":"s","pad":"`~
+        "p".replicate(16 * 1024)~`"}}`;
+    string prompt = `{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"s",`~
+        `"text":"mentions \"session/load\" in prose"}}`;
+    string notice = `{"jsonrpc":"2.0","method":"session/update","params":{"x":1}}`;
+    string payload = sessionNew~"\n"~prompt~"\n"~sessionLoad~"\n"~notice~"\n";
+
+    File input = File.tmpfile();
+    File output = File.tmpfile();
+    scope(exit)
+    {
+        input.close();
+        output.close();
+    }
+
+    input.write(payload);
+    input.rewind();
+
+    int status = runRelay(
+        ["/bin/cat"],
+        null,
+        null,
+        null,
+        null,
+        input,
+        output,
+        (string frame) {
+            JSONValue message = parseJSON(frame);
+            if (message["method"].str != "session/new")
+                return frame;
+
+            message["params"]["injected"] = JSONValue(true);
+            return message.toString();
+        }
+    );
+    status.should == 0;
+    output.rewind();
+    string[] lines = (cast(string)output.byChunk(4096).join).split("\n");
+    lines.length.should == 5;
+    JSONValue first = parseJSON(lines[0]);
+    first["params"]["injected"].boolean.should == true;
+    first["params"]["cwd"].str.should == "/tmp";
+    lines[1].should == prompt;
+    lines[2].should == sessionLoad;
+    lines[3].should == notice;
+}
+
+@Name("RelayAgent rewrites session creation and binds credentials on the response")
+unittest
+{
+    RelayAgent agent = new RelayAgent("client-token", "18080", "connection", null);
+    scope(exit)
+        agent.close();
+
+    string frame = `{"jsonrpc":"2.0","id":7,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}`;
+    JSONValue rewritten = parseJSON(agent.rewrite(frame));
+    rewritten["id"].integer.should == 7;
+    rewritten["method"].str.should == "session/new";
+    JSONValue[] servers = rewritten["params"]["mcpServers"].array;
+    servers.length.should == 1;
+    servers[0]["name"].str.should == MCP_SERVER_NAME;
+    string injected;
+    foreach (entry; servers[0]["env"].array)
+    {
+        if (entry["name"].str == "AUTONOM_MCP_TOKEN")
+            injected = entry["value"].str;
+    }
+    injected.length.should == 64;
+
+    agent.rewrite(`{"jsonrpc":"2.0","method":"session/update","params":{}}`).should ==
+        `{"jsonrpc":"2.0","method":"session/update","params":{}}`;
+    agent.rewrite("not json").should == "not json";
+
+    agent.frame(true, rewritten.toString());
+    agent.frame(false, `{"jsonrpc":"2.0","id":7,"result":{"sessionId":"sess-1"}}`);
+}
+
+@Name("injectCoord replaces a stale entry and preserves other servers")
+unittest
+{
+    JSONValue params = parseJSON(`{"cwd":"/x","mcpServers":[{"name":"other","command":"x"},`~
+        `{"name":"autonom-coord","command":"stale","env":[]}]}`);
+    JSONValue injected = injectCoord(params, "18080", "token-value");
+    JSONValue[] servers = injected["mcpServers"].array;
+    servers.length.should == 2;
+    servers[0]["name"].str.should == "other";
+    servers[1]["name"].str.should == MCP_SERVER_NAME;
+    string[string] env;
+    foreach (entry; servers[1]["env"].array)
+        env[entry["name"].str] = entry["value"].str;
+    env["AUTONOM_PORT"].should == "18080";
+    env["AUTONOM_MCP_TOKEN"].should == "token-value";
+    env["AUTONOM_RUN_TOKEN"].should == "";
+    env["AUTONOM_CLIENT_TOKEN"].should == "";
 }
 
 @Name("AcpClient performs initialize, session, prompt, and cancellation")

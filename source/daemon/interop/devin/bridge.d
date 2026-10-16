@@ -25,6 +25,7 @@ import std.exception : ErrnoException;
 import std.file;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.path : buildPath;
+import std.process : environment;
 import std.stdio : File;
 import std.string : toLower;
 import std.uuid : UUID;
@@ -152,6 +153,7 @@ public:
     const string sessionDatabase;
     const string compactionThresholds;
     const string dataDir;
+    const string mcpPort;
 
     this(Config configuration)
     {
@@ -160,6 +162,7 @@ public:
         sessionDatabase = configuration.sessionDatabase;
         compactionThresholds = configuration.compactionThresholds;
         dataDir = configuration.dataDir;
+        mcpPort = environment.get("AUTONOM_PORT", "8080");
         executionTimeout = configuration.executionTimeout;
         controlMutex = new Mutex();
         collect();
@@ -439,7 +442,10 @@ private:
             model,
             mode,
             environment,
-            runToken
+            runToken,
+            mcpPort,
+            dataDir,
+            access
         ), null, dependency);
     }
 }
