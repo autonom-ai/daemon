@@ -14,7 +14,7 @@ export async function runtimeStatus(session: CdpSession): Promise<RuntimeStatus 
             revision: status.revision, activeItem: status.activeItem, windowId: status.windowId,
             editorActive: status.editorActive,
             items: status.items.slice(0, 100).map(({id, label, path}) => ({id, label, path})),
-            sections: status.sections,
+            sections: status.sections, spaces: status.spaces,
             loadedActions: status.loadedActions, compiledScripts: status.compiledScripts
         };
     })()`) as RuntimeStatus | null;

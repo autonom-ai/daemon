@@ -41,16 +41,15 @@
     flex-shrink: 0;
     pointer-events: none;
 }
-[data-autonom-section] {
+[data-autonom-section],
+[data-autonom-section-empty] {
     list-style: none;
-    padding: 14px var(--sidebar-content-button-x-padding, 10px) 5px;
 }
-[data-autonom-section] h2 {
-    margin: 0;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-secondary, var(--vscode-descriptionForeground));
+[data-autonom-section] {
+    margin-top: 3px;
+}
+[data-autonom-section] + [data-autonom-section] {
+    margin-top: 4px;
 }
 button[data-autonom-item][aria-busy="true"] {
     cursor: progress;

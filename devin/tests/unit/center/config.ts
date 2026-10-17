@@ -1,5 +1,6 @@
 import type { ActionCache } from "../../../launcher/center/config";
 import { loadAction, loadCenter } from "../../../launcher/center/config";
+import { declaredItems } from "../../../launcher/center/content";
 
 import { stringify } from "yaml";
 
@@ -173,6 +174,97 @@ test("native Cloud import ids are validated and may be placed without custom act
     finally
     {
         await rm(dirname(path), { recursive: true, force: true });
+    }
+});
+
+test("the reserved spaces id imports the native Spaces section without an item", async () =>
+{
+    const path = await center({}, {
+        devin_cloud: ["wiki", "spaces"],
+        sections: [{ id: "native", items: [{ id: "wiki" }] }],
+    });
+    try
+    {
+        const content = await loadCenter(path);
+        assert.deepEqual(content.devinCloud, ["wiki", "spaces"]);
+        assert.deepEqual(declaredItems(content).map((item) => item.id), ["wiki"]);
+        await writeFile(path, stringify({ devin_cloud: ["spaces", "spaces"], sections: [] }));
+        await assert.rejects(loadCenter(path), /unique native/);
+    }
+    finally
+    {
+        await rm(dirname(path), { recursive: true, force: true });
+    }
+});
+
+test("section buttons load validated js actions and resolve through loadAction", async () =>
+{
+    const path = await center({ "actions/new-room.js": "await context.open('rooms');" }, {
+        sections: [{ id: "rooms", label: "Rooms", items: [], buttons: [
+            { id: "rooms-search", search: true },
+            { id: "rooms-new", label: "New room", icon: "plus", actions: { left_click: "actions/new-room.js" } },
+            { id: "rooms-hidden", hidden: true },
+        ] }],
+    });
+    try
+    {
+        const content = await loadCenter(path);
+        assert.equal(content.sections[0]?.items.length, 0);
+        const buttons = content.sections[0]?.buttons;
+        assert.equal(buttons?.length, 3);
+        assert.equal(buttons?.[0]?.search, true);
+        assert.equal(buttons?.[1]?.actions?.left_click.type, "js");
+        assert.equal(buttons?.[1]?.actions?.left_click.file, "actions/new-room.js");
+        assert.equal(buttons?.[2]?.hidden, true);
+        assert.ok(!JSON.stringify(content).includes("context.open"));
+        assert.deepEqual(declaredItems(content).map((item) => item.id), ["rooms-new"]);
+        const cache: ActionCache = new Map();
+        const source = await loadAction(path, content, "rooms-new", content.revision!, cache);
+        assert.deepEqual(source, { type: "js", source: "await context.open('rooms');" });
+        assert.equal(await loadAction(path, content, "rooms-new", content.revision!, cache), source);
+        await assert.rejects(loadAction(path, content, "rooms-search", content.revision!, cache), /Unknown or hidden/);
+        await assert.rejects(loadAction(path, content, "rooms-hidden", content.revision!, cache), /Unknown or hidden/);
+    }
+    finally
+    {
+        await rm(dirname(path), { recursive: true, force: true });
+    }
+});
+
+test("invalid section buttons reject the entire definition", async () =>
+{
+    const action = { left_click: "actions/new.js" };
+    const page = { left_click: "pages/events.html" };
+    const cases = [
+        { sections: [{ id: "group", buttons: [{ id: "add", actions: action }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: "not a list" }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "Bad Id", search: true }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", label: "x".repeat(201), actions: action }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", icon: "IconPlus", actions: action }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", icon: "file", actions: action }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", hidden: "yes", actions: action }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "find", search: "yes" }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", actions: action, tab: "old" }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "find", search: true, actions: action }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add" }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", actions: page }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", hidden: true, actions: page }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", actions: { left_click: "actions/missing.js" } }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "group", search: true }] }] },
+        { sections: [{ id: "group", label: "Group", items: [{ id: "add", actions: page }], buttons: [{ id: "add", actions: action }] }] },
+        { items: [{ id: "add", actions: page }], sections: [{ id: "group", label: "Group", buttons: [{ id: "add", actions: action }] }] },
+    ];
+    for (const config of cases)
+    {
+        const path = await center({ "pages/events.html": "<h1>Events</h1>", "actions/new.js": "noop" }, config);
+        try
+        {
+            await assert.rejects(loadCenter(path));
+        }
+        finally
+        {
+            await rm(dirname(path), { recursive: true, force: true });
+        }
     }
 });
 

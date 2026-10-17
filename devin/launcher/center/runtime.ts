@@ -1,6 +1,6 @@
 import { ActionStore, actionKey } from "./actions";
 import type { CenterContent, NativeItem, SidebarItem } from "./content";
-import { declaredItems, overlayItems } from "./content";
+import { declaredItems, overlayItems, spacesSection } from "./content";
 import { createLayout } from "./layout";
 import { validateConfig, validateServices } from "./native";
 import { Patches } from "./patches";
@@ -174,7 +174,10 @@ export function install(services: any, config: RuntimeConfig): any
                     id: section.id,
                     label: section.label ?? null,
                     items: section.items.filter((item) => !item.hidden).map((item) => item.id),
+                    buttons: (section.buttons ?? []).filter((button) => !button.hidden).map((button) => button.id),
                 })),
+                spaces: !(content.enabled && mode === "autonom")
+                    || Boolean(content.devinCloud?.includes(spacesSection)),
                 loadedActions: actions.sources.size + actions.scripts.size,
                 compiledScripts: actions.scripts.size,
             };
@@ -305,8 +308,10 @@ export function install(services: any, config: RuntimeConfig): any
             if (disposed || !content.enabled || mode !== "autonom" || !script || script.version !== version)
                 throw new Error("The JS action is not available in this UI snapshot.");
 
+            const section = content.sections.find((entry) => entry.buttons?.some((button) => button.id === id));
             await script.run(Object.freeze({
                 item: Object.freeze({ id, label: items.get(id)?.label ?? id }),
+                section: section && Object.freeze({ id: section.id, label: section.label ?? section.id }),
                 request: (message: Record<string, unknown>) => actions.request(message),
                 open: (itemId: string) => runtime.open(itemId),
                 executeCommand: (command: string, ...args: unknown[]) => api.executeCommand(command, ...args),

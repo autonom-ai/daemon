@@ -1,3 +1,4 @@
+import type { CenterContent } from "../../../launcher/center/content";
 import { install } from "../../../launcher/center/runtime";
 import { config, fixture, testContent } from "../../support";
 
@@ -192,6 +193,50 @@ test("JS actions do not navigate to a page and run with the scoped UI context", 
         await runtime.update(config({ ...testContent, sections: [] }));
         assert.equal(runtime.status().compiledScripts, 0);
         await assert.rejects(runtime.runScript("run", "script-one"), /not available/);
+    }
+    finally
+    {
+        runtime.dispose();
+    }
+});
+
+test("status reports section buttons and the reserved Spaces import", async () =>
+{
+    const environment = fixture();
+    const content: CenterContent = {
+        enabled: true,
+        revision: "demo",
+        devinCloud: ["spaces"],
+        sections: [{ id: "rooms", label: "Rooms", items: [], buttons: [
+            { id: "rooms-search", search: true },
+            { id: "rooms-new", label: "New room",
+                actions: { left_click: { type: "js", file: "new.js", version: "v1" } } },
+            { id: "rooms-hidden", hidden: true },
+        ] }],
+    };
+    const runtime = install(environment.services, config(content));
+    try
+    {
+        const status = await runtime.update(config(content));
+        assert.equal(status.spaces, true);
+        assert.deepEqual(status.sections, [
+            { id: "rooms", label: "Rooms", items: [], buttons: ["rooms-search", "rooms-new"] },
+        ]);
+        await assert.rejects(runtime.activate("rooms-search"), /Unknown or hidden/);
+        await assert.rejects(runtime.activate("rooms-hidden"), /Unknown or hidden/);
+        await runtime.activate("rooms-new");
+        assert.deepEqual(messages[0], { action: "runScript", id: "rooms-new", revision: "demo", windowId: 2 });
+        let section: unknown;
+        runtime.setScript("rooms-new", "v1", async (context: any) =>
+        {
+            section = context.section;
+        });
+        await runtime.runScript("rooms-new", "v1");
+        assert.deepEqual(section, { id: "rooms", label: "Rooms" });
+        await runtime.update(config({ enabled: true, sections: [] }));
+        assert.equal(runtime.status().spaces, false);
+        await runtime.update(config({ enabled: false, sections: [] }));
+        assert.equal(runtime.status().spaces, true);
     }
     finally
     {

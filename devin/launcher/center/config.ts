@@ -1,7 +1,7 @@
 import { object } from "../parse";
 import { assetVersion, readDescriptor, readPrivateFile } from "../storage";
-import type { ActionSource, CenterContent, ItemAction, SidebarItem, SidebarSection } from "./content";
-import { visibleItems } from "./content";
+import type { ActionSource, CenterContent, ItemAction, SidebarButton, SidebarItem, SidebarSection } from "./content";
+import { declaredItems, sectionButtonIcons, visibleItems } from "./content";
 
 import { parseDocument } from "yaml";
 
@@ -68,6 +68,54 @@ export async function loadCenter(configPath: string): Promise<CenterContent>
     const ids = new Set<string>();
     const assets = new Map<string, Promise<{ action: ItemAction; size: number }>>();
     let count = 0;
+    async function loadActionField(record: Record<string, unknown>, extensions: string[]): Promise<ItemAction | undefined>
+    {
+        if (record.actions === undefined)
+            return undefined;
+
+        const actions = object(record.actions);
+        if (!actions || Object.keys(actions).length !== 1 || typeof actions.left_click !== "string")
+            throw new Error("UI elements support only actions.left_click with an HTML or JS file path.");
+
+        const file = actions.left_click;
+        const extension = extname(file).toLowerCase();
+        if (!extensions.includes(extension))
+            throw new Error(`left_click actions must reference ${extensions.join(" or ")} files.`);
+
+        const path = await assetPath(directory, file);
+        const normalized = relative(directory, path);
+        let asset = assets.get(normalized);
+        if (!asset)
+        {
+            asset = (async () =>
+            {
+                const descriptor = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+                try
+                {
+                    const attributes = await descriptor.stat();
+                    if (!attributes.isFile() || attributes.size > 262144)
+                        throw new Error("UI action must be a bounded regular file (at most 256 KiB).");
+
+                    return {
+                        action: {
+                            file: normalized,
+                            type: extension === ".html" ? "html" : "js",
+                            version: assetVersion(attributes),
+                        },
+                        size: attributes.size,
+                    };
+                }
+                finally
+                {
+                    await descriptor.close();
+                }
+            })();
+            assets.set(normalized, asset);
+        }
+
+        return (await asset).action;
+    }
+
     async function loadItems(values: unknown[]): Promise<SidebarItem[]>
     {
         const ret: SidebarItem[] = [];
@@ -100,53 +148,59 @@ export async function loadCenter(configPath: string): Promise<CenterContent>
             if (typeof item.hidden === "boolean")
                 entry.hidden = item.hidden;
 
-            if (item.actions !== undefined)
-            {
-                const actions = object(item.actions);
-                if (!actions || Object.keys(actions).length !== 1 || typeof actions.left_click !== "string")
-                    throw new Error("UI items support only actions.left_click with an HTML or JS file path.");
-
-                const file = actions.left_click;
-                const extension = extname(file).toLowerCase();
-                if (extension !== ".html" && extension !== ".js")
-                    throw new Error("left_click actions must reference .html or .js files.");
-
-                const path = await assetPath(directory, file);
-                const normalized = relative(directory, path);
-                let asset = assets.get(normalized);
-                if (!asset)
-                {
-                    asset = (async () =>
-                    {
-                        const descriptor = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-                        try
-                        {
-                            const attributes = await descriptor.stat();
-                            if (!attributes.isFile() || attributes.size > 262144)
-                                throw new Error("UI action must be a bounded regular file (at most 256 KiB).");
-
-                            return {
-                                action: {
-                                    file: normalized,
-                                    type: extension === ".html" ? "html" : "js",
-                                    version: assetVersion(attributes),
-                                },
-                                size: attributes.size,
-                            };
-                        }
-                        finally
-                        {
-                            await descriptor.close();
-                        }
-                    })();
-                    assets.set(normalized, asset);
-                }
-
-                entry.actions = { left_click: (await asset).action };
-            }
+            const action = await loadActionField(item, [".html", ".js"]);
+            if (action)
+                entry.actions = { left_click: action };
 
             if (!entry.hidden && !entry.actions && !imported.includes(entry.id))
                 throw new Error(`Visible UI item needs a left_click action: ${entry.id}`);
+
+            ret.push(entry);
+        }
+
+        return ret;
+    }
+
+    async function loadButtons(values: unknown[], sectionId: string): Promise<SidebarButton[]>
+    {
+        const ret: SidebarButton[] = [];
+        for (const value of values)
+        {
+            const button = object(value);
+            if (!button || !identifier(button.id)
+                || button.label !== undefined && (typeof button.label !== "string" || button.label.length > 200)
+                || button.icon !== undefined && (typeof button.icon !== "string"
+                    || !(sectionButtonIcons as readonly string[]).includes(button.icon))
+                || button.hidden !== undefined && typeof button.hidden !== "boolean"
+                || button.search !== undefined && typeof button.search !== "boolean")
+                throw new Error(`Invalid section button in ${sectionId}.`);
+
+            allowFields(button, ["id", "label", "icon", "hidden", "search", "actions"]);
+            if (ids.has(button.id))
+                throw new Error(`Duplicate UI id: ${button.id}`);
+
+            ids.add(button.id);
+            if (++count > 100)
+                throw new Error("UI definition exceeds 100 items.");
+
+            const entry: SidebarButton = { id: button.id };
+            if (typeof button.label === "string")
+                entry.label = button.label;
+            if (typeof button.icon === "string")
+                entry.icon = button.icon;
+            if (button.hidden === true)
+                entry.hidden = true;
+            if (button.search === true)
+                entry.search = true;
+
+            const action = await loadActionField(button, [".js"]);
+            if (action)
+                entry.actions = { left_click: action };
+
+            if (entry.search && entry.actions)
+                throw new Error(`A search section button cannot have an action: ${entry.id}`);
+            if (!entry.hidden && !entry.search && !entry.actions)
+                throw new Error(`Visible section button needs a left_click action or search: ${entry.id}`);
 
             ret.push(entry);
         }
@@ -159,11 +213,12 @@ export async function loadCenter(configPath: string): Promise<CenterContent>
     {
         const section = object(value);
         const entries = section?.items ?? [];
-        if (!section || !identifier(section.id) || !Array.isArray(entries)
+        const buttons = section?.buttons ?? [];
+        if (!section || !identifier(section.id) || !Array.isArray(entries) || !Array.isArray(buttons)
             || section.label !== undefined && (typeof section.label !== "string" || section.label.length > 200))
             throw new Error("Invalid UI section.");
 
-        allowFields(section, ["id", "label", "items"]);
+        allowFields(section, ["id", "label", "items", "buttons"]);
         if (ids.has(section.id))
             throw new Error(`Duplicate UI id: ${section.id}`);
 
@@ -171,6 +226,13 @@ export async function loadCenter(configPath: string): Promise<CenterContent>
         const loaded: SidebarSection = { id: section.id, items: await loadItems(entries) };
         if (typeof section.label === "string")
             loaded.label = section.label;
+        if (buttons.length)
+        {
+            if (loaded.label === undefined)
+                throw new Error(`Section buttons require a label: ${loaded.id}`);
+
+            loaded.buttons = await loadButtons(buttons, loaded.id);
+        }
 
         ret.sections.push(loaded);
     }
@@ -214,7 +276,7 @@ export async function loadAction(
     if (revision !== content.revision)
         throw new Error("The UI definition changed. Retry the action after reload.");
 
-    const action = visibleItems(content).find((item) => item.id === id)?.actions?.left_click;
+    const action = declaredItems(content).find((item) => item.id === id)?.actions?.left_click;
     if (!action)
         throw new Error(`Unknown or hidden UI action: ${id}`);
 

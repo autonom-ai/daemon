@@ -14,7 +14,8 @@ export type RuntimeStatus = {
     windowId: number;
     editorActive: boolean;
     items: { id: string; label: string; path: string }[];
-    sections: { id: string; label: string | null; items: string[] }[];
+    sections: { id: string; label: string | null; items: string[]; buttons: string[] }[];
+    spaces: boolean;
     loadedActions: number;
     compiledScripts: number;
 };

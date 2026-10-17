@@ -12,11 +12,22 @@ export type SidebarItem = {
     actions?: { left_click: ItemAction };
 };
 
+export type SidebarButton = SidebarItem & {
+    search?: boolean;
+};
+
 export type SidebarSection = {
     id: string;
     label?: string;
     items: SidebarItem[];
+    buttons?: SidebarButton[];
 };
+
+/** Reserved `devin_cloud` id for the native Spaces section, not a page item. */
+export const spacesSection = "spaces";
+
+/** Bundled icons available to section buttons; see `icons.ts`. */
+export const sectionButtonIcons = ["search", "plus", "sliders"] as const;
 
 export type NativeItem = {
     id: string;
@@ -52,8 +63,13 @@ export function declaredItems(content: CenterContent): SidebarItem[]
     const ret = visibleItems(content);
     const placed = new Set(ret.map((item) => item.id));
     for (const id of content.devinCloud ?? [])
-        if (!placed.has(id))
+        if (!placed.has(id) && id !== spacesSection)
             ret.push({ id });
+
+    for (const section of content.sections)
+        for (const button of section.buttons ?? [])
+            if (!button.hidden && !button.search)
+                ret.push(button);
 
     return ret;
 }
@@ -66,9 +82,9 @@ export function overlayItems(native: NativeItem[], content: CenterContent): Nati
     const originals = new Map(native.map((item) => [item.id, item]));
     const imported = new Set(content.devinCloud ?? []);
     for (const id of imported)
-        if (!originals.has(id))
+        if (!originals.has(id) && id !== spacesSection)
             throw new Error(`Unknown Devin Cloud element: ${id}`);
-    const ret = visibleItems(content).map((item) =>
+    const mapItem = (item: SidebarItem): NativeItem =>
     {
         const original = originals.get(item.id);
         if (!item.actions?.left_click && (!original || !imported.has(item.id)))
@@ -81,12 +97,18 @@ export function overlayItems(native: NativeItem[], content: CenterContent): Nati
             icon: item.icon ?? original?.icon ?? "file",
             path: item.actions?.left_click ? `/autonom/${item.id}` : original!.path,
         };
-    });
+    };
+    const ret = (content.items ?? []).filter((item) => !item.hidden).map(mapItem);
     const placed = new Set([...(content.items ?? []), ...content.sections.flatMap((section) => section.items)]
         .map((item) => item.id));
     for (const id of imported)
-        if (!placed.has(id))
+        if (!placed.has(id) && id !== spacesSection)
             ret.push({ ...originals.get(id)! });
+
+    for (const section of content.sections)
+        for (const item of section.items)
+            if (!item.hidden)
+                ret.push(mapItem(item));
 
     return ret;
 }

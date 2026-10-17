@@ -1,5 +1,7 @@
 import uiCss from "../../../assets/ui.css";
 import type { CenterContent, SidebarItem } from "./content";
+import { spacesSection } from "./content";
+import { createSections } from "./sections";
 import { prepareShell } from "./shell";
 
 export function createLayout(context: {
@@ -9,7 +11,8 @@ export function createLayout(context: {
     activate: (id: string) => Promise<void>;
 }): { render(): void; dispose(): void }
 {
-    const headers = new Map<HTMLUListElement, Map<string, HTMLLIElement>>();
+    const sections = createSections();
+    let spacesGroups = new Set<HTMLElement>();
     let disposed = false;
     let observer: MutationObserver | undefined;
     let observerFrame: ReturnType<typeof setTimeout> | undefined;
@@ -24,6 +27,7 @@ export function createLayout(context: {
         {
             prepareShell(context.content.css ?? uiCss);
             renderSections();
+            renderSpaces();
         }
         finally
         {
@@ -54,27 +58,64 @@ export function createLayout(context: {
         return undefined;
     }
 
+    /** The Spaces label row keeps its React props even while its search field replaces the label. */
+    function isSpacesRow(row: HTMLElement): boolean
+    {
+        if (row.querySelector('[data-slot="sidebar-group-label"]')?.textContent?.trim() === "Spaces")
+            return true;
+
+        const key = Object.keys(row).find((name) => name.startsWith("__reactFiber$"));
+        let fiber = key ? (row as any)[key] : null;
+        for (let index = 0; fiber && index < 32; index++, fiber = fiber.return)
+            if (fiber.memoizedProps?.label === "Spaces" && fiber.memoizedProps?.onPlusClick)
+                return true;
+
+        return false;
+    }
+
+    /** Hides the native Spaces region in Autonom mode unless `devin_cloud` imports it. */
+    function renderSpaces(): void
+    {
+        const hide = context.enabled && !context.content.devinCloud?.includes(spacesSection);
+        const region = new Set<HTMLElement>();
+        for (const row of document.querySelectorAll<HTMLElement>('div[data-slot="sidebar-label-row"]'))
+        {
+            if (!isSpacesRow(row) || row.closest("[data-autonom-section]"))
+                continue;
+
+            let group = row.closest<HTMLElement>('[data-slot="sidebar-group"]');
+            while (group && !region.has(group))
+            {
+                region.add(group);
+                const next = group.nextElementSibling;
+                group = next instanceof HTMLElement && next.dataset.slot === "sidebar-group"
+                    && !next.querySelector('[data-slot="sidebar-label-row"]') ? next : null;
+            }
+        }
+
+        for (const group of spacesGroups)
+            if (!region.has(group))
+                group.style.display = "";
+
+        for (const group of region)
+            group.style.display = hide ? "none" : "";
+
+        spacesGroups = region;
+    }
+
     function renderSections(): void
     {
         const { content, items, enabled } = context;
         const menus = new Set(document.querySelectorAll<HTMLUListElement>('ul[aria-label="Pages"]'));
-        for (const [menu, sectionHeaders] of headers)
-        {
-            if (menus.has(menu) && enabled)
-                continue;
-
-            for (const header of sectionHeaders.values())
-                header.remove();
-
-            headers.delete(menu);
-        }
-
         for (const button of document.querySelectorAll<HTMLElement>("button[data-autonom-item]"))
             if (!enabled || !items.has(button.dataset.autonomItem!))
                 delete button.dataset.autonomItem;
 
         if (!enabled)
+        {
+            sections.prune(new Set());
             return;
+        }
 
         for (const menu of menus)
         {
@@ -90,52 +131,10 @@ export function createLayout(context: {
                 rows.set(id, row);
             }
 
-            let sectionHeaders = headers.get(menu);
-            if (!sectionHeaders)
-            {
-                sectionHeaders = new Map();
-                headers.set(menu, sectionHeaders);
-            }
-
-            const displayed = new Set<string>();
-            let anchor: HTMLElement | null = null;
-            for (let index = content.sections.length - 1; index >= 0; index--)
-            {
-                const section = content.sections[index]!;
-                anchor = section.items.map((item) => rows.get(item.id)).find(Boolean) ?? anchor;
-                if (!section.label || section.items.length > 0 && section.items.every((item) => item.hidden))
-                    continue;
-
-                displayed.add(section.id);
-                let header = sectionHeaders.get(section.id);
-                if (!header)
-                {
-                    header = document.createElement("li");
-                    header.dataset.autonomSection = section.id;
-                    header.setAttribute("role", "presentation");
-                    const label = document.createElement("h2");
-                    header.appendChild(label);
-                    sectionHeaders.set(section.id, header);
-                }
-
-                if (header.firstElementChild!.textContent !== section.label)
-                    header.firstElementChild!.textContent = section.label;
-
-                if (header.parentElement !== menu || header.nextElementSibling !== anchor)
-                    menu.insertBefore(header, anchor);
-
-                anchor = header;
-            }
-
-            for (const [id, header] of sectionHeaders)
-            {
-                if (displayed.has(id))
-                    continue;
-
-                header.remove();
-                sectionHeaders.delete(id);
-            }
+            sections.sync(menu, content.sections, rows);
         }
+
+        sections.prune(menus);
     }
 
     function onClick(event: MouseEvent): void
@@ -170,10 +169,11 @@ export function createLayout(context: {
                 clearTimeout(observerFrame);
 
             globalThis.document?.removeEventListener("click", onClick, true);
-            for (const sectionHeaders of headers.values())
-                for (const header of sectionHeaders.values())
-                    header.remove();
+            sections.prune(new Set());
+            for (const group of spacesGroups)
+                group.style.display = "";
 
+            spacesGroups.clear();
             for (const button of globalThis.document?.querySelectorAll<HTMLElement>("button[data-autonom-item]") ?? [])
                 delete button.dataset.autonomItem;
         },

@@ -1,5 +1,5 @@
-import type { SidebarItem } from "../../../launcher/center/content";
-import { isFullDocument, overlayItems, pageHtml } from "../../../launcher/center/content";
+import type { CenterContent, SidebarItem } from "../../../launcher/center/content";
+import { declaredItems, isFullDocument, overlayItems, pageHtml } from "../../../launcher/center/content";
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -69,10 +69,41 @@ test("native Cloud imports are YAML-selected, retain their routes, and never app
         devinCloud: ["security", "wiki"],
         sections: [{ id: "knowledge", items: [{ id: "wiki" }] }],
     });
-    assert.deepEqual(imported.map((item) => item.path), ["/wiki", "/security"]);
+    assert.deepEqual(imported.map((item) => item.path), ["/security", "/wiki"]);
     assert.throws(() => overlayItems(nativeItems, {
         enabled: true, sections: [], devinCloud: ["missing"],
     }), /Unknown Devin Cloud/);
+});
+
+test("the reserved spaces import is native-only and never becomes a sidebar item", () =>
+{
+    const nativeItems = [...native, { id: "wiki", label: "Wiki", icon: "wiki", path: "/wiki", native: true }];
+    assert.deepEqual(overlayItems(nativeItems, { enabled: true, sections: [], devinCloud: ["spaces"] }), []);
+    assert.deepEqual(overlayItems(nativeItems, {
+        enabled: true, sections: [], devinCloud: ["spaces", "wiki"],
+    }), [nativeItems[2]]);
+    assert.throws(() => overlayItems(nativeItems, {
+        enabled: true,
+        devinCloud: ["spaces"],
+        sections: [{ id: "group", items: [{ id: "spaces" }] }],
+    }), /needs a left_click/);
+});
+
+test("declaredItems resolves visible non-search buttons and skips hidden, search, and spaces ids", () =>
+{
+    const content: CenterContent = {
+        enabled: true,
+        devinCloud: ["spaces", "automations"],
+        items: [item("events", "Events")],
+        sections: [{ id: "rooms", label: "Rooms", items: [{ id: "hidden", hidden: true }], buttons: [
+            { id: "rooms-search", search: true },
+            { id: "rooms-new", label: "New room", icon: "plus",
+                actions: { left_click: { type: "js", file: "actions/new.js", version: "unit" } } },
+            { id: "rooms-hidden", hidden: true },
+        ] }],
+    };
+    assert.deepEqual(declaredItems(content).map((entry) => entry.id), ["events", "automations", "rooms-new"]);
+    assert.deepEqual(overlayItems(native, content).map((entry) => entry.id), ["events", "automations"]);
 });
 
 test("fragment pages receive a restrictive CSP and no host capability", () =>

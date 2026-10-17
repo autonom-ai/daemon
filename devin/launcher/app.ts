@@ -5,7 +5,7 @@ import { defaultSocketPath, isLauncherRunning, startControlSocket } from "./cdp/
 import { startBridge } from "./center/bridge";
 import type { ActionCache } from "./center/config";
 import { loadAction, loadCenter } from "./center/config";
-import { visibleItems } from "./center/content";
+import { declaredItems, visibleItems } from "./center/content";
 import { watchContent } from "./center/watch";
 import { executeScript, installRuntime, runtimeStatus } from "./center/window";
 import { environmentPort, parseArguments } from "./cli";
@@ -209,7 +209,7 @@ async function main(): Promise<void>
             throw new Error("The Desktop window is not attached.");
 
         const source = await loadAction(contentPath, content, id, revision, actionCache);
-        const action = visibleItems(content).find((item) => item.id === id)?.actions?.left_click;
+        const action = declaredItems(content).find((item) => item.id === id)?.actions?.left_click;
         if (source.type !== "js" || !action)
             throw new Error("The selected item is not a JS action.");
 
@@ -251,7 +251,7 @@ async function main(): Promise<void>
         content = next;
         runtimeSource = source;
         disabled = false;
-        const versions = new Map(visibleItems(content).filter((item) => item.actions)
+        const versions = new Map(declaredItems(content).filter((item) => item.actions)
             .map((item) => [resolve(dirname(contentPath), item.actions!.left_click.file), item.actions!.left_click.version]));
         for (const [file, cached] of actionCache)
             if (versions.get(file) !== cached.version)

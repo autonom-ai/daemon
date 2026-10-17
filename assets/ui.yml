@@ -28,7 +28,28 @@ items:
 sections:
     - id: rooms
       label: Rooms
+      buttons:
+          - id: rooms-search
+            search: true
+          - id: rooms-new
+            label: New room
+            icon: plus
+            actions:
+                left_click: actions/new-room.js
+          - id: rooms-properties
+            label: Properties
+            icon: sliders
+            actions:
+                left_click: actions/open-settings.js
       items: []
     - id: profiles
       label: Profiles
+      buttons:
+          - id: profiles-search
+            search: true
+          - id: profiles-new
+            label: New profile
+            icon: plus
+            actions:
+                left_click: actions/new-profile.js
       items: []

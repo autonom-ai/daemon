@@ -64,6 +64,7 @@ The sidebar uses native structural roles:
 - `button[aria-label="New session"]` identifies the real New session row.
 - The primary page list has `aria-label="Pages"`; visible rows carry an accessible `aria-label` matching the page label.
 - `data-slot="sidebar-button-content"` / `data-slot="sidebar-menu-button-content"` style the icon-and-label interior.
+- `div[data-slot="sidebar-label-row"]` with `div[data-slot="sidebar-group-label"]` is the native section-header surface that custom section labels, header buttons, and inline search reuse, including the native Spaces region.
 
 One icon-only switch replaces the native Agent/Editor presentation: Autonom, Devin Cloud, and Editor. Each mode renders its line icon while inactive and its filled variant (`autonom-fill`, `cloud-fill`, `pencil-fill`) while active. Native Agent/Editor handlers still own workbench transitions. The controls are `-webkit-app-region: no-drag`, because the surrounding titlebar is a native drag region that otherwise swallows real pointer clicks even though scripted CDP clicks still work. The switch resolves native buttons again after remounts, briefly restores their visibility when forwarding a click, and restores the original switch on detach. Styles live in `assets/ui.css`. The default Autonom page does not open or prefetch while Editor is selected.
 
@@ -86,41 +87,60 @@ enabled: true
 active_item: schedules
 devin_cloud:
     - wiki
+    - spaces
+
+items:
+    - id: schedules
+      label: Schedules
+      icon: automations
+      actions:
+          left_click: pages/schedules.html
+
 sections:
-    - id: coordination
-      label: Coordination
-      items:
-          - id: schedules
-            label: Schedules
-            icon: automations
+    - id: rooms
+      label: Rooms
+      buttons:
+          - id: rooms-search
+            search: true
+          - id: rooms-new
+            label: New room
+            icon: plus
             actions:
-                left_click: pages/schedules.html
-    - id: knowledge
-      label: Knowledge
-      items:
-          - id: wiki
-    - id: tools
-      label: Tools
-      items:
-          - id: reload-ui
-            label: Reload UI
+                left_click: actions/new-room.js
+          - id: rooms-properties
+            label: Properties
+            icon: sliders
             actions:
-                left_click: actions/reload.js
+                left_click: actions/open-settings.js
+      items: []
+    - id: profiles
+      label: Profiles
+      buttons:
+          - id: profiles-search
+            search: true
+          - id: profiles-new
+            label: New profile
+            icon: plus
+            actions:
+                left_click: actions/new-profile.js
+      items: []
 ```
 
-Sections and items render in YAML order; section labels are optional and empty labeled sections are supported. `devin_cloud` lists native manifest IDs to import. Imported entries can be placed in a section, or appear after custom entries when unplaced. No native item, including Wiki, is implicitly inserted. Imported entries cannot replace their native action with a custom script/page. Hidden items remain non-interactive. `active_item` must identify a visible HTML action and opens only in Autonom's Agent view.
+Sections and items render in YAML order, with the top-level `items` list ahead of the sections; section labels are optional and empty labeled sections are supported. `devin_cloud` lists native manifest IDs to import, plus the reserved id `spaces`. Imported entries can be placed in a section, or follow the top-level items when unplaced. No native item, including Wiki, is implicitly inserted. In Autonom mode (`enabled: true` with the Autonom provider) the native Spaces section is hidden unless `spaces` is listed in `devin_cloud`; `spaces` never creates a sidebar item and only keeps that native region visible. Devin Cloud mode always restores the native sidebar, including Spaces. Imported entries cannot replace their native action with a custom script/page. Hidden items remain non-interactive. `active_item` must identify a visible HTML action and opens only in Autonom's Agent view.
 
-Only `left_click` is supported. An `.html` file displays a native webview; a `.js` file runs as an async renderer function with `context.item`, `context.open(id)`, `context.executeCommand(command, ...args)`, `context.request(message)`, and `context.refresh()`. Example JS action: `await context.refresh();`. Scripts are trusted UI code, not sandboxed plugins; they have renderer access but no launcher Node API or daemon secret. Compilation happens through the existing CDP transport without weakening Trusted Types.
+Only `left_click` is supported. An `.html` file displays a native webview; a `.js` file runs as an async renderer function with `context.item`, `context.section`, `context.open(id)`, `context.executeCommand(command, ...args)`, `context.request(message)`, and `context.refresh()`. `context.section` is set only for section-button scripts and holds `{id, label}` of the owning section. Example JS action: `await context.refresh();`. Scripts are trusted UI code, not sandboxed plugins; they have renderer access but no launcher Node API or daemon secret. Compilation happens through the existing CDP transport without weakening Trusted Types.
+
+A labeled section may carry a `buttons` list rendered on its label row with the native Spaces header styling. Button fields: `id` (required identifier), `label` (optional tooltip/aria-label, at most 200 characters), `icon` (one of the bundled `search`, `plus`, `sliders`), `hidden`, `search`, and `actions`. A `search: true` button opens a built-in inline field that filters the section's visible rows and cannot have an action; every other visible button requires `actions.left_click` pointing at a `.js` file inside the assets directory — pages are not valid button actions. Button IDs share the item ID namespace and element count.
 
 The launcher validates metadata up front, reads HTML/JS only when invoked, and caches by file identity and modification version. Repeated JS invocations reuse compilation. Edits to YAML, CSS, HTML, or JS trigger a debounced atomic reload; invalid definitions retain the last working snapshot. Layout-only reloads do not recapture native services or rebuild the runtime. Active HTML is loaded before committing a replacement snapshot, and inactive action sources stay unloaded.
 
-Limits: 32 sections, 100 items, 64-character IDs, 200-character labels, 256 KiB per action, 1 MiB total action files, and 64 KiB each for YAML/CSS. Paths must stay beneath the definition directory and reference bounded regular no-follow files. Unknown fields, duplicate IDs, unsupported actions, malformed YAML, symlinks, and traversal fail closed. Full HTML documents keep their restrictive CSP; fragments are wrapped with no scripts or network access.
+Limits: 32 sections, 100 items and section buttons combined, 64-character IDs, 200-character labels, 256 KiB per action, 1 MiB total action files, and 64 KiB each for YAML/CSS. Paths must stay beneath the definition directory and reference bounded regular no-follow files. Unknown fields, duplicate IDs, unsupported actions, malformed YAML, symlinks, and traversal fail closed. Full HTML documents keep their restrictive CSP; fragments are wrapped with no scripts or network access.
 
 ## Launcher bridge
 
 Pages talk to the daemon through a token-authenticated loopback HTTP endpoint that the launcher owns. The injected runtime receives the endpoint URL and a random token, and forwards each `acquireVsCodeApi()` message to it; the launcher holds the daemon client capability (`dataDir/client.token`) and performs every file write. Capabilities never reach a page, a webview, or a log.
 
-UI bridge actions are `getAction` (validated lazy HTML/JS source), `runScript` (the requesting attached window), and `reloadUi`. Daemon/settings actions: `getState` (daemon `/api/client/state` for the workspace), `getSettings`/`saveSettings` (launcher settings), `getDaemon`/`saveDaemon` (daemon YAML), `editConfig` (open the daemon configuration in Desktop), and `editPolicy` (open the workspace policy). Unknown actions fail with HTTP 400.
+UI bridge actions are `getAction` (validated lazy HTML/JS source), `runScript` (the requesting attached window), and `reloadUi`. Daemon/settings actions: `getState` (daemon `/api/client/state` for the workspace), `getProfiles`/`createProfile` and `getRooms`/`createRoom` (daemon `/api/profiles` and `/api/rooms`; the create calls take `{name}`), `getSettings`/`saveSettings` (launcher settings), `getDaemon`/`saveDaemon` (daemon YAML), `editConfig` (open the daemon configuration in Desktop), and `editPolicy` (open the workspace policy). Unknown actions fail with HTTP 400.
 
 ## Launcher settings
 

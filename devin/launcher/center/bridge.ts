@@ -115,6 +115,15 @@ async function dispatch(context: BridgeContext, message: Record<string, unknown>
         case "getProfiles":
             return context.client.request("/api/profiles");
 
+        case "createProfile":
+            return context.client.request("/api/profiles", "POST", { name: text(message.name) });
+
+        case "getRooms":
+            return context.client.request("/api/rooms");
+
+        case "createRoom":
+            return context.client.request("/api/rooms", "POST", { name: text(message.name) });
+
         case "getEvents":
             return context.client.request(`/api/events?profile=${encodeURIComponent(text(message.profile, "human"))}`);
 
