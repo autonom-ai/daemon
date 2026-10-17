@@ -30,6 +30,15 @@ struct Frame
     string key() const
         => identified ? value["id"].toString() : null;
 
+    Frame withId(JSONValue id)
+    {
+        // JSONValue copies share their object storage. Routing must retain the peer's identity.
+        Frame ret = this;
+        ret.value = JSONValue(value.object.dup);
+        ret.value["id"] = id;
+        return ret;
+    }
+
     string encode()
     {
         string ret = value.toString();

@@ -132,6 +132,10 @@ def on_prompt(request_id, params):
     text = "\n".join(block.get("text", "") for block in params.get("prompt", []))
     record_prompt(session_id, text)
 
+    if text == "exit-after-reply":
+        finish(request_id, session_id)
+        raise SystemExit(0)
+
     if os.path.exists(path("fail-prompt")) or text == "fail":
         update(session_id, text)
         send_error(request_id, -32603, "prompt failed")

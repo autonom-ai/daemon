@@ -20,6 +20,10 @@ unittest
     reader.finish();
     received.length.should == 1;
     received[0].value.should == original;
+    Frame routed = frame.withId(JSONValue(2));
+    routed.value["id"].integer.should == 2;
+    frame.value["id"].str.should == "1";
+    routed.value["_meta"].should == original["_meta"];
     (received[0].key != Frame(parseJSON(`{"jsonrpc":"2.0","id":1,"result":{}}`)).key).should == true;
 }
 
