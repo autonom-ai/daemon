@@ -16,6 +16,7 @@ import core.time : MonoTime, seconds;
 import std.algorithm : sort;
 import std.file : exists;
 import std.json : JSONType, JSONValue, parseJSON;
+import std.path : buildPath;
 
 public:
 
@@ -151,10 +152,33 @@ void clientTranscript(Request request, Output output)
     if (!acceptMethod(request, output, [Request.Method.Get]))
         return;
 
-    string id = routeParameter!"/api/client/transcript/<id>"(request);
-    Call execution = bridge.execution(id);
-    string session = execution is null ? id : execution.sessionId;
-    if (execution is null && !bridge.access.managed(session))
+    try
+    {
+        string id = routeParameter!"/api/client/transcript/<id>"(request);
+        Call execution = bridge.execution(id);
+    JSONValue executionJson = execution !is null ? execution.toJSON() : bridge.executionRecord(id);
+
+    string session;
+    if (execution !is null && execution.sessionId.length)
+        session = execution.sessionId;
+    else
+    {
+        string mapped = bridge.sessionForExecution(id);
+        session = mapped.length ? mapped : id;
+    }
+
+    string executionOut = buildPath(bridge.executionDir, id ~ ".out");
+    string executionErr = buildPath(bridge.executionDir, id ~ ".err");
+    bool isKnownExecution = execution !is null || !executionJson.isNull ||
+        exists(executionOut) || exists(executionErr);
+
+    bool isKnownSession = session.length && (
+        bridge.access.managed(session) ||
+        bridge.findSession(session) !is null ||
+        exists(bridge.logPath(session))
+    );
+
+    if (!isKnownExecution && !isKnownSession)
     {
         respondError(output, 404, "Session is not managed by Autonom");
         return;
@@ -162,32 +186,91 @@ void clientTranscript(Request request, Output output)
 
     JSONValue ret = JSONValue.emptyObject;
     ret["messages"] = JSONValue.emptyArray;
-    ret["execution"] = JSONValue(null);
-    if (session.length)
+    ret["execution"] = executionJson.isNull ? JSONValue(null) : executionJson;
+
+    if (session.length && isKnownSession)
     {
         Session found = bridge.findSession(session);
-        if (execution is null && found !is null)
+        if (execution is null && found !is null && found.execution !is null)
+        {
             execution = found.execution;
+            if (ret["execution"].isNull)
+                ret["execution"] = execution.toJSON();
+        }
 
-        ret["session"] = found is null ? JSONValue(null) : found.toJSON();
-        ret["messages"] = readSessionMessages(bridge.sessionDatabase, session);
+        ret["session"] = found is null ? JSONValue(["id": JSONValue(session)]) : found.toJSON();
+        try
+            ret["messages"] = readSessionMessages(bridge.sessionDatabase, session);
+        catch (Exception)
+            ret["messages"] = JSONValue.emptyArray;
+
+        if (!ret["messages"].array.length && exists(bridge.logPath(session)))
+        {
+            try
+            {
+                string sessionLog = readText(bridge.logPath(session), 1024 * 1024);
+                if (sessionLog.length)
+                {
+                    ret["messages"].array ~= JSONValue([
+                        "role": JSONValue("assistant"),
+                        "content": JSONValue(sessionLog)
+                    ]);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
     }
     else
         ret["session"] = JSONValue(null);
 
-    if (execution !is null)
+    if (!ret["messages"].array.length)
     {
-        ret["execution"] = execution.toJSON();
-        if (!ret["messages"].array.length && !execution.running && exists(execution.outputPath))
+        if (exists(executionOut))
         {
-            ret["messages"].array ~= JSONValue([
-                "role": JSONValue("assistant"),
-                "content": JSONValue(readText(execution.outputPath, 1024 * 1024))
-            ]);
+            try
+            {
+                string outContent = readText(executionOut, 1024 * 1024);
+                if (outContent.length)
+                {
+                    ret["messages"].array ~= JSONValue([
+                        "role": JSONValue("assistant"),
+                        "content": JSONValue(outContent)
+                    ]);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+        else if (execution !is null && !execution.running && exists(execution.outputPath))
+        {
+            try
+            {
+                string outContent = readText(execution.outputPath, 1024 * 1024);
+                if (outContent.length)
+                {
+                    ret["messages"].array ~= JSONValue([
+                        "role": JSONValue("assistant"),
+                        "content": JSONValue(outContent)
+                    ]);
+                }
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 
-    respond(output, ret);
+        respond(output, ret);
+    }
+    catch (Exception error)
+    {
+        import std.stdio : stderr;
+        stderr.writeln("CLIENT TRANSCRIPT FAILED: ", error.toString());
+        respondError(output, 500, error.msg);
+    }
 }
 
 @endpoint @route!"/api/client/models"
