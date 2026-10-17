@@ -8,6 +8,7 @@ import arsd.sqlite;
 import unit_threaded;
 
 import std.json : JSONException;
+import std.uuid : randomUUID;
 
 @Name("Bridge lists database sessions without invoking the CLI or granting control")
 unittest
@@ -39,6 +40,22 @@ unittest
     fixture.bridge.findSession("session-one").shouldBeNull;
     fixture.bridge.findSession("missing").shouldBeNull;
     fixture.bridge.list().length.should == 0;
+}
+
+@Name("Bridge filters provisional observed sessions by their connection workspace and origin")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    fixture.bridge.observeConnection(randomUUID().toString(), ["provisional"],
+        ["provisional": fixture.root], ["provisional": false], false);
+    Session[] listed = fixture.bridge.list(fixture.root, "autonom");
+    listed.length.should == 1;
+    listed[0].id.should == "provisional";
+    listed[0].workspace.should == fixture.root;
+    fixture.bridge.list("/elsewhere", "autonom").length.should == 0;
 }
 
 @Name("Bridge leaves an unmarked session's ACP origin unknown")

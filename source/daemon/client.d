@@ -32,11 +32,11 @@ void clientState(Request request, Output output)
     ret["rooms"] = JSONValue.emptyArray;
     ret["humanEvents"] = JSONValue(cast(long)events.unread(profileStore.get(HUMAN_NAME)).length);
     string directory = request.get.read("directory");
-    Session[] sessions = bridge.list(directory);
+    Session[] sessions = bridge.list();
     foreach (profile; profileStore.list())
     {
         bool managed = profile.session !is null && bridge.access.managed(profile.session.id);
-        JSONValue record = profile.toJSON();
+        JSONValue record = profile.toJSON(false);
         record["managed"] = JSONValue(managed);
         record["events"] = JSONValue(cast(long)events.unread(profile).length);
         record["schedules"] = JSONValue(cast(long)scheduleStore.list(profile).length);
