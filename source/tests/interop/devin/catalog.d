@@ -1,7 +1,8 @@
 module tests.interop.devin.catalog;
 
-import daemon.interop;
 import daemon.interop.devin.bridge : Bridge;
+import daemon.interop.devin.connection;
+import daemon.interop;
 import tests.common;
 import tests.interop.devin.common : database;
 
@@ -15,9 +16,11 @@ import std.uuid : randomUUID;
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     Sqlite connection = database(fixture);
-    scope(exit) destroy(connection);
+    scope(exit)
+        destroy(connection);
 
     Session[] sessions = fixture.bridge.list(fixture.root);
     sessions.length.should == 1;
@@ -32,9 +35,11 @@ unittest
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     Sqlite connection = database(fixture);
-    scope(exit) destroy(connection);
+    scope(exit)
+        destroy(connection);
 
     fixture.bridge.findSession("session-one").shouldNotBeNull;
     connection.query("delete from sessions where id = 'session-one'");
@@ -63,9 +68,11 @@ unittest
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     Sqlite connection = database(fixture);
-    scope(exit) destroy(connection);
+    scope(exit)
+        destroy(connection);
 
     fixture.bridge.list()[0].metadata.acp.length.should == 0;
     fixture.bridge.list(null, "autonom").length.should == 0;
@@ -77,14 +84,17 @@ unittest
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     Sqlite connection = database(fixture);
-    scope(exit) destroy(connection);
+    scope(exit)
+        destroy(connection);
     connection.query("update sessions set metadata = ? where id = 'session-one'",
         `{"client_meta":{"autonom/connector":"autonom"}}`);
 
     Bridge restarted = new Bridge(fixture.config);
-    scope(exit) restarted.close();
+    scope(exit)
+        restarted.close();
     restarted.list(null, "autonom")[0].id.should == "session-one";
     restarted.list(null, "other").length.should == 0;
     restarted.access.managed("session-one").should == false;
@@ -95,9 +105,11 @@ unittest
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     Sqlite connection = database(fixture);
-    scope(exit) destroy(connection);
+    scope(exit)
+        destroy(connection);
     connection.query("update sessions set metadata = '{' where id = 'session-one'");
 
     fixture.bridge.list();
@@ -108,9 +120,11 @@ unittest
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     Sqlite connection = database(fixture);
-    scope(exit) destroy(connection);
+    scope(exit)
+        destroy(connection);
     connection.query("update sessions set metadata = '{' where id = 'session-one'");
 
     fixture.bridge.findSession("session-one");

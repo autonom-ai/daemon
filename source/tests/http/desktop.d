@@ -10,7 +10,7 @@ import unit_threaded;
 import core.thread : Thread;
 import core.time : seconds;
 import std.file : readText, write;
-import std.json : JSONType, JSONValue, parseJSON;
+import std.json : JSONValue, parseJSON;
 import std.net.curl : HTTP;
 import std.path : buildPath;
 import std.process;
@@ -19,10 +19,12 @@ import std.process;
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     installFake(fixture);
     RunningDaemon daemon = startDaemon(fixture);
-    scope(exit) daemon.close();
+    scope(exit)
+        daemon.close();
     write(buildPath(fixture.root, "next-session-id"), "desktop-session");
     Config options = Config.newEnv;
     options.preExecFunction = &createProcessGroup;
@@ -58,17 +60,20 @@ unittest
         return ret;
     }
     send(parseJSON(`{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}`));
-    waitUntil(delegate bool() { return !find(null, JSONValue("1")).isNull; });
+    waitUntil(delegate bool() {
+        return !find(null, JSONValue("1")).isNull;
+    });
     send(JSONValue([
         "jsonrpc": JSONValue("2.0"), "id": JSONValue(1), "method": JSONValue("session/new"),
         "params": JSONValue(["cwd": JSONValue(fixture.root), "mcpServers": JSONValue.emptyArray])
     ]));
-    waitUntil(delegate bool() { return !find(null, JSONValue(1)).isNull; });
+    waitUntil(delegate bool() {
+        return !find(null, JSONValue(1)).isNull;
+    });
     find(null, JSONValue(1))["result"]["sessionId"].str.should == "desktop-session";
     send(parseJSON(`{"jsonrpc":"2.0","id":"autonom:1","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"permission"}]}}`));
     JSONValue native;
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         native = find("session/request_permission");
         return !native.isNull;
     });
@@ -79,8 +84,12 @@ unittest
     JSONValue decision = JSONValue(["id": pending[0]["id"], "optionId": pending[0]["options"][0]["optionId"]]);
     request(path, 200, decision.toString());
     request(path, 409, decision.toString());
-    waitUntil(delegate bool() { return !find(null, JSONValue("autonom:1")).isNull; });
-    waitUntil(delegate bool() { return !find("$/cancel_request").isNull; });
+    waitUntil(delegate bool() {
+        return !find(null, JSONValue("autonom:1")).isNull;
+    });
+    waitUntil(delegate bool() {
+        return !find("$/cancel_request").isNull;
+    });
     find("$/cancel_request")["params"]["requestId"].should == native["id"];
     // A late native answer must not be forwarded or matched to another request.
     send(JSONValue([
@@ -93,8 +102,7 @@ unittest
 
     JSONValue previous = native["id"];
     send(parseJSON(`{"jsonrpc":"2.0","id":"backend-cancel","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"cancel-permission"}]}}`));
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         native = find("session/request_permission");
         return native["id"] != previous && find("$/cancel_request")["params"]["requestId"] == native["id"];
     });
@@ -104,17 +112,20 @@ unittest
         "id": native["id"],
         "result": JSONValue(["outcome": JSONValue(["outcome": JSONValue("cancelled")])])
     ]));
-    waitUntil(delegate bool() { return !find(null, JSONValue("backend-cancel")).isNull; });
+    waitUntil(delegate bool() {
+        return !find(null, JSONValue("backend-cancel")).isNull;
+    });
 
     send(parseJSON(`{"jsonrpc":"2.0","id":"peer-cancel","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"hang"}]}}`));
     send(parseJSON(`{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":"peer-cancel"}}`));
-    waitUntil(delegate bool() { return !find(null, JSONValue("peer-cancel")).isNull; });
+    waitUntil(delegate bool() {
+        return !find(null, JSONValue("peer-cancel")).isNull;
+    });
     find(null, JSONValue("peer-cancel"))["result"]["stopReason"].str.should == "cancelled";
 
     send(parseJSON(`{"jsonrpc":"2.0","id":"native","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"permission"}]}}`));
     previous = native["id"];
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         native = find("session/request_permission");
         return native["id"] != previous;
     });
@@ -126,7 +137,9 @@ unittest
             "optionId": JSONValue("reject_once")
         ])])
     ]));
-    waitUntil(delegate bool() { return !find(null, JSONValue("native")).isNull; });
+    waitUntil(delegate bool() {
+        return !find(null, JSONValue("native")).isNull;
+    });
     decision["id"] = native["id"];
     request(path, 409, decision.toString());
     request(path).array.length.should == 0;
@@ -134,11 +147,12 @@ unittest
     string capability = readText(buildPath(fixture.config.dataDir, "mcp", "desktop-session.token"));
     daemon.close();
     send(parseJSON(`{"jsonrpc":"2.0","id":"offline","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"offline"}]}}`));
-    waitUntil(delegate bool() { return !find(null, JSONValue("offline")).isNull; }, 1.seconds);
+    waitUntil(delegate bool() {
+        return !find(null, JSONValue("offline")).isNull;
+    }, 1.seconds);
 
     daemon = startDaemon(fixture);
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         try
         {
             return request("/api/mcp/session", 200, null, "application/json", HTTP.Method.undefined,
@@ -150,7 +164,9 @@ unittest
     readText(buildPath(fixture.config.dataDir, "mcp", "desktop-session.token")).should == capability;
 
     relay.stdin.close();
-    waitUntil(delegate bool() { return tryWait(relay.pid).terminated; });
+    waitUntil(delegate bool() {
+        return tryWait(relay.pid).terminated;
+    });
     request("/api/mcp/session", 403, null, "application/json", HTTP.Method.undefined,
         null, null, false, capability);
 }

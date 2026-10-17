@@ -1,16 +1,17 @@
 module tests.interop.devin.bridge;
 
-import daemon.interop;
 import daemon.interop.devin.bridge : Bridge;
+import daemon.interop.devin.session.control : remove;
+import daemon.interop;
 import tests.common;
+
 import unit_threaded : Name, should, shouldThrow;
 
 import core.time : msecs;
 import std.algorithm.searching : canFind;
-import std.conv : octal;
 import std.file;
 import std.path : buildPath;
-import std.string : splitLines, strip;
+import std.string : splitLines;
 
 @Name("Bridge owns one canonical handle per session independently of profiles")
 unittest
@@ -72,8 +73,7 @@ unittest
     installFake(fixture);
     Session session = fixture.bridge.session("session-1");
     session.resume("work", fixture.root);
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return session.status == SessionStatus.Offline;
     });
     string log = buildPath(fixture.bridge.logDir, "session-1.log");
@@ -90,7 +90,8 @@ unittest
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     installFake(fixture);
 
     Call first = fixture.bridge.start("work", fixture.root);
@@ -108,15 +109,15 @@ unittest
     foreach (marker; ["fail-compact", "hang-compact"])
     {
         Fixture fixture = Fixture.create();
-        scope(exit) fixture.close();
+        scope(exit)
+            fixture.close();
         installFake(fixture);
 
         Call first = fixture.bridge.start("work", fixture.root);
         first.wait();
         write(buildPath(fixture.root, marker), "");
         Call resumed = fixture.bridge.resume(first.sessionId, "must not run", fixture.root, null, true);
-        waitUntil(delegate bool()
-        {
+        waitUntil(delegate bool() {
             return readText(buildPath(fixture.root, "acp-calls.jsonl")).canFind("/compact");
         });
         if (marker == "hang-compact")

@@ -1,13 +1,17 @@
 module daemon.hooks;
 
 import daemon.agent;
-import daemon.events.event : Event;
-import daemon.exception;
-import daemon.interop.call;
-import daemon.interop.session;
-import daemon.policy;
-import daemon.http;
 import daemon.api;
+import daemon.events.event : Event;
+import daemon.events.wake : adopt;
+import daemon.exception;
+import daemon.http;
+import daemon.interop.call;
+import daemon.interop.devin.connection;
+import daemon.interop.devin.session.catalog;
+import daemon.interop.session : Session;
+import daemon.policy;
+
 import serverino;
 
 import std.algorithm.searching : startsWith;
@@ -15,18 +19,16 @@ import std.array : join;
 import std.conv : to;
 import std.json : JSONValue, JSONType;
 
-private:
+private enum mcpPrefix = "mcp__autonom-coord__";
+private enum maxInjectedEvents = 5;
 
-enum MCP_PREFIX = "mcp__autonom-coord__";
-enum MAX_INJECTED_EVENTS = 5;
-
-JSONValue hookResponse()
+private JSONValue hookResponse()
     => JSONValue(cast(JSONValue[string])null);
 
-JSONValue block(string reason)
+private JSONValue block(string reason)
     => JSONValue(["decision": JSONValue("block"), "reason": JSONValue(reason)]);
 
-bool acceptHook(Request request, Output output, string event, out JSONValue data)
+private bool acceptHook(Request request, Output output, string event, out JSONValue data)
 {
     if (!acceptMethod(request, output, [Request.Method.Post]))
         return false;
@@ -46,7 +48,7 @@ bool acceptHook(Request request, Output output, string event, out JSONValue data
             return true;
 
         bool blocked = event == "PreToolUse" &&
-            (hookTool(data).startsWith(MCP_PREFIX) || request.header.read("x-autonom-run").length ||
+            (hookTool(data).startsWith(mcpPrefix) || request.header.read("x-autonom-run").length ||
             bridge.access.managed(session));
         respond(output, blocked ? block("Only sessions started by Autonom may use Autonom tools") : hookResponse());
         return false;
@@ -59,13 +61,13 @@ bool acceptHook(Request request, Output output, string event, out JSONValue data
     return true;
 }
 
-string hookSession(JSONValue data)
+private string hookSession(JSONValue data)
     => "session_id" in data.object && data["session_id"].type == JSONType.string ? data["session_id"].str : null;
 
-string hookTool(JSONValue data)
+private string hookTool(JSONValue data)
     => "tool_name" in data.object && data["tool_name"].type == JSONType.string ? data["tool_name"].str : null;
 
-JSONValue hookInput(JSONValue data)
+private JSONValue hookInput(JSONValue data)
 {
     if ("tool_input" !in data.object)
         return JSONValue.emptyObject;
@@ -75,7 +77,7 @@ JSONValue hookInput(JSONValue data)
     return data["tool_input"];
 }
 
-string hookDirectory(JSONValue data, string session)
+private string hookDirectory(JSONValue data, string session)
 {
     if (!session.length)
         return null;
@@ -94,7 +96,7 @@ string hookDirectory(JSONValue data, string session)
         return null;
 }
 
-bool blockedByPolicy(string directory, string tool, JSONValue input, Output output)
+private bool blockedByPolicy(string directory, string tool, JSONValue input, Output output)
 {
     if (!directory.length)
         return false;
@@ -121,7 +123,7 @@ bool blockedByPolicy(string directory, string tool, JSONValue input, Output outp
     }
 }
 
-string unreadContext(Profile profile)
+private string unreadContext(Profile profile)
 {
     Event[] unread = events.unread(profile);
     if (!unread.length)
@@ -130,9 +132,9 @@ string unreadContext(Profile profile)
     string[] listed;
     foreach (i, event; unread)
     {
-        if (i == MAX_INJECTED_EVENTS)
+        if (i == maxInjectedEvents)
         {
-            listed ~= (unread.length - MAX_INJECTED_EVENTS).to!string~" more";
+            listed ~= (unread.length - maxInjectedEvents).to!string~" more";
             break;
         }
 
@@ -143,7 +145,7 @@ string unreadContext(Profile profile)
         " - read them with read_events: "~listed.join("; ")~".";
 }
 
-JSONValue contextResponse(string event, string session)
+private JSONValue contextResponse(string event, string session)
 {
     if (!session.length || events is null)
         return hookResponse();
@@ -169,16 +171,14 @@ JSONValue contextResponse(string event, string session)
     ]);
 }
 
-void respondHook(string EVENT)(Request request, Output output)
+private void respondHook(string event)(Request request, Output output)
 {
     JSONValue data;
-    if (!acceptHook(request, output, EVENT, data))
+    if (!acceptHook(request, output, event, data))
         return;
 
     respond(output, hookResponse());
 }
-
-public:
 
 @endpoint @route!"/api/hooks/pre-tool-use"
 void preToolUse(Request request, Output output)
@@ -202,7 +202,7 @@ void preToolUse(Request request, Output output)
     if (session.length && directory.length)
         scheduler.adopt(session, directory);
 
-    if (tool.startsWith(MCP_PREFIX) && session.length)
+    if (tool.startsWith(mcpPrefix) && session.length)
     {
         respond(output, JSONValue([
             "hookSpecificOutput": JSONValue([

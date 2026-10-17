@@ -1,13 +1,14 @@
 module daemon.agent.profile;
 
-import daemon.interop.session;
-import daemon.http;
 import daemon.api;
+import daemon.http;
+import daemon.interop.session : Session;
+
 import serverino;
 
 import std.json : JSONValue;
 
-enum HUMAN_NAME = "human";
+enum humanName = "human";
 
 @endpoint @route!(matchesPath!"/api/profiles/<name>")
 void getProfile(Request request, Output output)

@@ -1,25 +1,34 @@
 module daemon.api;
 
-import daemon.agent;
+import daemon.agent.api;
 import daemon.agent.profile;
 import daemon.agent.store;
+import daemon.agent;
 import daemon.config;
+import daemon.coord.messages;
+import daemon.coord.rooms;
 import daemon.coord;
-import daemon.coord.api;
-import daemon.events;
+import daemon.events.api;
 import daemon.events.event;
 import daemon.events.schedule;
+import daemon.events;
 import daemon.exception;
 import daemon.hooks;
 import daemon.http;
 import daemon.interop.api;
-import daemon.interop.devin.session;
 import daemon.interop.devin.bridge : Bridge;
-static import daemon.interop.devin.bridge;
-import daemon.interop.call;
+import daemon.interop.devin.calls;
+import daemon.interop.devin.connection;
+import daemon.interop.devin.session.api;
+import daemon.interop.devin.session.control;
+import daemon.interop.devin.session.permissions;
+import daemon.interop.devin.session.transcript;
+import daemon.interop.devin.session;
 import daemon.interop.mcp;
-import daemon.policy;
 import daemon.policy.access;
+import daemon.policy;
+static import daemon.interop.devin.bridge;
+
 import serverino;
 
 import core.sys.posix.signal : kill, SIGTERM;
@@ -31,11 +40,7 @@ import std.json : JSONValue;
 import std.meta : AliasSeq;
 import std.process : environment, thisProcessID;
 
-private:
-
-bool stopping;
-
-public:
+private bool stopping;
 
 // Worker-owned domain singletons
 Config configuration;
@@ -73,15 +78,18 @@ void closeDomain()
 
 alias apiModules = AliasSeq!(
     daemon.agent.profile,
-    daemon.agent.store,
-    daemon.coord.api,
-    daemon.events.event,
-    daemon.events.schedule,
+    daemon.agent.api,
+    daemon.coord.rooms,
+    daemon.coord.messages,
+    daemon.events.api,
     daemon.hooks,
     daemon.policy.access,
     daemon.interop.api,
-    daemon.interop.devin.bridge,
-    daemon.interop.devin.session,
+    daemon.interop.devin.connection,
+    daemon.interop.devin.session.api,
+    daemon.interop.devin.session.control,
+    daemon.interop.devin.session.permissions,
+    daemon.interop.devin.session.transcript,
     daemon.interop.mcp
 );
 

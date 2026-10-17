@@ -1,0 +1,52 @@
+module daemon.agent.api;
+
+import daemon.agent;
+import daemon.api;
+import daemon.http;
+
+import serverino;
+
+import std.json : JSONValue;
+
+@endpoint @route!"/api/profiles"
+void profiles(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
+        return;
+
+    if (request.method == Request.Method.Get)
+    {
+        JSONValue[] ret;
+        foreach (profile; profileStore.list())
+            ret ~= profile.toJSON();
+
+        respond(output, JSONValue(ret));
+    }
+    else
+        respond(output, profileStore.create(readField!"name"(request)).toJSON(), 201);
+}
+
+@endpoint @route!(matchesPath!"/api/profiles/<name>/session")
+void profileSession(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
+        return;
+
+    Profile profile = profileStore.get(routeParameter!"/api/profiles/<name>/session"(request));
+    if (profile is null)
+        respondError(output, 404, "Profile not found");
+    else if (request.method == Request.Method.Post)
+    {
+        string session = readField!"id"(request);
+        if (!bridge.access.client(request.header.read("x-autonom-client")) &&
+            bridge.authenticate(request.header.read("x-autonom-run"), session) is null &&
+            bridge.access.mcpSession(request.header.read("x-autonom-mcp")) != session)
+            throw new ProfileConflictException("A session can register only its own managed identity");
+
+        respond(output, profileStore.register(profile.name, session).toJSON());
+    }
+    else if (profile.session !is null)
+        respond(output, profile.session.toJSON());
+    else
+        respondError(output, 404, "Profile has no session");
+}

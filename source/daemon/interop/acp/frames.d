@@ -2,11 +2,9 @@ module daemon.interop.acp.frames;
 
 import std.json : JSONType, JSONValue, parseJSON;
 
-public:
-
 // Shared by both daemon-owned and Desktop ACP connections.
-enum FRAME_LIMIT = 16 * 1024 * 1024;
-enum REQUEST_LIMIT = 256;
+enum frameLimit = 16 * 1024 * 1024;
+enum requestLimit = 256;
 
 struct Frame
 {
@@ -42,7 +40,7 @@ struct Frame
     string encode()
     {
         string ret = value.toString();
-        if (ret.length > FRAME_LIMIT)
+        if (ret.length > frameLimit)
             throw new Exception("ACP frame exceeds the 16 MiB limit");
         return ret~"\n";
     }
@@ -76,8 +74,7 @@ private:
     char[] partial;
 
 public:
-    void feed(const(ubyte)[] bytes, void delegate(Frame) receive)
-    {
+    void feed(const(ubyte)[] bytes, void delegate(Frame) receive) {
         foreach (value; bytes)
         {
             if (value == '\n')
@@ -90,7 +87,7 @@ public:
             }
             else
             {
-                if (partial.length >= FRAME_LIMIT)
+                if (partial.length >= frameLimit)
                     throw new Exception("ACP frame exceeds the 16 MiB limit");
                 partial ~= cast(char)value;
             }

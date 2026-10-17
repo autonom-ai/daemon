@@ -1,8 +1,8 @@
 module daemon.config;
 
 public import daemon.config.parse;
-
 import daemon.storage;
+
 import intuit.router : IRouter;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
@@ -11,8 +11,6 @@ import core.time : Duration, hours, minutes, seconds;
 import std.algorithm.searching : canFind;
 import std.path;
 import std.process : environment;
-
-public:
 
 class Config
 {
@@ -42,12 +40,14 @@ public:
         => buildPath(environment.get("XDG_CONFIG_HOME", expandTilde("~/.config")), "autonom", "config.yml");
 
     static string defaultSessionLockDir()
-        => buildPath(
+    {
+        return buildPath(
             environment.get("XDG_DATA_HOME", expandTilde("~/.local/share")),
             "devin",
             "cli",
             "session_locks"
         );
+    }
 
     static Config get(string configPath = null)
     {

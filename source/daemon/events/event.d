@@ -2,11 +2,8 @@ module daemon.events.event;
 
 import daemon.agent;
 import daemon.config;
-import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
-import daemon.http;
-import daemon.api;
+import daemon.coord.stream : stdTimeTicksPerMillisecond;
 import daemon.storage;
-import serverino;
 
 import std.datetime : Clock, UTC;
 import std.file;
@@ -14,28 +11,14 @@ import std.json : JSONType, JSONValue;
 import std.path : buildPath;
 import std.uuid : randomUUID;
 
-public:
-
-@endpoint @route!"/api/events"
-void readEvents(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get]))
-        return;
-
-    Profile profile = caller(request);
-    JSONValue ret = JSONValue.emptyObject;
-    ret["events"] = JSONValue.emptyArray;
-    foreach (event; events.read(profile))
-        ret["events"].array ~= event.toJSON();
-
-    respond(output, ret);
-}
-
-enum MAX_EVENTS = 1000;
-enum EVENTS_FILE = "events.json";
+enum maxEvents = 1000;
+enum eventsFile = "events.json";
 
 class EventStore
 {
+private:
+    Event[][string] pending;
+
 public:
     const string directory;
 
@@ -80,8 +63,8 @@ public:
         }
 
         *found ~= event;
-        if (found.length > MAX_EVENTS)
-            *found = (*found)[$-MAX_EVENTS..$];
+        if (found.length > maxEvents)
+            *found = (*found)[$-maxEvents..$];
 
         save(profile.name);
     }
@@ -110,13 +93,11 @@ public:
     }
 
 private:
-    Event[][string] pending;
-
     string inboxDir(string profileName) const
         => buildPath(directory, "inboxes", profileName);
 
     string eventsPath(string profileName) const
-        => buildPath(inboxDir(profileName), EVENTS_FILE);
+        => buildPath(inboxDir(profileName), eventsFile);
 
     Event[] load(string profileName)
     {
@@ -196,7 +177,7 @@ struct Event
         Event ret;
         ret.id = id.length ? id.idup : randomUUID().toString();
         ret.type = type;
-        ret.timestamp = Clock.currTime(UTC()).stdTime / HECTONANOSECONDS_PER_MILLISECOND;
+        ret.timestamp = Clock.currTime(UTC()).stdTime / stdTimeTicksPerMillisecond;
         ret.from = from;
         ret.room = room;
         ret.text = text;

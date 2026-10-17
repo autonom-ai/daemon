@@ -13,12 +13,14 @@ import std.path : buildPath;
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     mkdirRecurse(buildPath(fixture.root, ".devin"));
     string path = buildPath(fixture.root, ".devin", "policy.yml");
     write(path, "rules:\n  - action: allow\n    match:\n      tool: ^read$\n    reason: Local reads\n");
     RunningDaemon daemon = startDaemon(fixture);
-    scope(exit) daemon.close();
+    scope(exit)
+        daemon.close();
 
     JSONValue rules = request("/api/policy?directory="~fixture.root);
     rules.array.length.should == 1;
@@ -33,12 +35,14 @@ unittest
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     mkdirRecurse(buildPath(fixture.root, ".devin"));
     string path = buildPath(fixture.root, ".devin", "policy.yml");
     write(path, "rules:\n  - action: invalid\n");
     RunningDaemon daemon = startDaemon(fixture);
-    scope(exit) daemon.close();
+    scope(exit)
+        daemon.close();
 
     request("/api/policy?directory="~fixture.root, 503);
     write(path, "rules: []\n");

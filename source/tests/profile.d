@@ -1,10 +1,13 @@
 module tests.profile;
 
-import daemon.agent;
+import daemon.agent.api;
 import daemon.agent.profile;
 import daemon.agent.store;
+import daemon.agent;
+import daemon.interop.devin.session.control;
 import daemon.interop;
 import tests.common;
+
 import serverino : endpoint, route;
 import unit_threaded : Name, should, shouldThrow;
 
@@ -20,10 +23,10 @@ import std.traits : hasUDA;
 @Name("Profile declares module-level HTTP endpoints")
 unittest
 {
-    static foreach (HANDLER; ["profiles", "getProfile", "profileSession"])
+    static foreach (handler; ["profiles", "getProfile", "profileSession"])
     {
-        hasUDA!(mixin(HANDLER), endpoint).should == true;
-        hasUDA!(mixin(HANDLER), route).should == true;
+        hasUDA!(mixin(handler), endpoint).should == true;
+        hasUDA!(mixin(handler), route).should == true;
     }
 }
 

@@ -1,21 +1,18 @@
 module tests.http.coord;
 
-import tests.http.common;
 import tests.common;
+import tests.http.common;
+
 import unit_threaded : Name, Serial, should;
 
 import core.sys.linux.sys.file : flock, LOCK_EX;
-import core.thread : Thread;
-import core.time : Duration, msecs, seconds;
-import std.algorithm : canFind;
-import std.array : join, replace, replicate;
-import std.conv : octal, to;
-import std.file : exists, getcwd, mkdirRecurse, readText, setAttributes, write;
-import std.json : JSONValue, parseJSON;
-import std.net.curl : CurlException, HTTP;
+import std.conv : to;
+import std.file : mkdirRecurse, write;
+import std.json : JSONValue;
+import std.net.curl : HTTP;
 import std.path : buildPath;
 import std.process;
-import std.stdio : File, stdin;
+import std.stdio : File;
 
 @Name("Daemon coordinates rooms and messages while unread events remain advisory") @Serial
 unittest
@@ -167,4 +164,3 @@ unittest
         .should == "general";
     request("/api/rooms?session=session-1").array.length.should == 0;
 }
-

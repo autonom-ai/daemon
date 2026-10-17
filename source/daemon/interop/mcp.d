@@ -1,26 +1,23 @@
 module daemon.interop.mcp;
 
-import daemon.exception;
-import daemon.http;
 import daemon.api;
+import daemon.http;
+
 import serverino;
 
-import std.algorithm.searching : canFind;
 import std.file : thisExePath;
 import std.json : JSONType, JSONValue;
 import std.path : buildPath, dirName;
-import std.uuid : UUID;
 
-public:
-
-enum MCP_SERVER_NAME = "autonom-coord";
+enum mcpServerName = "autonom-coord";
 
 string mcpServerPath()
     => buildPath(dirName(dirName(thisExePath)), "source", "mcp", "server.py");
 
 JSONValue coordServer(string port, string token)
-    => JSONValue([
-        "name": JSONValue(MCP_SERVER_NAME),
+{
+    return JSONValue([
+        "name": JSONValue(mcpServerName),
         "command": JSONValue("python3"),
         "args": JSONValue([JSONValue(mcpServerPath())]),
         "env": JSONValue([
@@ -30,6 +27,7 @@ JSONValue coordServer(string port, string token)
             JSONValue(["name": JSONValue("AUTONOM_CLIENT_TOKEN"), "value": JSONValue("")])
         ])
     ]);
+}
 
 JSONValue injectCoord(JSONValue params, string port, string token)
 {
@@ -39,7 +37,7 @@ JSONValue injectCoord(JSONValue params, string port, string token)
         foreach (entry; params["mcpServers"].array)
         {
             if (entry.type != JSONType.object || "name" !in entry.object ||
-                entry["name"].type != JSONType.string || entry["name"].str != MCP_SERVER_NAME)
+                entry["name"].type != JSONType.string || entry["name"].str != mcpServerName)
                 servers ~= entry;
         }
     }

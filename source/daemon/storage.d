@@ -12,9 +12,7 @@ import std.stdio : File;
 import std.string : toStringz;
 import std.uuid;
 
-package(daemon):
-
-File openFile(string path, int flags)
+package(daemon) File openFile(string path, int flags)
 {
     if (isSymlink(dirName(path)))
         throw new Exception("Storage directory must not be a symlink");
@@ -36,7 +34,7 @@ File openFile(string path, int flags)
     return ret;
 }
 
-string readText(string path, size_t limit = 64 * 1024)
+package(daemon) string readText(string path, size_t limit = 64 * 1024)
 {
     File file = openFile(path, O_RDONLY);
     scope(exit)
@@ -57,7 +55,7 @@ string readText(string path, size_t limit = 64 * 1024)
     return ret;
 }
 
-JSONValue readJSON(string path, size_t limit = 64 * 1024)
+package(daemon) JSONValue readJSON(string path, size_t limit = 64 * 1024)
 {
     string content = readText(path, limit);
     try
@@ -66,13 +64,13 @@ JSONValue readJSON(string path, size_t limit = 64 * 1024)
         throw new FileException(path, error.msg);
 }
 
-void atomicWrite(string path, string content)
+package(daemon) void atomicWrite(string path, string content)
 {
     bool committed;
     atomicWrite(path, content, committed);
 }
 
-void atomicWrite(string path, string content, out bool committed)
+package(daemon) void atomicWrite(string path, string content, out bool committed)
 {
     committed = false;
     if (exists(path) && isSymlink(path))

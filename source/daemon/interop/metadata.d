@@ -1,8 +1,6 @@
 module daemon.interop.metadata;
 
-import std.json : JSONType, JSONValue;
-
-public:
+import std.json : JSONValue;
 
 struct SessionMetadata
 {

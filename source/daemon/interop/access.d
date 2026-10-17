@@ -1,7 +1,7 @@
 module daemon.interop.access;
 
 import daemon.interop.call;
-import daemon.interop.session;
+import daemon.interop.session : Session;
 import daemon.storage;
 
 import core.sync.mutex : Mutex;
@@ -13,11 +13,8 @@ import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath;
 import std.stdio : File;
 
-public:
-
 class Access
 {
-public:
     const string tokenPath;
 
     this(string directory)

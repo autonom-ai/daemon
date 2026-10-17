@@ -1,7 +1,7 @@
 module daemon.interop.devin.desktop;
 
 import daemon.interop.acp;
-import daemon.interop.mcp : MCP_SERVER_NAME, injectCoord;
+import daemon.interop.mcp : mcpServerName, injectCoord;
 
 import core.atomic : atomicLoad, atomicStore;
 import core.sync.condition : Condition;
@@ -15,8 +15,6 @@ import std.net.curl : HTTP;
 import std.path : dirName;
 import std.socket;
 import std.uuid : randomUUID;
-
-public:
 
 /// Desktop's stdio peer and the authenticated control socket share one ACP connection.
 class Desktop
@@ -90,7 +88,9 @@ private:
                 ]);
             }
             post("/api/acp/observe", JSONValue([
-                "connection": JSONValue(id), "sessions": listed, "closed": JSONValue(closed)
+                "connection": JSONValue(id),
+                "sessions": listed,
+                "closed": JSONValue(closed)
             ]));
         }
     }
@@ -164,7 +164,7 @@ private:
         {
             foreach (server; params["mcpServers"].array)
             {
-                if (server["name"].str != MCP_SERVER_NAME)
+                if (server["name"].str != mcpServerName)
                     continue;
                 foreach (entry; server["env"].array)
                 {
@@ -173,10 +173,14 @@ private:
                 }
             }
             synchronized (httpMutex)
+            {
                 post("/api/acp/admit", JSONValue([
-                    "connection": JSONValue(id), "session": JSONValue(session),
-                    "token": JSONValue(issued), "directory": JSONValue(directory)
+                    "connection": JSONValue(id),
+                    "session": JSONValue(session),
+                    "token": JSONValue(issued),
+                    "directory": JSONValue(directory)
                 ]));
+            }
         }
         synchronized (mutex)
             sessions[session.idup] = Instance(directory.idup, issued.idup, 0);
@@ -190,7 +194,7 @@ private:
         size_t offset;
         while (offset < line.length)
         {
-            auto count = socket.send(cast(ubyte[])line[offset..$]);
+            ptrdiff_t count = socket.send(cast(ubyte[])line[offset..$]);
             if (count <= 0)
                 throw new Exception("ACP control write failed");
             offset += count;
@@ -237,7 +241,8 @@ private:
 
     void serve(Socket socket)
     {
-        scope(exit) socket.close();
+        scope(exit)
+            socket.close();
         socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, 5.seconds);
         socket.setOption(SocketOptionLevel.SOCKET, SocketOption.SNDTIMEO, 2.seconds);
         JSONValue identity = JSONValue(null);
@@ -245,14 +250,14 @@ private:
         {
             string line;
             ubyte[4096] buffer;
-            while (line.length <= FRAME_LIMIT)
+            while (line.length <= frameLimit)
             {
-                auto count = socket.receive(buffer);
+                ptrdiff_t count = socket.receive(buffer);
                 if (count <= 0)
                     return;
-                foreach (value; buffer[0..count])
+                foreach (val; buffer[0..count])
                 {
-                    if (value == '\n')
+                    if (val == '\n')
                     {
                         JSONValue request = parseJSON(line);
                         identity = request["id"];
@@ -260,8 +265,8 @@ private:
                         send(socket, JSONValue(["jsonrpc": JSONValue("2.0"), "id": identity, "result": result]));
                         return;
                     }
-                    line ~= cast(char)value;
-                    if (line.length > FRAME_LIMIT)
+                    line ~= cast(char)val;
+                    if (line.length > frameLimit)
                         throw new AcpException(-32600, "ACP control request is too large");
                 }
             }
@@ -270,14 +275,18 @@ private:
         {
             AcpException protocol = cast(AcpException)error;
             try
+            {
                 send(socket, JSONValue([
-                    "jsonrpc": JSONValue("2.0"), "id": identity,
+                    "jsonrpc": JSONValue("2.0"),
+                    "id": identity,
                     "error": JSONValue([
                         "code": JSONValue(protocol is null ? -32603 : protocol.code),
                         "message": JSONValue(protocol is null ? "ACP control request failed" : protocol.msg)
                     ])
                 ]));
-            catch (Exception) {}
+            }
+            catch (Exception)
+            { }
         }
     }
 
@@ -290,7 +299,7 @@ private:
                 if (!clients[i].isRunning)
                 {
                     clients[i].join();
-                    clients = clients[0..i]~clients[i+1..$];
+                    clients = clients[0..i]~clients[i + 1..$];
                     break;
                 }
             }
@@ -301,7 +310,9 @@ private:
                     socket.close();
                 else
                 {
-                    Thread client = new Thread({ serve(socket); });
+                    Thread client = new Thread({
+                        serve(socket);
+                    });
                     clients ~= client;
                     client.start();
                 }
@@ -356,7 +367,8 @@ public:
 
                 try
                     observe();
-                catch (Exception) {}
+                catch (Exception)
+                { }
             }
         });
         heartbeat.start();
@@ -378,7 +390,8 @@ public:
             listener.close();
         try
             observe(true);
-        catch (Exception) {}
+        catch (Exception)
+        { }
         if (socketPath.length && exists(socketPath))
             remove(socketPath);
     }

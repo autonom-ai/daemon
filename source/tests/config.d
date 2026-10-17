@@ -1,8 +1,9 @@
 module tests.config;
 
 import daemon.config;
-import intuit.router.openrouter;
 import tests.common;
+
+import intuit.router.openrouter;
 import unit_threaded : Name, should, shouldThrow;
 
 import core.time : hours, minutes, seconds;
@@ -29,7 +30,7 @@ unittest
         fixture.close();
 
     string path = buildPath(fixture.root, "defaults.yml");
-    write(path, "devinCommand: devin\n"~ROUTER);
+    write(path, "devinCommand: devin\n"~routerConfig);
     Config config = new Config(path);
     config.dataDir.should == fixture.root;
     config.sessionLockDir.should == Config.defaultSessionLockDir;
@@ -73,7 +74,7 @@ unittest
 
     foreach (content; [
         "devinCommand: devin\n",
-        ROUTER
+        routerConfig
     ])
     {
         write(fixture.path, content);
@@ -88,7 +89,7 @@ unittest
     scope(exit)
         fixture.close();
 
-    string complete = "devinCommand: devin\n"~ROUTER;
+    string complete = "devinCommand: devin\n"~routerConfig;
     foreach (content; [
         "dataDir: [\n",
         "[]\n",
@@ -139,7 +140,7 @@ unittest
     fixture.config.offlineCompactAfter.should == 1.hours;
     fixture.config.sessionDatabase.should == buildPath(fixture.root, "sessions.db");
 
-    write(fixture.path, "devinCommand: devin\ncompactOnResume: true\nofflineStartAfter: 30m\nofflineCompactAfter: 90\n"~ROUTER);
+    write(fixture.path, "devinCommand: devin\ncompactOnResume: true\nofflineStartAfter: 30m\nofflineCompactAfter: 90\n"~routerConfig);
     Config config = new Config(fixture.path);
     config.compactOnResume.should == true;
     config.offlineStartAfter.should == 30.minutes;
@@ -155,7 +156,7 @@ unittest
         "compactionThresholds: 1,2,3\n"
     ])
     {
-        write(fixture.path, "devinCommand: devin\n"~content~ROUTER);
+        write(fixture.path, "devinCommand: devin\n"~content~routerConfig);
         (new Config(fixture.path)).shouldThrow!Exception();
     }
 }
@@ -170,4 +171,40 @@ unittest
     string path = buildPath(fixture.root, "linked.yml");
     symlink(fixture.path, path);
     (new Config(path)).shouldThrow!Exception();
+}
+
+@Name("Retention configuration parses knobs with backward-compatible defaults and custom values")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    fixture.config.maxStreamBytes.should == 4 * 1024 * 1024;
+    fixture.config.maxStreamEntries.should == 1000;
+    fixture.config.callCapacity.should == 128;
+    fixture.config.callSettleTimeout.should == 300.seconds;
+    fixture.config.maxConcurrentCalls.should == 8;
+    fixture.config.pruneExecutionArtifacts.should == false;
+    fixture.config.allowDestructivePruning.should == false;
+
+    string customConfig = buildPath(fixture.root, "custom_retention.yml");
+    write(customConfig, "devinCommand: devin\n"~
+        "maxStreamBytes: 16MiB\n"~
+        "maxStreamEntries: 2000\n"~
+        "callCapacity: 64\n"~
+        "callSettleTimeout: 10m\n"~
+        "maxConcurrentCalls: 4\n"~
+        "pruneExecutionArtifacts: true\n"~
+        "allowDestructivePruning: true\n"~
+        routerConfig);
+
+    Config custom = new Config(customConfig);
+    custom.maxStreamBytes.should == 16 * 1024 * 1024;
+    custom.maxStreamEntries.should == 2000;
+    custom.callCapacity.should == 64;
+    custom.callSettleTimeout.should == 10.minutes;
+    custom.maxConcurrentCalls.should == 4;
+    custom.pruneExecutionArtifacts.should == true;
+    custom.allowDestructivePruning.should == true;
 }

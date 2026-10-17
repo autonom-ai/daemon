@@ -138,7 +138,7 @@ layers, or file splits solely to satisfy a style checklist.
 
 - Use four-space indentation and Allman braces for declarations and scoped
   control flow. Put the body on the following line.
-- Omit braces only when a scoped statement has one non-nested body statement
+- Omit braces when a scoped statement has one non-nested body statement
   that fits on one physical line. If the body statement wraps across lines or
   contains nested scoped control flow, use braces. A braced outer block
   remains braced even if its nested statement is a single line.

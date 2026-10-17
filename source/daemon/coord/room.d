@@ -9,11 +9,7 @@ import std.json : JSONType, JSONValue;
 import std.path : buildPath;
 import std.uni : sicmp;
 
-private:
-
-enum MEMBERSHIP_FILE = "profiles.json";
-
-public:
+private enum membershipFile = "profiles.json";
 
 class Room
 {
@@ -21,58 +17,6 @@ private:
     string[] admins;
     string[] involved;
     bool restricted;
-
-    static string[] listed(JSONValue value)
-    {
-        if (value.type != JSONType.array)
-            throw new Exception("Invalid room membership");
-
-        string[] ret = new string[0];
-        foreach (entry; value.array)
-        {
-            if (entry.type != JSONType.string || !entry.str.length)
-                throw new Exception("Invalid room membership");
-
-            ret ~= entry.str;
-        }
-
-        return ret;
-    }
-
-    static bool named(string[] names, string profileName)
-    {
-        foreach (name; names)
-        {
-            if (sicmp(name, profileName) == 0)
-                return true;
-        }
-
-        return false;
-    }
-
-    JSONValue involvedJSON()
-    {
-        if (!restricted)
-            return JSONValue(null);
-
-        JSONValue ret = JSONValue.emptyArray;
-        foreach (name; involved)
-            ret.array ~= JSONValue(name);
-
-        return ret;
-    }
-
-    string membershipPath() const
-        => buildPath(directory, MEMBERSHIP_FILE);
-
-    void save()
-    {
-        JSONValue data = JSONValue.emptyObject;
-        data["owner"] = JSONValue(owner);
-        data["admins"] = JSONValue(admins);
-        data["involved"] = involvedJSON();
-        atomicWrite(membershipPath, data.toString());
-    }
 
 public:
     const string name;
@@ -101,7 +45,7 @@ public:
 
     static Room load(string name, string directory)
     {
-        string path = buildPath(directory, MEMBERSHIP_FILE);
+        string path = buildPath(directory, membershipFile);
         if (!exists(path))
             return null;
 
@@ -120,7 +64,7 @@ public:
     }
 
     bool originalOwner(string profileName)
-        => sicmp(owner, profileName) == 0 || sicmp(HUMAN_NAME, profileName) == 0;
+        => sicmp(owner, profileName) == 0 || sicmp(humanName, profileName) == 0;
 
     bool admin(string profileName)
         => named(admins, profileName);
@@ -177,5 +121,58 @@ public:
         ret["admins"] = JSONValue(admins);
         ret["involved"] = involvedJSON();
         return ret;
+    }
+
+private:
+    static string[] listed(JSONValue value)
+    {
+        if (value.type != JSONType.array)
+            throw new Exception("Invalid room membership");
+
+        string[] ret = new string[0];
+        foreach (entry; value.array)
+        {
+            if (entry.type != JSONType.string || !entry.str.length)
+                throw new Exception("Invalid room membership");
+
+            ret ~= entry.str;
+        }
+
+        return ret;
+    }
+
+    static bool named(string[] names, string profileName)
+    {
+        foreach (name; names)
+        {
+            if (sicmp(name, profileName) == 0)
+                return true;
+        }
+
+        return false;
+    }
+
+    JSONValue involvedJSON()
+    {
+        if (!restricted)
+            return JSONValue(null);
+
+        JSONValue ret = JSONValue.emptyArray;
+        foreach (name; involved)
+            ret.array ~= JSONValue(name);
+
+        return ret;
+    }
+
+    string membershipPath() const
+        => buildPath(directory, membershipFile);
+
+    void save()
+    {
+        JSONValue data = JSONValue.emptyObject;
+        data["owner"] = JSONValue(owner);
+        data["admins"] = JSONValue(admins);
+        data["involved"] = involvedJSON();
+        atomicWrite(membershipPath, data.toString());
     }
 }

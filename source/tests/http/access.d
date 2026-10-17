@@ -1,21 +1,14 @@
 module tests.http.access;
 
-import tests.http.common;
 import tests.common;
+import tests.http.common;
+
 import unit_threaded : Name, Serial, should;
 
-import core.sys.linux.sys.file : flock, LOCK_EX;
-import core.thread : Thread;
-import core.time : Duration, msecs, seconds;
-import std.algorithm : canFind;
-import std.array : join, replace, replicate;
-import std.conv : octal, to;
-import std.file : exists, getcwd, mkdirRecurse, readText, setAttributes, write;
-import std.json : JSONValue, parseJSON;
-import std.net.curl : CurlException, HTTP;
-import std.path : buildPath;
+import std.conv : to;
+import std.json : JSONValue;
+import std.net.curl : HTTP;
 import std.process;
-import std.stdio : File, stdin;
 
 @Name("Unmanaged sessions cannot acquire Autonom identity through hooks") @Serial
 unittest
@@ -120,4 +113,3 @@ unittest
     request("/api/sessions/desktop-session/resume", 409,
         JSONValue(["prompt": JSONValue("hello"), "directory": JSONValue(fixture.root)]).toString());
 }
-

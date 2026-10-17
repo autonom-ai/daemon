@@ -5,23 +5,25 @@ import tests.http.common;
 
 import unit_threaded;
 
+import std.conv : to;
 import std.json : JSONValue;
 
 @Name("HTTP permission decisions select only offered options and settle the ACP request once") @Serial
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     installFake(fixture);
     RunningDaemon daemon = startDaemon(fixture);
-    scope(exit) daemon.close();
+    scope(exit)
+        daemon.close();
     JSONValue accepted = request("/api/sessions", 202, JSONValue([
         "directory": JSONValue(fixture.root), "prompt": JSONValue("permission")
     ]).toString());
     JSONValue pending;
     string session;
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         JSONValue call = request("/api/executions/"~accepted["id"].str);
         if (call["sessionId"].isNull)
             return false;
@@ -42,20 +44,20 @@ unittest
 @Name("HTTP permission decisions settle via path-based requestId endpoint") @Serial
 unittest
 {
-    import std.conv : to;
 
     Fixture fixture = Fixture.create();
-    scope(exit) fixture.close();
+    scope(exit)
+        fixture.close();
     installFake(fixture);
     RunningDaemon daemon = startDaemon(fixture);
-    scope(exit) daemon.close();
+    scope(exit)
+        daemon.close();
     JSONValue accepted = request("/api/sessions", 202, JSONValue([
         "directory": JSONValue(fixture.root), "prompt": JSONValue("permission")
     ]).toString());
     JSONValue pending;
     string session;
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         JSONValue call = request("/api/executions/"~accepted["id"].str);
         if (call["sessionId"].isNull)
             return false;

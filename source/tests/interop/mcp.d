@@ -15,7 +15,7 @@ unittest
     JSONValue[] servers = injected["mcpServers"].array;
     servers.length.should == 2;
     servers[0]["name"].str.should == "other";
-    servers[1]["name"].str.should == MCP_SERVER_NAME;
+    servers[1]["name"].str.should == mcpServerName;
     string[string] env;
     foreach (entry; servers[1]["env"].array)
         env[entry["name"].str] = entry["value"].str;
@@ -24,4 +24,3 @@ unittest
     env["AUTONOM_RUN_TOKEN"].should == "";
     env["AUTONOM_CLIENT_TOKEN"].should == "";
 }
-

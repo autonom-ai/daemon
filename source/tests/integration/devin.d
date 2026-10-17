@@ -4,9 +4,9 @@ module tests.integration.devin;
 version(devin)
 {
     import daemon.config : Config;
-    import daemon.interop.acp : AcpClient, AcpException, Frame, FRAME_LIMIT;
+    import daemon.interop.acp : AcpClient, AcpException, Frame, frameLimit;
+    import daemon.interop.devin.options : promptParams, sessionParams;
     import daemon.interop.devin.bridge : Bridge;
-    import daemon.interop.devin.acp : promptParams, sessionParams;
     import daemon.interop.devin.db : readSessionMetadata;
     import daemon.interop.metadata : SessionMetadata;
     import daemon.interop.process : createProcessGroup, terminate;
@@ -64,8 +64,8 @@ version(devin)
             "method": JSONValue("initialize"),
             "params": initialize
         ]));
-        initialize["_meta"]["padding"] = JSONValue("x".replicate(FRAME_LIMIT + 1 - boundary.encode().length));
-        boundary.encode().length.should == FRAME_LIMIT + 1; // Includes the newline delimiter.
+        initialize["_meta"]["padding"] = JSONValue("x".replicate(frameLimit + 1 - boundary.encode().length));
+        boundary.encode().length.should == frameLimit + 1; // Includes the newline delimiter.
         agent.request("initialize", initialize, 30.seconds)["protocolVersion"].integer.should == 1;
 
         initialize["_meta"]["padding"] = JSONValue(initialize["_meta"]["padding"].str~"x");
@@ -122,7 +122,7 @@ version(devin)
         synchronized (notifications)
         {
             replayed.should == prompt;
-            (largest > 1024 * 1024 && largest <= FRAME_LIMIT).should == true;
+            (largest > 1024 * 1024 && largest <= frameLimit).should == true;
         }
         loaded.close();
 
@@ -189,15 +189,16 @@ version(devin)
         relay.stdin.flush();
         relay.stdin.writeln(initialize[35..$]);
         relay.stdin.flush();
-        waitUntil(delegate bool() { return !find(JSONValue("initialize")).isNull; }, 30.seconds);
+        waitUntil(delegate bool() {
+            return !find(JSONValue("initialize")).isNull;
+        }, 30.seconds);
         find(JSONValue("initialize"))["result"]["protocolVersion"].integer.should == 1;
 
         relay.stdin.write(
             `{"jsonrpc":"2.0","id":"1","method":"session/list","params":{}}`~"\n"~
             `{"jsonrpc":"2.0","id":1,"method":"session/list","params":{}}`~"\n");
         relay.stdin.flush();
-        waitUntil(delegate bool()
-        {
+        waitUntil(delegate bool() {
             return !find(JSONValue("1")).isNull && !find(JSONValue(1)).isNull;
         }, 30.seconds);
         find(JSONValue("1"))["result"]["sessions"].array.length.should == 0;
@@ -206,8 +207,7 @@ version(devin)
         relay.stdin.writeln(`{"jsonrpc":"2.0","id":"bad","method":"session/list","result":{}}`);
         relay.stdin.flush();
         typeof(tryWait(Pid.init)) result;
-        waitUntil(delegate bool()
-        {
+        waitUntil(delegate bool() {
             result = tryWait(relay.pid);
             return result.terminated;
         }, 10.seconds);

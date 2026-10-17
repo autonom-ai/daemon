@@ -1,23 +1,18 @@
 module daemon.acp;
 
 import daemon.config : Config;
-import daemon.interop.acp.client : AcpClient, AcpException;
-import daemon.interop.acp.frames : FRAME_LIMIT, REQUEST_LIMIT;
+import daemon.interop.acp.client : AcpClient;
 import daemon.interop.devin.desktop : Desktop;
 import daemon.interop.devin.process : cliEnvironment;
 
 import core.atomic : atomicLoad, atomicStore;
-import core.sync.mutex : Mutex;
-import core.thread : Thread;
-import core.time : Duration, seconds;
-import std.file : exists, isSymlink, mkdirRecurse, read, remove;
-import std.path : baseName, buildPath, dirName;
+import core.sys.posix.unistd : symlink;
+import std.file : exists, isSymlink, read, remove;
+import std.path : baseName, buildPath;
 import std.process : environment;
 import std.stdio : File, stderr, stdin, stdout;
 import std.string : strip, toStringz;
 import std.uuid : randomUUID;
-
-public:
 
 /// ACP Host Connection encapsulating Desktop stdio and authenticated control socket.
 class AcpHostConnection
@@ -54,19 +49,20 @@ public:
         {
             try
             {
-                import core.sys.posix.unistd : symlink;
                 if (exists(daemonSockPath) || isSymlink(daemonSockPath))
                     remove(daemonSockPath);
                 symlink(baseName(socketPath).toStringz, daemonSockPath.toStringz);
             }
-            catch (Exception) {}
+            catch (Exception)
+            { }
         }
     }
 
     int run()
     {
         atomicStore(running, true);
-        scope(exit) close();
+        scope(exit)
+            close();
         return agent.relay(peerInput, peerOutput);
     }
 
@@ -83,7 +79,8 @@ public:
                 if (exists(daemonSockPath) || isSymlink(daemonSockPath))
                     remove(daemonSockPath);
             }
-            catch (Exception) {}
+            catch (Exception)
+            { }
         }
 
         if (desktop !is null)
@@ -112,23 +109,24 @@ int runAcpHost(string devinCommand = null, string configPath = null)
         }
     }
     catch (Exception)
-    {
-    }
+    { }
 
     string[string] child = cliEnvironment();
     if (data.length)
         child["AUTONOM_DATA_DIR"] = data;
 
     AcpClient agent = new AcpClient([command, "acp"], child, null, stderr);
-    scope(exit) agent.close();
+    scope(exit)
+        agent.close();
 
     string port = environment.get("AUTONOM_PORT", "8080");
     string id = randomUUID().toString();
-    string socketPath = data.length ? buildPath(data, "acp", id ~ ".sock") : null;
+    string socketPath = data.length ? buildPath(data, "acp", id~".sock") : null;
     string daemonSockPath = data.length ? buildPath(data, "acp", "daemon.sock") : null;
 
     AcpHostConnection host = new AcpHostConnection(agent, stdin, stdout, token, port, id, socketPath, daemonSockPath);
-    scope(exit) host.close();
+    scope(exit)
+        host.close();
 
     return host.run();
 }
