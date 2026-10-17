@@ -80,6 +80,16 @@ unittest
     result["stopReason"].str.should == "cancelled";
     chunks.canFind("hello agent").should == true;
     chunks.canFind("steer me").should == true;
+
+    long exiting = agent.send("session/prompt", JSONValue([
+        "sessionId": JSONValue(session),
+        "prompt": JSONValue([JSONValue([
+            "type": JSONValue("text"),
+            "text": JSONValue("exit-after-reply")
+        ])])
+    ]));
+    waitUntil(delegate bool() { return agent.disconnected; });
+    agent.await(exiting, 1.seconds)["stopReason"].str.should == "end_turn";
     agent.close();
 }
 

@@ -136,6 +136,9 @@ private:
             incomingBytes = 0;
             foreach (response; requests)
             {
+                if (response.done)
+                    continue;
+
                 response.done = true;
                 response.errorCode = -32000;
                 response.error = failure;
@@ -192,8 +195,7 @@ private:
                 }
                 if (peerOutput.isOpen)
                 {
-                    frame.value["id"] = JSONValue(id);
-                    writeFrame(peerOutput, peerMutex, frame);
+                    writeFrame(peerOutput, peerMutex, frame.withId(JSONValue(id)));
                 }
                 return;
             }
@@ -229,8 +231,7 @@ private:
         {
             synchronized (stateMutex)
                 requests.remove(identity);
-            frame.value["id"] = response.originalId;
-            writeFrame(peerOutput, peerMutex, frame);
+            writeFrame(peerOutput, peerMutex, frame.withId(response.originalId));
             return;
         }
         synchronized (stateMutex)
@@ -261,7 +262,7 @@ private:
             id = allocate();
             response.peer = peer;
             response.originalId = frame.value["id"];
-            frame.value["id"] = JSONValue(id);
+            frame = frame.withId(JSONValue(id));
             requests[id] = response;
         }
         try
@@ -321,8 +322,7 @@ private:
             incomingBytes -= pending.bytes;
             incoming.remove(id.integer);
         }
-        frame.value["id"] = pending.frame.value["id"];
-        writeFrame(toAgent, writeMutex, frame);
+        writeFrame(toAgent, writeMutex, frame.withId(pending.frame.value["id"]));
     }
 
 public:

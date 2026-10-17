@@ -87,4 +87,24 @@ unittest
         ])])
     ]));
     request(path).array.length.should == 0;
+
+    send(parseJSON(`{"jsonrpc":"2.0","id":"native","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"permission"}]}}`));
+    JSONValue previous = native["id"];
+    waitUntil(delegate bool()
+    {
+        native = find("session/request_permission");
+        return native["id"] != previous;
+    });
+    send(JSONValue([
+        "jsonrpc": JSONValue("2.0"),
+        "id": native["id"],
+        "result": JSONValue(["outcome": JSONValue([
+            "outcome": JSONValue("selected"),
+            "optionId": JSONValue("reject_once")
+        ])])
+    ]));
+    waitUntil(delegate bool() { return !find(null, JSONValue("native")).isNull; });
+    decision["id"] = native["id"];
+    request(path, 409, decision.toString());
+    request(path).array.length.should == 0;
 }
