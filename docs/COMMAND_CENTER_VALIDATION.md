@@ -28,8 +28,8 @@ A release needs all four. Unit coverage lives in `source/launcher/tests/unit/`: 
 
 ### 1. Preconditions
 
-- Devin Desktop **1.126.0**, commit `fcf7ba39e6150055fad817f8716385b4d320d46d`.
-- Native host bundle `out/vs/workbench/workbench.desktop.main.js` SHA-256 `da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d`.
+- Devin Desktop **1.126.0**, commit `0b186d6e13a1a48a46430c51fe414dd0747d46f6`.
+- Native host bundle `out/vs/workbench/workbench.desktop.main.js` SHA-256 `302af387606888341f563bbbac96db129c821602a9fa2bd7f37313899450a6e1`.
 - No running Devin Desktop window: the pipe must reach the browser process the launcher spawns.
 - The repository `assets/ui.yml` and its `pages/*.html` files are present.
 - No concurrent change to Desktop's `user-data-dir`.
