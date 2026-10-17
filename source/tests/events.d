@@ -403,7 +403,7 @@ unittest
     fixture.events.unread(marlow).length.should == 0;
 }
 
-@Name("A stale ping without a pinging workspace drops its event")
+@Name("A stale ping without a pinging workspace surfaces its event")
 unittest
 {
     WakeFixture fixture = WakeFixture.create("offlineStartAfter: 1s\n");
@@ -418,7 +418,10 @@ unittest
     Room room = fixture.bus.createRoom("general", wren.name);
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, [marlow]);
 
-    fixture.events.unread(marlow).length.should == 0;
+    fixture.events.unread(marlow).length.should == 1;
+    fixture.events.unread(marlow)[0].type.should == EventType.Ping;
+    fixture.events.unread(marlow)[0].text.should == "hello";
+    fixture.events.unread(marlow)[0].from.should == "wren";
     fixture.store.get("marlow").session.isRunning().should == false;
     invocations(fixture.fixture.root).length.should == 1;
 }

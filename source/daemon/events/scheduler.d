@@ -533,10 +533,15 @@ private:
         string workspace;
         if (!active && !scheduled && (session is null || offline(session) > config.offlineStartAfter))
         {
-            fresh = true;
             workspace = pingerWorkspace(from);
-            if (!workspace.length)
+            if (workspace.length)
+                fresh = true;
+            else
+            {
+                foreach (event; batch)
+                    events.surface(profile, event);
                 return;
+            }
         }
 
         if (!active)
