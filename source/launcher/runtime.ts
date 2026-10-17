@@ -75,12 +75,12 @@ const ACP_ICON_STYLE: [string, string][] = [
     ["-webkit-mask-image", ""],
 ];
 
-export function prepareShell(css = uiCss): any
+export function prepareShell(css = uiCss, icons: Record<string, string> = {}): any
 {
     const target = globalThis as any;
     if (target.__autonomShell)
     {
-        target.__autonomShell.update(css);
+        target.__autonomShell.update(css, icons);
         target.__autonomShell.heartbeat();
         return target.__autonomShell;
     }
@@ -94,7 +94,8 @@ export function prepareShell(css = uiCss): any
         agent: HTMLButtonElement;
         editor: HTMLButtonElement;
     }>();
-    const acpIcons = new Set<Element>();
+    const patchedIcons = new Set<Element>();
+    let acpIcons = icons;
     let requested: "autonom" | "devin-cloud" = "autonom";
     let lease: ReturnType<typeof setTimeout> | undefined;
     let frame: ReturnType<typeof setTimeout> | undefined;
@@ -234,15 +235,15 @@ export function prepareShell(css = uiCss): any
         for (let index = 0; fiber && index < 16; index++, fiber = fiber.return)
         {
             const props = fiber.memoizedProps;
-            if (typeof props?.providerId === "string" && typeof props?.icon === "string" && props.icon.trim())
-                return props.icon.trim();
+            if (typeof props?.providerId === "string" && "icon" in props)
+                return acpIcons[props.providerId];
         }
         return undefined;
     }
 
     function renderAcpIcons(): void
     {
-        for (const element of acpIcons)
+        for (const element of patchedIcons)
         {
             if (element.isConnected && acpRegistryIcon(element) !== undefined)
                 continue;
@@ -250,8 +251,11 @@ export function prepareShell(css = uiCss): any
             const style = (element as HTMLElement).style;
             for (const [name] of ACP_ICON_STYLE)
                 style.removeProperty(name);
-            acpIcons.delete(element);
+            patchedIcons.delete(element);
         }
+
+        if (!Object.keys(acpIcons).length)
+            return;
 
         for (const element of document.querySelectorAll(ACP_ICON_SELECTOR))
         {
@@ -264,10 +268,10 @@ export function prepareShell(css = uiCss): any
             if (style.getPropertyValue("mask-image") !== mask)
             {
                 for (const [name, value] of ACP_ICON_STYLE)
-                    style.setProperty(name, name.includes("mask-image") ? mask : value);
+                    style.setProperty(name, name.endsWith("mask-image") ? mask : value);
             }
 
-            acpIcons.add(element);
+            patchedIcons.add(element);
         }
     }
 
@@ -281,10 +285,12 @@ export function prepareShell(css = uiCss): any
             return [...switches].filter(([, entry]) => entry.host.getBoundingClientRect().width > 0)
                 .some(([root]) => root.querySelector('button[aria-label="Editor"]')?.getAttribute("aria-pressed") === "true");
         },
-        update(nextCss: string): void
+        update(nextCss: string, nextIcons?: Record<string, string>): void
         {
             if (style.textContent !== nextCss)
                 style.textContent = nextCss;
+            if (nextIcons)
+                acpIcons = nextIcons;
 
             render();
         },
@@ -311,14 +317,14 @@ export function prepareShell(css = uiCss): any
                 entry.host.remove();
             }
 
-            for (const element of acpIcons)
+            for (const element of patchedIcons)
             {
                 const style = (element as HTMLElement).style;
                 for (const [name] of ACP_ICON_STYLE)
                     style.removeProperty(name);
             }
 
-            acpIcons.clear();
+            patchedIcons.clear();
             style.remove();
             if (target.__autonomShell === shell)
                 delete target.__autonomShell;

@@ -1,3 +1,4 @@
+import autonomFillMarkup from "../../assets/icons/autonom-fill.svg";
 import { object, readPrivateFile, writePrivateFile } from "./config";
 
 import { existsSync } from "node:fs";
@@ -11,7 +12,7 @@ const ACP_AGENT = {
     version: "0.1.0",
     description: "Devin Local with daemon-owned Autonom sessions and scheduled wakes.",
     license: "AGPL-3.0-only",
-    icon: "https://cdn.jsdelivr.net/gh/cetio/autonom@main/assets/icons/autonom-fill.svg",
+    icon: `data:image/svg+xml;base64,${Buffer.from(autonomFillMarkup).toString("base64")}`,
 };
 
 const ENABLED_AGENT_KEYS = ["devin.acp.enabledAgents", "windsurf.acp.enabledAgents"];
@@ -115,6 +116,19 @@ async function readJsonFile(path: string): Promise<Record<string, unknown>>
             return {};
         throw error;
     }
+}
+
+export async function acpRegistryIcons(registryPath = acpRegistryPath()): Promise<Record<string, string>>
+{
+    const registry = await readJsonFile(registryPath);
+    const icons: Record<string, string> = {};
+    for (const agent of Array.isArray(registry.agents) ? registry.agents : [])
+    {
+        const entry = object(agent);
+        if (typeof entry?.id === "string" && typeof entry.icon === "string" && entry.icon.trim())
+            icons[entry.id] = entry.icon;
+    }
+    return icons;
 }
 
 export async function ensureAcpAgent(options: {

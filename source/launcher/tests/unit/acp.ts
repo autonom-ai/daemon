@@ -1,4 +1,4 @@
-import { ACP_AGENT_ID, acpRegistryPath, acpSettingsPath, ensureAcpAgent } from "../../acp";
+import { ACP_AGENT_ID, acpRegistryIcons, acpRegistryPath, acpSettingsPath, ensureAcpAgent } from "../../acp";
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -141,6 +141,33 @@ test("a missing agent binary is rejected before any file is written", async () =
         await assert.rejects(
             ensureAcpAgent({ command: join(root, "missing-acp"), registryPath, settingsPath }),
             /binary is missing/);
+    }
+    finally
+    {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("registry icons map every agent with an icon to its definition", async () =>
+{
+    const root = await directory();
+    try
+    {
+        const registryPath = join(root, "registry.json");
+        await writeFile(registryPath, JSON.stringify({
+            version: "1.0.0",
+            agents: [
+                { id: "devin-cli", name: "Devin Local" },
+                { id: "devin-autonom", icon: "data:image/svg+xml;base64,PHN2Zz4=" },
+                { id: "other", icon: "   " },
+                { id: "https-agent", icon: "https://example.com/icon.svg" },
+            ],
+        }));
+        assert.deepEqual(await acpRegistryIcons(registryPath), {
+            "devin-autonom": "data:image/svg+xml;base64,PHN2Zz4=",
+            "https-agent": "https://example.com/icon.svg",
+        });
+        assert.deepEqual(await acpRegistryIcons(join(root, "missing.json")), {});
     }
     finally
     {

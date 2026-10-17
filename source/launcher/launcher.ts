@@ -1,4 +1,4 @@
-import { ensureAcpAgent } from "./acp";
+import { acpRegistryIcons, ensureAcpAgent } from "./acp";
 import { captureServices, CdpClient } from "./cdp";
 import type { CdpSession } from "./cdp";
 import { startBridge } from "./bridge";
@@ -166,6 +166,8 @@ async function main(): Promise<void>
         if (targets.length)
             foundWindow = true;
 
+        const icons = JSON.stringify(await acpRegistryIcons().catch(() => ({})));
+
         for (const [id, session] of sessions)
         {
             if (targets.some((target) => target.id === id))
@@ -194,7 +196,7 @@ async function main(): Promise<void>
                 await session.evaluate(`(() => {
                     if (!globalThis.__autonomShell) {
                         ${runtimeSource}
-                        AutonomRuntime.prepareShell(${JSON.stringify(content.css)});
+                        AutonomRuntime.prepareShell(${JSON.stringify(content.css)}, ${icons});
                     } else globalThis.__autonomShell.heartbeat();
                 })()`);
                 if (!await status(session))
