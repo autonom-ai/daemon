@@ -337,6 +337,46 @@ void sessionPermissions(Request request, Output output)
     }
 }
 
+bool matchSessionPermissionWithReqId(const Request request)
+{
+    import std.string : split;
+    string[] parts = request.path.split("/");
+    return parts.length == 6 && parts[1] == "api" && parts[2] == "sessions" &&
+           parts[4] == "permissions" && parts[3].length > 0 && parts[5].length > 0;
+}
+
+@endpoint @route!matchSessionPermissionWithReqId
+void sessionPermissionById(Request request, Output output)
+{
+    import std.string : split;
+    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
+        return;
+    string[] parts = request.path.split("/");
+    string id = parts[3];
+    Session.validateId(id);
+    long requestId;
+    try
+        requestId = parts[5].to!long;
+    catch (Exception)
+        throw new InvalidInputException("Permission request id must be an integer");
+
+    if (request.method == Request.Method.Post)
+    {
+        JSONValue data = readBody(request);
+        if ("id" in data.object && data["id"].type == JSONType.integer && data["id"].integer != requestId)
+            throw new InvalidInputException("Request id mismatch between path and body");
+        onlyFields(data, ["id", "optionId"]);
+        if ("optionId" !in data.object || (!data["optionId"].isNull && data["optionId"].type != JSONType.string))
+            throw new InvalidInputException("Expected an offered optionId, or null to cancel");
+        bridge.decidePermission(id, requestId, data["optionId"].isNull ? null : data["optionId"].str);
+        respond(output, JSONValue.emptyObject);
+    }
+    else
+    {
+        respond(output, bridge.pendingPermissions(id, requestId));
+    }
+}
+
 @endpoint @route!(matchesPath!"/api/executions/<id>")
 void getCall(Request request, Output output)
 {
