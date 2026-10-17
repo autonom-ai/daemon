@@ -28,7 +28,7 @@ test("installation replaces the CLI entrypoint, keeps app bundles pristine, and 
         assert.match(stub.toString(), /exec .*dist\/launcher.js.* "\$@"/);
         assert.equal(resolveDesktopBinary(join(root, "bin/devin-desktop")), join(root, "devin-desktop"));
         for (const file of ["dist/launcher.js", "dist/runtime.js", "assets/ui.yml",
-            "devin/launcher/cdp/control.mjs", "source/daemon/interop/devin/hook.py", "source/mcp/server.py",
+            "devin/launcher/cdp/control.mjs", "source/daemon/interop/devin/hook.py", "source/mcp/server.py", "source/mcp/daemon.py", "source/mcp/coord.py", "source/mcp/tools.py",
             "devin/hooks.v1.json", "bin/autonom-daemon", "bin/autonom-acp"])
             assert.deepEqual(await readFile(join(root, "autonom", file)), await readFile(join(repository, file)));
         await assert.rejects(readFile(join(root, "autonom/source/mcp/orchestrate.py")), { code: "ENOENT" });

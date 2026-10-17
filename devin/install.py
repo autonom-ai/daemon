@@ -315,6 +315,9 @@ def main():
             "devin/launcher/cdp/control.mjs",
             "source/daemon/interop/devin/hook.py",
             "source/mcp/server.py",
+            "source/mcp/daemon.py",
+            "source/mcp/coord.py",
+            "source/mcp/tools.py",
             "bin/autonom-daemon",
             "bin/autonom-acp",
         ]
