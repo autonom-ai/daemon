@@ -45,11 +45,11 @@ public:
         _session = session;
     }
 
-    JSONValue toJSON()
+    JSONValue toJSON(bool refresh = true)
     {
         return JSONValue([
             "name": JSONValue(name),
-            "session": session is null ? JSONValue(null) : session.toJSON()
+            "session": session is null ? JSONValue(null) : session.toJSON(refresh)
         ]);
     }
 }
