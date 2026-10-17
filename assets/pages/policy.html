@@ -208,117 +208,103 @@
             border-radius: 4px;
             color: #e5e7eb;
         }
+
+        select, input, button { font: inherit; }
+        select, input { color: var(--vscode-input-foreground, inherit); background: var(--vscode-input-background, transparent); border: 1px solid var(--vscode-input-border, #555); padding: 8px; border-radius: 4px; }
+        label { display: inline-flex; gap: 8px; align-items: center; margin: 8px 12px 8px 0; }
+        #status { margin: 16px 0; white-space: pre-wrap; }
+        .card-row { overflow-wrap: anywhere; }
+        .card-row pre { white-space: pre-wrap; margin: 8px 0; }
+        button:disabled { opacity: 0.5; cursor: default; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="breadcrumb">
-            <span>Autonom</span>
-            <span>/</span>
-            <span class="current">Policy</span>
-        </div>
+    <main class="container">
+        <div class="breadcrumb"><span>Autonom</span><span>/</span><span class="current">Workspace Policy</span></div>
         <h1>Workspace Policy</h1>
-        <p class="subtitle">Deterministic tool screening, permission rules, and AI decision gates.</p>
-
-        <div class="callout">
-            <div class="callout-content">
-                <div class="callout-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                </div>
-                <div>
-                    <div class="callout-title">PreToolUse enforcement active</div>
-                    <div class="callout-desc">Tool calls are screened on every invocation regardless of permission mode (including bypass).</div>
-                </div>
-            </div>
-            <button class="btn-secondary" onclick="alert('Workspace policy reloaded.');">Verify Rules</button>
-        </div>
-
-        <div class="toolbar">
-            <div class="pills">
-                <button class="pill active" onclick="filterRules(this, 'all')">All Rules (3)</button>
-                <button class="pill" onclick="filterRules(this, 'screen')">Screen</button>
-                <button class="pill" onclick="filterRules(this, 'allow')">Allow</button>
-                <button class="pill" onclick="filterRules(this, 'deny')">Deny</button>
-            </div>
-            <button class="btn-primary" onclick="openPolicyFile()">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                Edit policy.yml
-            </button>
-        </div>
-
-        <div class="section-title">Active Screening Rules</div>
-        <div class="card-group" id="rules-group">
-            <div class="card-row" data-rule="screen">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Screen tool calls with Mercury Decide
-                        <span class="badge">SCREEN</span>
-                    </div>
-                    <div class="card-row-desc">Evaluates tool input questions using model <code>inception/mercury-decide:free</code> with probability threshold <code>0.5</code>.</div>
-                </div>
-            </div>
-            <div class="card-row" data-rule="allow">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Allow Read-Only Investigation Tools
-                        <span class="badge-green">ALLOW</span>
-                    </div>
-                    <div class="card-row-desc">Unscreened direct execution for safe filesystem and codebase inspection tools: <code>view_file</code>, <code>list_dir</code>, <code>search_web</code>.</div>
-                </div>
-            </div>
-            <div class="card-row" data-rule="deny">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Fallback Protection Rule
-                        <span class="badge-red">DENY</span>
-                    </div>
-                    <div class="card-row-desc">First-match wins. Any unmatched or unrecognized tool call is automatically rejected by the security boundary.</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="section-title">Policy Governance & Limits</div>
-        <div class="card-group">
-            <div class="card-row">
-                <div class="card-row-info">
-                    <div class="card-row-title">Configuration Path</div>
-                    <div class="card-row-desc">Stored at <code>.devin/policy.yml</code> in workspace root. Files reload dynamically on every tool evaluation.</div>
-                </div>
-            </div>
-            <div class="card-row">
-                <div class="card-row-info">
-                    <div class="card-row-title">Model Decision Timeout</div>
-                    <div class="card-row-desc">Synchronous screening checks are strictly bounded to 8 seconds; timeouts fail closed with <code>denied: true</code>.</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
+        <p class="subtitle">Rules are evaluated in file order. The first match wins; unmatched calls are denied.</p>
+        <button class="btn-secondary" onclick="refresh()">Reload and validate</button>
+        <button class="btn-primary" onclick="request('editPolicy').catch(showError)">Edit policy.yml</button>
+        <p id="status" role="status">Loading…</p>
+        <div id="records" class="card-group"></div>
+    </main>
     <script>
-        let vscode = null;
-        try {
-            if (typeof acquireVsCodeApi === "function") {
-                vscode = acquireVsCodeApi();
-            }
-        } catch {}
+        const vscode = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
+        const pending = new Map();
+        let serial = 0;
 
-        function filterRules(btn, type) {
-            document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
-            if (btn) btn.classList.add("active");
-            document.querySelectorAll("#rules-group .card-row").forEach(row => {
-                if (type === "all" || row.dataset.rule === type) {
-                    row.style.display = "";
-                } else {
-                    row.style.display = "none";
-                }
+        function request(action, values = {})
+        {
+            return new Promise((resolve, reject) =>
+            {
+                if (!vscode)
+                    return reject(new Error("Open this page in the Autonom Command Center."));
+                const reqId = String(++serial);
+                const timer = setTimeout(() =>
+                {
+                    pending.delete(reqId);
+                    reject(new Error("The request timed out. Refresh to retry."));
+                }, 30000);
+                pending.set(reqId, { resolve, reject, timer });
+                vscode.postMessage({ ...values, action, reqId });
             });
         }
 
-        function openPolicyFile() {
-            if (vscode) {
-                vscode.postMessage({ reqId: "open-policy", action: "editPolicy" });
+        window.addEventListener("message", (event) =>
+        {
+            const data = event.data || {};
+            const call = pending.get(data.reqId);
+            if (!call)
+                return;
+            pending.delete(data.reqId);
+            clearTimeout(call.timer);
+            if (data.error)
+                call.reject(new Error(data.error));
+            else
+                call.resolve(data.result);
+        });
+
+        function showError(error)
+        {
+            document.getElementById("status").textContent = error.message;
+        }
+
+        let revision = 0;
+
+        async function refresh()
+        {
+            const current = ++revision;
+            document.getElementById("status").textContent = "Loading…";
+            try
+            {
+                const rules = await request("getPolicy");
+                if (current !== revision)
+                    return;
+                const records = document.getElementById("records");
+                records.replaceChildren();
+                for (const [index, rule] of rules.entries())
+                {
+                    const row = document.createElement("div");
+                    row.className = "card-row";
+                    const details = document.createElement("pre");
+                    details.textContent = `${index + 1}. ${rule.action}\n${JSON.stringify(rule, null, 2)}`;
+                    row.append(details);
+                    records.append(row);
+                }
+                document.getElementById("status").textContent = `${rules.length} valid rules loaded. Reloading does not call screening models.`;
+            }
+            catch (error)
+            {
+                if (current === revision)
+                {
+                    document.getElementById("records").replaceChildren();
+                    showError(error);
+                }
             }
         }
+
+        refresh();
+
     </script>
 </body>
 </html>

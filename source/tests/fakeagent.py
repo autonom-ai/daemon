@@ -2,6 +2,7 @@
 import fcntl
 import json
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -45,6 +46,21 @@ out_lock = threading.Lock()
 
 def path(name):
     return os.path.join(ROOT, name)
+
+
+def save_session(session_id, directory=None, meta=None):
+    database = os.path.join(os.path.dirname(LOCK_DIR), "sessions.db")
+    with sqlite3.connect(database) as connection:
+        connection.execute("create table if not exists sessions (id text primary key, model text default '', "
+                           "working_directory text, title text default '', agent_mode text default 'ask', "
+                           "backend_type text default 'windsurf', created_at integer default 0, "
+                           "last_activity_at integer default 0, hidden integer default 0, "
+                           "workspace_dirs text default '[]', main_chain_id integer, metadata text)")
+        connection.execute("insert or ignore into sessions (id, working_directory) values (?, ?)",
+                           (session_id, directory or ROOT))
+        if meta is not None:
+            connection.execute("update sessions set metadata = ? where id = ?",
+                               (json.dumps({"client_meta": meta}), session_id))
 
 
 def send(message):
@@ -235,12 +251,14 @@ def acp_main():
                 send_error(request_id, -32603, "session creation failed")
                 continue
             session_id = new_session_id()
+            save_session(session_id, params.get("cwd"), params.get("_meta"))
             record_call({"method": "session/new", "sessionId": session_id})
             hold_lock(session_id)
             send_result(request_id, {"sessionId": session_id,
                                      "configOptions": CONFIG_OPTIONS})
         elif method == "session/load":
             session_id = params.get("sessionId", "")
+            save_session(session_id, params.get("cwd"), params.get("_meta"))
             record_call({"method": "session/load", "sessionId": session_id})
             if os.path.exists(path("fail-load")) or "locked" in session_id:
                 send_error(request_id, -32015, "session_locked")

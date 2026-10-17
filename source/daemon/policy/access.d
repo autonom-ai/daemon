@@ -16,6 +16,18 @@ import std.json : JSONType, JSONValue;
 
 public:
 
+@endpoint @route!"/api/policy"
+void inspectPolicy(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Get]))
+        return;
+
+    try
+        respond(output, policy.inspect(request.get.read("directory")));
+    catch (Exception error)
+        respondError(output, 503, "Could not load workspace policy: "~error.msg);
+}
+
 @endpoint @route!"/api/policy/check"
 void checkPolicy(Request request, Output output)
 {
@@ -112,6 +124,36 @@ public:
 
         this.config = configuration;
         configuration.router.connectTimeout(2.seconds);
+    }
+
+    JSONValue inspect(string directory)
+    {
+        if (!directory.length || !isDir(directory))
+            throw new InvalidInputException("An existing working directory is required");
+
+        PolicyFile file = PolicyFile.loadRules(directory);
+        JSONValue ret = JSONValue.emptyArray;
+        foreach (rule; file.rules)
+        {
+            JSONValue entry = JSONValue([
+                "action": JSONValue(cast(string)rule.action),
+                "match": JSONValue(rule.match),
+                "reason": rule.reason.length ? JSONValue(rule.reason) : JSONValue(null),
+                "models": JSONValue(rule.models),
+                "threshold": JSONValue(rule.threshold),
+                "questions": JSONValue.emptyArray
+            ]);
+            foreach (question; rule.questions)
+                entry["questions"].array ~= JSONValue([
+                    "type": JSONValue("predicate"),
+                    "name": JSONValue(question.name),
+                    "instructions": JSONValue(question.instructions)
+                ]);
+
+            ret.array ~= entry;
+        }
+
+        return ret;
     }
 
     PolicyResult check(string directory, string tool, JSONValue input = JSONValue.emptyObject)

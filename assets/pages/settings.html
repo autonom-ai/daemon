@@ -113,7 +113,7 @@
             transition: all 0.15s ease;
         }
         .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
-        
+
         .toast {
             position: fixed;
             bottom: 24px;
@@ -174,7 +174,7 @@
             color: var(--text-secondary);
             line-height: 1.45;
         }
-        
+
         /* Form Controls matching Devin Cloud */
         .card-control {
             display: flex;
@@ -208,7 +208,7 @@
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
         }
         .switch.active::after { transform: translateX(16px); }
-        
+
         input[type="text"], input[type="number"], select {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.12);
@@ -270,7 +270,7 @@
             </div>
             <div class="actions">
                 <button class="btn-secondary" id="btn-open-config" onclick="openConfigFile()">Open config.yml</button>
-                <button class="btn-primary" id="btn-save" onclick="saveAllSettings()">
+                <button class="btn-primary" id="btn-save" disabled onclick="saveAllSettings()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                     Save Changes
                 </button>
@@ -296,7 +296,7 @@
                         <div class="card-row-desc">Authoritative YAML configuration for daemon runtime, router credentials, and data directory.</div>
                     </div>
                     <div class="card-control">
-                        <div class="readonly-text" id="text-config-file">~/.config/autonom/config.yml</div>
+                        <div class="readonly-text" id="text-config-file">Loading…</div>
                     </div>
                 </div>
                 <div class="card-row">
@@ -305,7 +305,7 @@
                         <div class="card-row-desc">YAML file that declares UI sections, items, native imports, and click actions.</div>
                     </div>
                     <div class="card-control">
-                        <div class="readonly-text" id="text-command-center">assets/ui.yml</div>
+                        <div class="readonly-text" id="text-command-center">Loading…</div>
                     </div>
                 </div>
             </div>
@@ -364,7 +364,7 @@
                         <div class="card-row-desc">Repository that owns the launcher, the daemon, and the Command Center assets.</div>
                     </div>
                     <div class="card-control">
-                        <div class="readonly-text" id="text-repository">/home/cet/Repos/autonom</div>
+                        <div class="readonly-text" id="text-repository">Loading…</div>
                     </div>
                 </div>
                 <div class="card-row">
@@ -373,7 +373,7 @@
                         <div class="card-row-desc">Workspace folder the launcher opened in Devin Desktop; its policy file lives in .devin.</div>
                     </div>
                     <div class="card-control">
-                        <div class="readonly-text" id="text-workspace">/home/cet/Repos/autonom</div>
+                        <div class="readonly-text" id="text-workspace">Loading…</div>
                     </div>
                 </div>
                 <div class="card-row">
@@ -382,127 +382,148 @@
                         <div class="card-row-desc">Durable storage directory for agent profiles, inboxes, worktrees, and token capabilities.</div>
                     </div>
                     <div class="card-control">
-                        <div class="readonly-text" id="text-data-dir">~/.local/share/autonom</div>
+                        <div class="readonly-text" id="text-data-dir">Loading…</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="toast" id="toast">✓ Settings saved successfully.</div>
+    <div class="toast" id="toast" role="status"></div>
 
     <script>
         const vscode = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
-        let currentSettings = {};
-        let currentDaemon = {};
+        const pending = new Map();
+        let serial = 0;
 
-        function toggleSwitch(btn) {
-            btn.classList.toggle("active");
-            btn.setAttribute("aria-checked", btn.classList.contains("active"));
+        function request(action, values = {})
+        {
+            return new Promise((resolve, reject) =>
+            {
+                if (!vscode)
+                    return reject(new Error("Open this page in the Autonom Command Center."));
+                const reqId = String(++serial);
+                const timer = setTimeout(() =>
+                {
+                    pending.delete(reqId);
+                    reject(new Error("The request timed out. Refresh to retry."));
+                }, 30000);
+                pending.set(reqId, { resolve, reject, timer });
+                vscode.postMessage({ ...values, action, reqId });
+            });
         }
 
-        function switchSection(btn, name) {
-            document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
-            if (btn) btn.classList.add("active");
-            const target = document.getElementById("section-" + name);
-            if (target) {
-                target.scrollIntoView({ behavior: "smooth", block: "start" });
-            }
-        }
-
-        function showToast(message) {
-            const toast = document.getElementById("toast");
-            toast.textContent = message || "✓ Settings saved successfully.";
-            toast.classList.add("show");
-            setTimeout(() => { toast.classList.remove("show"); }, 3000);
-        }
-
-        function loadInitialState() {
-            if (!vscode) return;
-            vscode.postMessage({ reqId: "get-settings", action: "getSettings" });
-            vscode.postMessage({ reqId: "get-daemon", action: "getDaemon" });
-        }
-
-        window.addEventListener("message", (event) => {
+        window.addEventListener("message", (event) =>
+        {
             const data = event.data || {};
-            const reqId = data.reqId || data.id;
-            const result = data.result;
-
-            if (data.error) {
-                showToast("✗ " + data.error);
-                document.getElementById("btn-save").disabled = false;
-                document.getElementById("btn-save").innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Save Changes`;
+            const call = pending.get(data.reqId);
+            if (!call)
                 return;
-            }
-
-            if (reqId === "get-settings" && result) {
-                currentSettings = result;
-                if (result.port) document.getElementById("input-port").value = result.port;
-                if (result.configFile) document.getElementById("text-config-file").textContent = result.configFile;
-                if (result.commandCenterConfig) document.getElementById("text-command-center").textContent = result.commandCenterConfig;
-                if (result.repository) document.getElementById("text-repository").textContent = result.repository;
-                if (result.workspace) document.getElementById("text-workspace").textContent = result.workspace;
-                if (result.dataDir) document.getElementById("text-data-dir").textContent = result.dataDir;
-            }
-
-            if (reqId === "get-daemon" && result && result.daemon) {
-                currentDaemon = result.daemon;
-                if (typeof result.daemon.compactOnResume === "boolean") {
-                    const sw = document.getElementById("switch-compact");
-                    sw.classList.toggle("active", result.daemon.compactOnResume);
-                    sw.setAttribute("aria-checked", String(result.daemon.compactOnResume));
-                }
-                if (result.daemon.offlineStartAfter) document.getElementById("input-offline-start").value = result.daemon.offlineStartAfter;
-                if (result.daemon.offlineCompactAfter) document.getElementById("input-offline-compact").value = result.daemon.offlineCompactAfter;
-                if (result.daemon.executionTimeout) document.getElementById("input-timeout").value = result.daemon.executionTimeout;
-            }
-
-            if (reqId === "save-settings-result" || reqId === "save-daemon-result") {
-                showToast("✓ Settings saved successfully.");
-                document.getElementById("btn-save").disabled = false;
-                document.getElementById("btn-save").innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Save Changes`;
-            }
+            pending.delete(data.reqId);
+            clearTimeout(call.timer);
+            if (data.error)
+                call.reject(new Error(data.error));
+            else
+                call.resolve(data.result);
         });
 
-        function saveAllSettings() {
-            const btn = document.getElementById("btn-save");
-            btn.disabled = true;
-            btn.textContent = "Saving...";
+        function showError(error)
+        {
+            showToast(error.message);
+        }
 
-            const newSettings = {
+        let currentSettings;
+        let currentDaemon;
+
+        function toggleSwitch(button)
+        {
+            button.classList.toggle("active");
+            button.setAttribute("aria-checked", String(button.classList.contains("active")));
+        }
+
+        function switchSection(button, name)
+        {
+            document.querySelectorAll(".pill").forEach((pill) => pill.classList.remove("active"));
+            button.classList.add("active");
+            document.getElementById("section-" + name)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+
+        function showToast(message)
+        {
+            const toast = document.getElementById("toast");
+            toast.textContent = message;
+            toast.classList.add("show");
+            setTimeout(() => toast.classList.remove("show"), 5000);
+        }
+
+        async function loadInitialState()
+        {
+            try
+            {
+                const [settings, result] = await Promise.all([request("getSettings"), request("getDaemon")]);
+                currentSettings = settings;
+                currentDaemon = result.daemon;
+                document.getElementById("input-port").value = settings.port;
+                for (const [field, id] of Object.entries({
+                    configFile: "text-config-file", commandCenterConfig: "text-command-center",
+                    repository: "text-repository", workspace: "text-workspace", dataDir: "text-data-dir",
+                }))
+                    document.getElementById(id).textContent = settings[field] || "Unavailable";
+                const compact = document.getElementById("switch-compact");
+                compact.classList.toggle("active", !!currentDaemon.compactOnResume);
+                compact.setAttribute("aria-checked", String(!!currentDaemon.compactOnResume));
+                document.getElementById("input-offline-start").value = currentDaemon.offlineStartAfter;
+                document.getElementById("input-offline-compact").value = currentDaemon.offlineCompactAfter;
+                document.getElementById("input-timeout").value = currentDaemon.executionTimeout;
+                document.getElementById("btn-save").disabled = false;
+            }
+            catch (error)
+            {
+                showError(error);
+            }
+        }
+
+        async function saveAllSettings()
+        {
+            const button = document.getElementById("btn-save");
+            if (!currentSettings || !currentDaemon || button.disabled)
+                return;
+            button.disabled = true;
+            button.textContent = "Saving…";
+            const settings = {
                 ...currentSettings,
-                port: parseInt(document.getElementById("input-port").value, 10)
+                port: Number(document.getElementById("input-port").value),
             };
-
-            const newDaemon = {
+            const values = {
                 ...currentDaemon,
                 compactOnResume: document.getElementById("switch-compact").classList.contains("active"),
                 offlineStartAfter: document.getElementById("input-offline-start").value,
                 offlineCompactAfter: document.getElementById("input-offline-compact").value,
-                executionTimeout: document.getElementById("input-timeout").value
+                executionTimeout: document.getElementById("input-timeout").value,
             };
-
-            if (vscode) {
-                vscode.postMessage({ reqId: "save-settings-result", action: "saveSettings", settings: newSettings });
-                vscode.postMessage({ reqId: "save-daemon-result", action: "saveDaemon", values: newDaemon });
-            } else {
-                setTimeout(() => {
-                    showToast("✓ Settings saved in preview.");
-                    btn.disabled = false;
-                    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Save Changes`;
-                }, 500);
+            const results = await Promise.allSettled([
+                request("saveSettings", { settings }),
+                request("saveDaemon", { values }),
+            ]);
+            const failures = results.flatMap((result, index) => result.status === "rejected"
+                ? [`${index ? "Daemon" : "Launcher"}: ${result.reason.message}`] : []);
+            if (failures.length)
+                showToast("Some settings were not saved. " + failures.join("; "));
+            else
+            {
+                currentSettings = settings;
+                currentDaemon = values;
+                showToast("Settings saved.");
             }
+            button.disabled = false;
+            button.textContent = "Save Changes";
         }
 
-        function openConfigFile() {
-            if (vscode) {
-                vscode.postMessage({ reqId: "edit-config", action: "editConfig" });
-            } else {
-                alert("Opening configuration file in editor.");
-            }
+        function openConfigFile()
+        {
+            request("editConfig").catch(showError);
         }
 
-        // Initialize state on load
         loadInitialState();
     </script>
 </body>

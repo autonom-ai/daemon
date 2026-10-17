@@ -111,6 +111,32 @@ async function dispatch(context: BridgeContext, message: Record<string, unknown>
         case "getState":
             return await context.client.getState(context.workspace);
 
+        case "getProfiles":
+            return context.client.request("/api/profiles");
+
+        case "getEvents":
+            return context.client.request(`/api/client/events?profile=${encodeURIComponent(text(message.profile, "human"))}`);
+
+        case "acknowledgeEvents":
+            return context.client.request(`/api/events?profile=${encodeURIComponent(text(message.profile, "human"))}`);
+
+        case "getSchedules":
+            return context.client.request(`/api/schedules?profile=${encodeURIComponent(text(message.profile, "human"))}`);
+
+        case "createSchedule":
+            return context.client.request(`/api/schedules?profile=${encodeURIComponent(text(message.profile, "human"))}`,
+                "POST", message.schedule);
+
+        case "removeSchedule":
+            return context.client.request(`/api/schedules/${encodeURIComponent(text(message.id))}?profile=${encodeURIComponent(text(message.profile, "human"))}`,
+                "DELETE");
+
+        case "refreshSchedules":
+            return context.client.request("/api/schedules/refresh", "POST", {});
+
+        case "getPolicy":
+            return context.client.request(`/api/policy?directory=${encodeURIComponent(context.workspace)}`);
+
         case "getSettings":
             return {
                 port: context.settings.port,

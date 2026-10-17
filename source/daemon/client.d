@@ -5,7 +5,7 @@ import daemon.coord;
 import daemon.events.event : EventType;
 import daemon.exception;
 import daemon.interop.devin.db : readSessionMessages;
-import daemon.interop.execution;
+import daemon.interop.bridge;
 import daemon.interop.session;
 import daemon.http;
 import daemon.runtime;
@@ -30,9 +30,9 @@ void clientState(Request request, Output output)
     ret["sessions"] = JSONValue.emptyArray;
     ret["runs"] = JSONValue.emptyArray;
     ret["rooms"] = JSONValue.emptyArray;
-    ret["permissions"] = permissions.pending();
     ret["humanEvents"] = JSONValue(cast(long)events.unread(profileStore.get(HUMAN_NAME)).length);
     string directory = request.get.read("directory");
+    Session[] sessions = bridge.list(directory);
     foreach (profile; profileStore.list())
     {
         bool managed = profile.session !is null && bridge.access.managed(profile.session.id);
@@ -53,27 +53,23 @@ void clientState(Request request, Output output)
         ret["profiles"].array ~= record;
     }
 
-    foreach (id; bridge.sessionIds())
+    foreach (session; sessions)
     {
-        Session session = bridge.findSession(id);
-        if (session is null)
-            continue;
-
-        JSONValue record = session.toJSON();
+        JSONValue record = session.toJSON(false);
         if (!record["directory"].str.length && session.execution !is null)
             record["directory"] = JSONValue(session.execution.workspace);
         if (directory.length && record["directory"].str != directory)
             continue;
 
-        Profile profile = profileStore.profileFor(id);
+        Profile profile = profileStore.profileFor(session.id);
         record["profile"] = profile is null ? JSONValue(null) : JSONValue(profile.name);
         ret["sessions"].array ~= record;
     }
 
-    Execution[] runs = bridge.listExecutions(directory);
+    Call[] runs = bridge.listCalls(directory);
     foreach (execution; runs.length > 100 ? runs[$-100..$] : runs)
     {
-        if (execution.kind != ExecutionKind.Remove)
+        if (execution.kind != CallKind.Remove)
             ret["runs"].array ~= execution.toJSON();
     }
 
@@ -156,7 +152,7 @@ void clientTranscript(Request request, Output output)
         return;
 
     string id = routeParameter!"/api/client/transcript/<id>"(request);
-    Execution execution = bridge.execution(id);
+    Call execution = bridge.execution(id);
     string session = execution is null ? id : execution.sessionId;
     if (execution is null && !bridge.access.managed(session))
     {
@@ -214,7 +210,7 @@ void clientModels(Request request, Output output)
         respond(output, parseJSON(catalog));
     }
     catch (Exception)
-        respondError(output, 503, "Could not retrieve the Devin model catalog");
+        respondError(output, 503, "Could not retrieve the Bridge model catalog");
 }
 
 private:

@@ -3,7 +3,7 @@ module daemon.hooks;
 import daemon.agent;
 import daemon.events.event : Event;
 import daemon.exception;
-import daemon.interop.execution;
+import daemon.interop.bridge;
 import daemon.interop.session;
 import daemon.policy;
 import daemon.http;
@@ -38,7 +38,7 @@ bool acceptHook(Request request, Output output, string event, out JSONValue data
         throw new InvalidInputException("Expected the "~event~" hook event");
 
     string session = hookSession(data);
-    Execution execution = bridge.authenticate(request.header.read("x-autonom-run"), session, true);
+    Call execution = bridge.authenticate(request.header.read("x-autonom-run"), session, true);
     if (execution is null)
     {
         string bound = bridge.access.mcpSession(request.header.read("x-autonom-mcp"));
@@ -250,16 +250,7 @@ void permissionRequest(Request request, Output output)
     if (!acceptHook(request, output, "PermissionRequest", data))
         return;
 
-    string tool = hookTool(data);
-    if (!tool.length)
-    {
-        respond(output, hookResponse());
-        return;
-    }
-
-    respond(output, JSONValue(["permission": JSONValue(
-        permissions.add(hookSession(data), tool, hookInput(data)).id
-    )]));
+    respond(output, hookResponse());
 }
 
 @endpoint @route!"/api/hooks/post-tool-use"

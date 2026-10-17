@@ -212,103 +212,209 @@
             border-radius: 4px;
             color: #e5e7eb;
         }
+
+        [hidden] { display: none !important; }
+        select, input, button { font: inherit; }
+        select, input { color: var(--vscode-input-foreground, inherit); background: var(--vscode-input-background, transparent); border: 1px solid var(--vscode-input-border, #555); padding: 8px; border-radius: 4px; }
+        label { display: inline-flex; gap: 8px; align-items: center; margin: 8px 12px 8px 0; }
+        #status { margin: 16px 0; white-space: pre-wrap; }
+        .card-row { overflow-wrap: anywhere; }
+        .card-row pre { white-space: pre-wrap; margin: 8px 0; }
+        button:disabled { opacity: 0.5; cursor: default; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="breadcrumb">
-            <span>Autonom</span>
-            <span>/</span>
-            <span class="current">Schedules</span>
-        </div>
+    <main class="container">
+        <div class="breadcrumb"><span>Autonom</span><span>/</span><span class="current">Schedules</span></div>
         <h1>Schedules</h1>
-        <p class="subtitle">Clock triggers, recurring wake intervals, and automated reminders for autonomous agent sessions.</p>
-
-        <div class="callout">
-            <div class="callout-content">
-                <div class="callout-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                </div>
-                <div>
-                    <div class="callout-title">Scheduled wakes automatically resume offline sessions</div>
-                    <div class="callout-desc">Clock schedules trigger due events and resume offline sessions with compaction threshold evaluation.</div>
-                </div>
-            </div>
-            <button class="btn-secondary" onclick="refreshClock()">Refresh Now</button>
-        </div>
-
-        <div class="toolbar">
-            <div class="pills">
-                <button class="pill active" onclick="selectPill(this)">All (0)</button>
-                <button class="pill" onclick="selectPill(this)">Recurring</button>
-                <button class="pill" onclick="selectPill(this)">One-shot</button>
-                <button class="pill" onclick="selectPill(this)">Clock</button>
-            </div>
-            <button class="btn-primary" onclick="alert('Use schedule tool in agent session or coord/inboxes/<profile>/schedules.json');">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                New Schedule
-            </button>
-        </div>
-
-        <div class="section-title">Active Schedules</div>
-        <div class="card-group">
-            <div class="empty-state">
-                <div class="empty-icon">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                </div>
-                <div class="empty-text">No active schedules configured</div>
-                <div class="empty-subtext">Autonomous agents schedule timers via the <code>schedule</code> tool, firing wake events on loopback.</div>
-            </div>
-        </div>
-
-        <div class="section-title">Schedule Policies</div>
-        <div class="card-group">
-            <div class="card-row">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Clock Event Dispatcher
-                        <span class="badge-green">Daemon Active</span>
-                    </div>
-                    <div class="card-row-desc">Dedicated background scheduler thread monitors coordination files and fires <code>POST /api/schedules/refresh</code>.</div>
-                </div>
-            </div>
-            <div class="card-row">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Offline Compaction Threshold
-                        <span class="badge">Automatic</span>
-                    </div>
-                    <div class="card-row-desc">Offline sessions exceeding <code>offlineCompactAfter</code> duration compact context before wake prompt delivery.</div>
-                </div>
-            </div>
-            <div class="card-row">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Storage Location
-                        <span class="badge-neutral">Coordination Store</span>
-                    </div>
-                    <div class="card-row-desc">Schedules persist in <code>dataDir/coord/inboxes/&lt;profile&gt;/schedules.json</code> across daemon restarts.</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
+        <p class="subtitle">Create and cancel schedules for profile inboxes.</p>
+        <label>Profile <select id="profile" disabled onchange="refresh()"><option value="human">human</option></select></label>
+        <button class="btn-secondary" onclick="refresh()">Refresh</button>
+        <button class="btn-secondary" onclick="refreshClock()">Check due schedules</button>
+        <form id="create" onsubmit="createSchedule(event)">
+            <label>Type <select id="type" onchange="selectType()"><option>clock</option><option>ping</option><option>dm</option><option>room</option></select></label>
+            <label id="room-field" hidden>Room <input id="room"></label>
+            <label id="from-field" hidden>From profile (optional) <input id="from"></label>
+            <span id="clock-fields">
+                <label>At <input id="at" type="datetime-local"></label>
+                <label>Or every seconds <input id="every" type="number" min="1" max="2592000"></label>
+            </span>
+            <button id="add" class="btn-primary" disabled>Create schedule</button>
+        </form>
+        <p id="status" role="status">Loading…</p>
+        <div id="records" class="card-group"></div>
+    </main>
     <script>
-        let vscode = null;
-        try {
-            if (typeof acquireVsCodeApi === "function") vscode = acquireVsCodeApi();
-        } catch {}
+        const vscode = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
+        const pending = new Map();
+        let serial = 0;
 
-        function selectPill(btn) {
-            document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
-            if (btn) btn.classList.add("active");
+        function request(action, values = {})
+        {
+            return new Promise((resolve, reject) =>
+            {
+                if (!vscode)
+                    return reject(new Error("Open this page in the Autonom Command Center."));
+                const reqId = String(++serial);
+                const timer = setTimeout(() =>
+                {
+                    pending.delete(reqId);
+                    reject(new Error("The request timed out. Refresh to retry."));
+                }, 30000);
+                pending.set(reqId, { resolve, reject, timer });
+                vscode.postMessage({ ...values, action, reqId });
+            });
         }
 
-        function refreshClock() {
-            if (vscode) {
-                vscode.postMessage({ reqId: "refresh-schedules", action: "getState" });
+        window.addEventListener("message", (event) =>
+        {
+            const data = event.data || {};
+            const call = pending.get(data.reqId);
+            if (!call)
+                return;
+            pending.delete(data.reqId);
+            clearTimeout(call.timer);
+            if (data.error)
+                call.reject(new Error(data.error));
+            else
+                call.resolve(data.result);
+        });
+
+        function showError(error)
+        {
+            document.getElementById("status").textContent = error.message;
+        }
+
+        let revision = 0;
+
+        function selectType()
+        {
+            const type = document.getElementById("type").value;
+            document.getElementById("room-field").hidden = type !== "room";
+            document.getElementById("from-field").hidden = type === "clock";
+            document.getElementById("clock-fields").hidden = type !== "clock";
+        }
+
+        async function refresh()
+        {
+            const current = ++revision;
+            document.getElementById("status").textContent = "Loading…";
+            try
+            {
+                const profile = document.getElementById("profile").value;
+                const schedules = await request("getSchedules", { profile });
+                if (current !== revision)
+                    return;
+                const records = document.getElementById("records");
+                records.replaceChildren();
+                for (const schedule of schedules)
+                {
+                    const row = document.createElement("div");
+                    row.className = "card-row";
+                    const details = document.createElement("pre");
+                    const title = schedule.type + (schedule.room ? ` in ${schedule.room}` : "") + (schedule.from ? ` from ${schedule.from}` : "");
+                    const clock = schedule.every ? `Every ${schedule.every} seconds` : schedule.at ? `At ${new Date(schedule.at).toLocaleString()}` : "On matching activity";
+                    const next = schedule.type === "clock" ? `\nNext: ${new Date(schedule.next - 62135596800000).toLocaleString()}` : "";
+                    details.textContent = `${title}\n${clock}${next}`;
+                    const cancel = document.createElement("button");
+                    cancel.className = "btn-secondary";
+                    cancel.textContent = "Cancel";
+                    cancel.onclick = async () =>
+                    {
+                        cancel.disabled = true;
+                        try
+                        {
+                            await request("removeSchedule", { profile, id: schedule.id });
+                            await refresh();
+                        }
+                        catch (error)
+                        {
+                            showError(error);
+                            cancel.disabled = false;
+                        }
+                    };
+                    row.append(details, cancel);
+                    records.append(row);
+                }
+                document.getElementById("status").textContent = schedules.length ? `${schedules.length} schedules.` : "No active schedules.";
+                document.getElementById("add").disabled = false;
+            }
+            catch (error)
+            {
+                if (current === revision)
+                {
+                    document.getElementById("records").replaceChildren();
+                    document.getElementById("add").disabled = true;
+                    showError(error);
+                }
             }
         }
+
+        async function createSchedule(event)
+        {
+            event.preventDefault();
+            const add = document.getElementById("add");
+            add.disabled = true;
+            try
+            {
+                const schedule = { type: document.getElementById("type").value };
+                if (schedule.type === "clock")
+                {
+                    const at = document.getElementById("at").value;
+                    const every = document.getElementById("every").value;
+                    if (!!at === !!every)
+                        throw new Error("Choose either a time or an interval.");
+                    if (at)
+                        schedule.at = new Date(at).toISOString();
+                    else
+                        schedule.every = Number(every);
+                }
+                else
+                {
+                    const from = document.getElementById("from").value.trim();
+                    if (from)
+                        schedule.from = from;
+                    if (schedule.type === "room")
+                        schedule.room = document.getElementById("room").value.trim();
+                }
+                await request("createSchedule", { profile: document.getElementById("profile").value, schedule });
+                await refresh();
+            }
+            catch (error)
+            {
+                showError(error);
+            }
+            finally
+            {
+                add.disabled = false;
+            }
+        }
+
+        async function refreshClock()
+        {
+            try
+            {
+                await request("refreshSchedules");
+                await refresh();
+            }
+            catch (error)
+            {
+                showError(error);
+            }
+        }
+
+        async function loadProfiles()
+        {
+            const profiles = await request("getProfiles");
+            const select = document.getElementById("profile");
+            for (const profile of profiles)
+                select.add(new Option(profile.name, profile.name));
+            select.disabled = false;
+            await refresh();
+        }
+
+        loadProfiles().catch(showError);
+
     </script>
 </body>
 </html>

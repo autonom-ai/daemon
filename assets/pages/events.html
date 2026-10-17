@@ -211,104 +211,143 @@
             border-radius: 4px;
             color: #e5e7eb;
         }
+
+        [hidden] { display: none !important; }
+        select, input, button { font: inherit; }
+        select, input { color: var(--vscode-input-foreground, inherit); background: var(--vscode-input-background, transparent); border: 1px solid var(--vscode-input-border, #555); padding: 8px; border-radius: 4px; }
+        label { display: inline-flex; gap: 8px; align-items: center; margin: 8px 12px 8px 0; }
+        #status { margin: 16px 0; white-space: pre-wrap; }
+        .card-row { overflow-wrap: anywhere; }
+        .card-row pre { white-space: pre-wrap; margin: 8px 0; }
+        button:disabled { opacity: 0.5; cursor: default; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="breadcrumb">
-            <span>Autonom</span>
-            <span>/</span>
-            <span class="current">Events</span>
-        </div>
+    <main class="container">
+        <div class="breadcrumb"><span>Autonom</span><span>/</span><span class="current">Events</span></div>
         <h1>Events</h1>
-        <p class="subtitle">Coordination event bus, incoming agent pings, and cross-session delivery queues.</p>
-
-        <div class="callout">
-            <div class="callout-content">
-                <div class="callout-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
-                </div>
-                <div>
-                    <div class="callout-title">Unread events are enforced by PreToolUse</div>
-                    <div class="callout-desc">All tools except <code>read_events</code> are gated until pending messages and room events are acknowledged.</div>
-                </div>
-            </div>
-            <button class="btn-secondary" onclick="pollNow()">Poll Now</button>
-        </div>
-
-        <div class="toolbar">
-            <div class="pills">
-                <button class="pill active" onclick="selectPill(this)">All (0)</button>
-                <button class="pill" onclick="selectPill(this)">Pings</button>
-                <button class="pill" onclick="selectPill(this)">Direct Messages</button>
-                <button class="pill" onclick="selectPill(this)">Room Activity</button>
-                <button class="pill" onclick="selectPill(this)">Clock Wakes</button>
-            </div>
-            <button class="btn-primary" onclick="alert('Cleared all acknowledged inbox items.');">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                Acknowledge All
-            </button>
-        </div>
-
-        <div class="section-title">Profile Inboxes</div>
-        <div class="card-group">
-            <div class="empty-state">
-                <div class="empty-icon">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-6l-2 3h-4l-2-3H2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-7z"></path><path d="M5.45 5.11L2 12v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-7l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg>
-                </div>
-                <div class="empty-text">No pending unread events</div>
-                <div class="empty-subtext">Events arriving for offline or active profiles surface here and in <code>UserPromptSubmit</code> context.</div>
-            </div>
-        </div>
-
-        <div class="section-title">Event Streams & Delivery Bus</div>
-        <div class="card-group">
-            <div class="card-row">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Append-Only Stream Store
-                        <span class="badge-green">Healthy</span>
-                    </div>
-                    <div class="card-row-desc">JSON lines streams held in memory (1,000 item ring buffer) and flushed atomically to <code>coord/inboxes/&lt;profile&gt;/events.json</code>.</div>
-                </div>
-            </div>
-            <div class="card-row">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Per-Profile Read Cursors
-                        <span class="badge">Isolated</span>
-                    </div>
-                    <div class="card-row-desc">Each profile maintains independent cursor offsets in <code>cursors.json</code> so concurrent agents consume streams without collision.</div>
-                </div>
-            </div>
-            <div class="card-row">
-                <div class="card-row-info">
-                    <div class="card-row-title">
-                        Wake Reconciliation
-                        <span class="badge-neutral">Auto-Resume</span>
-                    </div>
-                    <div class="card-row-desc">Unscheduled pings to offline profiles spawn fresh sessions; scheduled events resume existing profiles automatically.</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
+        <p class="subtitle">Pending events for each profile. Viewing an inbox leaves its events unread.</p>
+        <label>Profile <select id="profile" disabled onchange="refresh()"><option value="human">human</option></select></label>
+        <label>Type <select id="filter" onchange="render()"><option value="">All</option><option>ping</option><option>dm</option><option>room</option><option>clock</option></select></label>
+        <button class="btn-secondary" onclick="refresh()">Refresh</button>
+        <button id="acknowledge" class="btn-primary" disabled onclick="acknowledge()">Acknowledge pending events</button>
+        <p id="status" role="status">Loading…</p>
+        <div id="records" class="card-group"></div>
+    </main>
     <script>
-        let vscode = null;
-        try {
-            if (typeof acquireVsCodeApi === "function") vscode = acquireVsCodeApi();
-        } catch {}
+        const vscode = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
+        const pending = new Map();
+        let serial = 0;
 
-        function selectPill(btn) {
-            document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
-            if (btn) btn.classList.add("active");
+        function request(action, values = {})
+        {
+            return new Promise((resolve, reject) =>
+            {
+                if (!vscode)
+                    return reject(new Error("Open this page in the Autonom Command Center."));
+                const reqId = String(++serial);
+                const timer = setTimeout(() =>
+                {
+                    pending.delete(reqId);
+                    reject(new Error("The request timed out. Refresh to retry."));
+                }, 30000);
+                pending.set(reqId, { resolve, reject, timer });
+                vscode.postMessage({ ...values, action, reqId });
+            });
         }
 
-        function pollNow() {
-            if (vscode) {
-                vscode.postMessage({ reqId: "poll-events", action: "getState" });
+        window.addEventListener("message", (event) =>
+        {
+            const data = event.data || {};
+            const call = pending.get(data.reqId);
+            if (!call)
+                return;
+            pending.delete(data.reqId);
+            clearTimeout(call.timer);
+            if (data.error)
+                call.reject(new Error(data.error));
+            else
+                call.resolve(data.result);
+        });
+
+        function showError(error)
+        {
+            document.getElementById("status").textContent = error.message;
+        }
+
+        let events = [];
+        let revision = 0;
+
+        async function refresh()
+        {
+            const current = ++revision;
+            document.getElementById("acknowledge").disabled = true;
+            document.getElementById("status").textContent = "Loading…";
+            try
+            {
+                const result = await request("getEvents", { profile: document.getElementById("profile").value });
+                if (current !== revision)
+                    return;
+                events = result;
+                render();
+            }
+            catch (error)
+            {
+                if (current === revision)
+                {
+                    document.getElementById("records").replaceChildren();
+                    showError(error);
+                }
             }
         }
+
+        function render()
+        {
+            const filter = document.getElementById("filter").value;
+            const records = document.getElementById("records");
+            records.replaceChildren();
+            for (const event of events.filter((entry) => !filter || entry.type === filter))
+            {
+                const row = document.createElement("div");
+                row.className = "card-row";
+                const details = document.createElement("pre");
+                const title = event.type + (event.from ? ` from ${event.from}` : "") + (event.room ? ` in ${event.room}` : "");
+                const time = new Date(event.ts - 62135596800000).toLocaleString();
+                details.textContent = `${title} · ${time}\n${event.text || "Scheduled wake"}`;
+                row.append(details);
+                records.append(row);
+            }
+            document.getElementById("status").textContent = events.length ? `${events.length} pending events.` : "No pending events.";
+            document.getElementById("acknowledge").disabled = !events.length;
+        }
+
+        async function acknowledge()
+        {
+            document.getElementById("acknowledge").disabled = true;
+            try
+            {
+                await request("acknowledgeEvents", { profile: document.getElementById("profile").value });
+                await refresh();
+            }
+            catch (error)
+            {
+                showError(error);
+                document.getElementById("acknowledge").disabled = false;
+            }
+        }
+
+        async function loadProfiles()
+        {
+            const profiles = await request("getProfiles");
+            const select = document.getElementById("profile");
+            for (const profile of profiles)
+                select.add(new Option(profile.name, profile.name));
+            select.disabled = false;
+            await refresh();
+        }
+
+        loadProfiles().catch(showError);
+
     </script>
 </body>
 </html>

@@ -53,7 +53,7 @@ cd ../..
 node dist/launcher.js /abs/path/to/workspace
 ```
 
-For installed-startup validation, run `sudo bash install.sh --no-build`, quit Desktop once, then run `devin-desktop --debug` from a terminal. The installed CLI wrapper must behave exactly like `node dist/launcher.js --debug`, without changing the logged-in profile.
+For installed-startup validation, run `sudo python3 install.py --no-build`, quit Desktop once, then run `devin-desktop --debug` from a terminal. The installed CLI wrapper must behave exactly like `node dist/launcher.js --debug`, without changing the logged-in profile.
 
 The launcher verifies the build pin before spawning Desktop, starts the page bridge and control socket, launches Desktop with `--remote-debugging-pipe`, and attaches eligible workbench or sessions windows. It prints the workspace and control socket. If Desktop opens in editor mode, open the agent window (Ctrl+') and the launcher attaches within five seconds.
 

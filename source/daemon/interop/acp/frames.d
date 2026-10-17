@@ -1,238 +1,96 @@
 module daemon.interop.acp.frames;
 
-import core.atomic : atomicLoad;
-import core.stdc.errno : errno, EINTR;
-import core.sys.posix.poll : poll, pollfd, POLLOUT;
-import core.sys.posix.unistd : write;
-import core.sync.condition : Condition;
-import core.sync.mutex : Mutex;
-import std.stdio : File;
+import std.json : JSONType, JSONValue, parseJSON;
 
-package(daemon):
+public:
 
-enum OBSERVE_FRAME_LIMIT = 2 * 1024 * 1024;
-enum OBSERVE_QUEUE_LIMIT = 64;
+// Shared by both daemon-owned and Desktop ACP connections.
+enum FRAME_LIMIT = 16 * 1024 * 1024;
+enum REQUEST_LIMIT = 256;
 
-struct FrameHeader
+struct Frame
 {
-    string id;
-    bool idComplete;
-    bool hasMethod;
-}
+    JSONValue value;
 
-FrameHeader scanHeader(const(char)[] data)
-{
-    FrameHeader ret;
-    int depth;
-    bool inString;
-    bool escaped;
-    string pendingKey;
-    char[] token;
-    foreach (i, value; data)
+    this(JSONValue value)
     {
-        if (inString)
-        {
-            if (escaped)
-            {
-                escaped = false;
-                token ~= value;
-            }
-            else if (value == '\\')
-                escaped = true;
-            else if (value == '"')
-            {
-                inString = false;
-                if (depth == 1)
-                {
-                    size_t next = i + 1;
-                    while (next < data.length && (data[next] == ' ' || data[next] == '\t'))
-                        next++;
-
-                    if (next < data.length && data[next] == ':')
-                    {
-                        pendingKey = token.idup;
-                        if (pendingKey == "method")
-                            ret.hasMethod = true;
-                    }
-                    else
-                    {
-                        if (pendingKey == "id")
-                        {
-                            ret.id = token.idup;
-                            ret.idComplete = true;
-                        }
-
-                        pendingKey = null;
-                    }
-                }
-
-                token = null;
-            }
-            else if (depth <= 1)
-                token ~= value;
-
-            continue;
-        }
-
-        switch (value)
-        {
-        case '"':
-            inString = true;
-            token = null;
-            break;
-        case '{':
-        case '[':
-            depth++;
-            break;
-        case '}':
-        case ']':
-            if (depth > 0)
-                depth--;
-            break;
-        default:
-            break;
-        }
+        this.value = value;
+        validate();
     }
 
-    return ret;
-}
+    bool request() const
+        => value.type == JSONType.object && "method" in value.object;
 
-bool writeBounded(int fd, const(ubyte)[] bytes, shared(bool)* aborted)
-{
-    size_t offset;
-    while (offset < bytes.length)
+    bool identified() const
+        => ("id" in value.object) !is null;
+
+    string method() const
+        => request ? value["method"].str : null;
+
+    string key() const
+        => identified ? value["id"].toString() : null;
+
+    string encode()
     {
-        if (aborted !is null && atomicLoad(*aborted))
-            return false;
-
-        pollfd watch = pollfd(fd, POLLOUT);
-        int ready = poll(&watch, 1, 100);
-        if (ready < 0)
-        {
-            if (errno == EINTR)
-                continue;
-            return false;
-        }
-        if (ready == 0)
-            continue;
-
-        immutable count = write(fd, bytes.ptr + offset, bytes.length - offset);
-        if (count < 0)
-        {
-            if (errno == EINTR)
-                continue;
-            return false;
-        }
-        if (count == 0)
-            return false;
-
-        offset += count;
+        string ret = value.toString();
+        if (ret.length > FRAME_LIMIT)
+            throw new Exception("ACP frame exceeds the 16 MiB limit");
+        return ret~"\n";
     }
 
-    return true;
+    void validate()
+    {
+        if (value.type != JSONType.object || "jsonrpc" !in value.object ||
+            value["jsonrpc"].type != JSONType.string || value["jsonrpc"].str != "2.0")
+            throw new Exception("Invalid ACP envelope");
+        if (identified)
+        {
+            JSONType type = value["id"].type;
+            if (type != JSONType.string && type != JSONType.integer &&
+                type != JSONType.uinteger && type != JSONType.null_)
+                throw new Exception("Invalid ACP request identity");
+        }
+        if (request)
+        {
+            if (value["method"].type != JSONType.string || !value["method"].str.length ||
+                "result" in value.object || "error" in value.object)
+                throw new Exception("Invalid ACP request");
+        }
+        else if (!identified || (("result" in value.object) !is null) == (("error" in value.object) !is null))
+            throw new Exception("Invalid ACP response");
+    }
 }
 
-struct FrameTap
+struct FrameReader
 {
-    string frame;
-    bool skip;
+private:
+    char[] partial;
 
-    void feed(FrameQueue queue, bool clientToAgent, ubyte[] chunk)
+public:
+    void feed(const(ubyte)[] bytes, void delegate(Frame) receive)
     {
-        foreach (value; chunk)
+        foreach (value; bytes)
         {
             if (value == '\n')
             {
-                if (skip)
-                {
-                    skip = false;
-                    frame = null;
-                }
-                else if (frame.length)
-                {
-                    queue.push(clientToAgent, frame);
-                    frame = null;
-                }
-                else
-                    queue.push(clientToAgent, "");
-
-                continue;
+                if (!partial.length)
+                    continue;
+                Frame frame = Frame(parseJSON(partial));
+                partial = null;
+                receive(frame);
             }
-
-            if (!skip)
+            else
             {
-                frame ~= cast(char)value;
-                if (frame.length >= OBSERVE_FRAME_LIMIT)
-                {
-                    skip = true;
-                    frame = null;
-                }
+                if (partial.length >= FRAME_LIMIT)
+                    throw new Exception("ACP frame exceeds the 16 MiB limit");
+                partial ~= cast(char)value;
             }
-        }
-    }
-}
-
-final class RelayIO
-{
-    File toChild;
-    File fromChild;
-    File input;
-    File output;
-}
-
-class FrameQueue
-{
-private:
-    Mutex mutex;
-    Condition updated;
-    bool[] directions;
-    string[] frames;
-    bool finished;
-
-public:
-    this()
-    {
-        mutex = new Mutex();
-        updated = new Condition(mutex);
-    }
-
-    void push(bool clientToAgent, string frame)
-    {
-        synchronized (mutex)
-        {
-            if (frames.length >= OBSERVE_QUEUE_LIMIT)
-                return;
-
-            directions ~= clientToAgent;
-            frames ~= frame;
-            updated.notify();
         }
     }
 
     void finish()
     {
-        synchronized (mutex)
-        {
-            finished = true;
-            updated.notifyAll();
-        }
-    }
-
-    bool pop(out bool clientToAgent, out string frame)
-    {
-        synchronized (mutex)
-        {
-            while (!frames.length && !finished)
-                updated.wait();
-
-            if (!frames.length)
-                return false;
-
-            clientToAgent = directions[0];
-            frame = frames[0];
-            directions = directions[1..$];
-            frames = frames[1..$];
-            return true;
-        }
+        if (partial.length)
+            throw new Exception("ACP stream ended within a frame");
     }
 }

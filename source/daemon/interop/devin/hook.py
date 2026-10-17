@@ -2,13 +2,11 @@
 import json
 import os
 import sys
-import time
 import urllib.error
 import urllib.request
 
 INPUT_LIMIT = 16 * 1024 * 1024
 REPLY_LIMIT = 16 * 1024 * 1024
-PERMISSION_TIMEOUT = 240
 COORDINATION_PREFIXES = ("mcp__autonom-coord__", "mcp__autonom-orchestrate__")
 SENSITIVE = ("PreToolUse", "PermissionRequest")
 PATHS = {
@@ -88,21 +86,7 @@ def forward(data, event):
     if path is None:
         raise HookError("Unknown Autonom hook")
 
-    result = call("POST", "/api/hooks/" + path, data)
-    permission = result.get("permission")
-    if not permission:
-        return result
-
-    session = data.get("session_id") if isinstance(data.get("session_id"), str) else None
-    deadline = time.monotonic() + PERMISSION_TIMEOUT
-    while time.monotonic() < deadline:
-        result = call("GET", "/api/permissions/" + str(permission), session=session)
-        if result.get("decision"):
-            return {"decision": result["decision"], "reason": result.get("reason", "")}
-
-        time.sleep(0.5)
-
-    return block("Permission request expired without a user decision")
+    return call("POST", "/api/hooks/" + path, data)
 
 
 def expected_event():

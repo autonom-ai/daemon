@@ -6,7 +6,7 @@ The adapter is `source/launcher/`, a launcher that starts Devin Desktop with `--
 
 The debugging pipe is created by the launcher process and inherited as file descriptors 3 and 4 of the browser process, so the Chrome DevTools Protocol endpoint never listens on a loopback port. The default transport exposes no DevTools network endpoint. Every launcher argument is forwarded to Devin Desktop except `--debug`, which explicitly switches to a loopback WebSocket transport on port 9222 (`--debug=<port>` overrides it) for development. Debug mode verifies the browser PID matches the launched process; it is never persisted in settings or `argv.json`. The launcher strips inherited `ACP_*`, `ELECTRON_*`, `VSCODE_*`, and `WINDSURF_*` variables from the child environment so launching from a terminal inside Devin Desktop does not leak host state (such as `ELECTRON_RUN_AS_NODE` or the parent's IPC hook) into the new instance.
 
-`install.sh` replaces only the `bin/devin-desktop` CLI shim with a small direct launcher wrapper, preserving the original shim byte-for-byte. It copies the launcher bundle and runtime assets beside the Desktop installation. The Electron binary, package entrypoint, main and workbench bundles, `product.json`, and profile data are untouched. The launcher starts the sibling Electron binary with its private pipe. The adapter wraps the native navigation manifest getter and surface controller in memory and restores every descriptor on dispose. There is no checksum rewriting or integrity-warning suppression.
+`install.py` replaces only the `bin/devin-desktop` CLI shim with a small direct launcher wrapper, preserving the original shim byte-for-byte. It copies the launcher bundle and runtime assets beside the Desktop installation. The Electron binary, package entrypoint, main and workbench bundles, `product.json`, and profile data are untouched. The launcher starts the sibling Electron binary with its private pipe. The adapter wraps the native navigation manifest getter and surface controller in memory and restores every descriptor on dispose. There is no checksum rewriting or integrity-warning suppression.
 
 An already-running unmanaged Desktop must be restarted once: additional windows in that process cannot inherit a new debugging pipe. Once managed, further launches delegate their window requests to it.
 
@@ -18,12 +18,12 @@ Build and test as your normal user, then install with the permissions required b
 npm --prefix source/launcher ci
 npm --prefix source/launcher run check
 npm --prefix source/launcher test
-sudo bash install.sh --no-build
+sudo python3 install.py --no-build
 ```
 
 Quit Desktop once, then run `devin-desktop` from a terminal. Your existing profile and login remain in use. The installed shim execs the launcher directly, preserving argv, cwd, stdout, stderr, and exit status; `devin-desktop --debug` therefore behaves the same as `node dist/launcher.js --debug`. The installer records the original shim for byte-for-byte rollback and copies the launcher, assets, daemon, and MCP scripts into `/usr/share/devin-desktop/autonom`. Build before installing or launching.
 
-`bash install.sh --check` verifies status. `sudo bash install.sh --uninstall` restores the CLI shim byte-for-byte; its backup and inert installed launcher payload remain for auditing. `--app <resources/app>` selects a non-default installation. External edits or unknown versions fail closed. The installer references this checkout, so keep it in place. Desktop upgrades replace the patch and require reinstallation after rechecking compatibility. Windows and macOS startup/packaging have not been validated.
+`python3 install.py --check` verifies status. `sudo python3 install.py --uninstall` restores the CLI shim byte-for-byte; its backup and inert installed launcher payload remain for auditing. `--app <resources/app>` selects a non-default installation. External edits or unknown versions fail closed. The installer references this checkout, so keep it in place. Desktop upgrades replace the patch and require reinstallation after rechecking compatibility. Windows and macOS startup/packaging have not been validated.
 
 ## Verified native boundaries
 

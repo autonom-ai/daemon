@@ -6,9 +6,9 @@ import daemon.coord;
 import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
 import daemon.events.event : Event, EventStore, EventType;
 import daemon.events.schedule : Schedule, ScheduleStore;
-import daemon.interop.devin;
+import daemon.interop.bridge;
 import daemon.interop.metadata : SessionMetadata;
-import daemon.interop.execution;
+import daemon.interop.bridge;
 import daemon.interop.session;
 import daemon.storage;
 import core.atomic : atomicLoad, atomicStore;
@@ -32,7 +32,7 @@ class Scheduler
 public:
     this(
         Config configuration,
-        Devin bridge,
+        Bridge bridge,
         ProfileStore store,
         EventStore events,
         ScheduleStore schedules
@@ -197,7 +197,7 @@ private:
     enum POLL_INTERVAL = 1.seconds;
 
     Config config;
-    Devin bridge;
+    Bridge bridge;
     ProfileStore store;
     EventStore events;
     ScheduleStore schedules;
@@ -318,7 +318,7 @@ private:
 
     Duration offline(Session session)
     {
-        Execution execution = session.execution;
+        Call execution = session.execution;
         if (execution is null || !execution.finishedAt.length)
             return Duration.max;
 
@@ -338,7 +338,7 @@ private:
         if (ret.id.length)
             return ret;
 
-        Execution execution = session.execution;
+        Call execution = session.execution;
         if (execution !is null)
         {
             ret.model = execution.model;
@@ -449,15 +449,7 @@ private:
         bool compact = config.compactOnResume || offline(session) > config.offlineCompactAfter;
         try
         {
-            Execution execution;
-            if (compact)
-            {
-                Execution preparation = bridge.compact(session.id, info.directory, info.model);
-                execution = bridge.resume(session.id, prompt, info.directory, info.model, preparation);
-            }
-            else
-                execution = bridge.resume(session.id, prompt, info.directory, info.model);
-
+            Call execution = bridge.resume(session.id, prompt, info.directory, info.model, compact);
             record(execution.id, profile.name, session.id, null, batch);
             return true;
         }
@@ -474,7 +466,7 @@ private:
     {
         try
         {
-            Execution execution = bridge.start(wakePrompt(batch, from.name), workspace, targetModel(profile));
+            Call execution = bridge.start(wakePrompt(batch, from.name), workspace, targetModel(profile));
             record(execution.id, profile.name, null, workspace, batch);
             return true;
         }
@@ -588,7 +580,7 @@ private:
         bool changed;
         foreach (wake; pendingWakes)
         {
-            Execution execution = bridge.execution(wake.execution);
+            Call execution = bridge.execution(wake.execution);
             if (execution !is null && execution.running)
             {
                 remaining ~= wake;
@@ -596,9 +588,9 @@ private:
             }
 
             changed = true;
-            if (execution !is null && execution.status == ExecutionStatus.Succeeded)
+            if (execution !is null && execution.status == CallStatus.Succeeded)
             {
-                if (execution.kind == ExecutionKind.Start && execution.sessionId.length && !wake.session.length)
+                if (execution.kind == CallKind.Start && execution.sessionId.length && !wake.session.length)
                     register(wake.profile, execution.sessionId);
             }
             else
