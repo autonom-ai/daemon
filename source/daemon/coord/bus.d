@@ -35,11 +35,16 @@ string canonicalRoomName(string name)
 class Bus
 {
 private:
+    static Bus instance;
     Config configuration;
     ProfileStore store;
     Room[string] rooms;
     Stream[string] streams;
     size_t[string][string] cursors;
+
+public:
+    static Bus get() => instance;
+    static void set(Bus b) { instance = b; }
 
     string roomsDir() const
         => buildPath(directory, "rooms");

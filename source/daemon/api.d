@@ -1,17 +1,22 @@
 module daemon.api;
 
+import daemon.agent;
 import daemon.agent.profile;
 import daemon.agent.store;
+import daemon.config;
+import daemon.coord;
 import daemon.coord.api;
+import daemon.events;
 import daemon.events.event;
 import daemon.events.schedule;
 import daemon.exception;
 import daemon.hooks;
 import daemon.http;
 import daemon.interop.api;
+import daemon.interop.bridge;
 import daemon.interop.mcp;
+import daemon.policy;
 import daemon.policy.access;
-import daemon.runtime;
 import serverino;
 
 import core.sys.posix.signal : kill, SIGTERM;
@@ -28,6 +33,40 @@ private:
 bool stopping;
 
 public:
+
+// Worker-owned domain singletons
+Config configuration;
+Bridge bridge;
+ProfileStore profileStore;
+Policy policy;
+Bus bus;
+EventStore events;
+ScheduleStore scheduleStore;
+Scheduler scheduler;
+
+void setupDomain()
+{
+    configuration = Config.get(environment.get("AUTONOM_CONFIG", Config.defaultPath));
+    bridge = new Bridge(configuration);
+    profileStore = new ProfileStore(configuration, bridge);
+    events = new EventStore(configuration, profileStore);
+    bus = new Bus(configuration, profileStore);
+    scheduleStore = new ScheduleStore(configuration, profileStore);
+    scheduler = new Scheduler(configuration, bridge, profileStore, events, scheduleStore);
+    policy = new Policy(configuration);
+
+    Bus.set(bus);
+    ProfileStore.set(profileStore);
+    Config.set(configuration);
+}
+
+void closeDomain()
+{
+    if (scheduler !is null)
+        scheduler.stop();
+    if (bridge !is null)
+        bridge.close();
+}
 
 alias apiModules = AliasSeq!(
     daemon.agent.profile,
@@ -103,7 +142,7 @@ void stop(Request request, Output output)
 
 @onWorkerStart void setupWorker()
 {
-    daemon.runtime.setup();
+    setupDomain();
     refresh(Request.init);
     scheduler.start();
 }
@@ -163,7 +202,7 @@ void refresh(Request request)
 
 @onWorkerStop void closeWorker()
 {
-    daemon.runtime.close();
+    closeDomain();
 }
 
 @onWorkerException bool handleException(Request request, Output output, Exception error)
