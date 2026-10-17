@@ -86,10 +86,23 @@ public:
     }
 }
 
+private bool isSymlinkSafe(string target)
+{
+    try
+    {
+        return isSymlink(target);
+    }
+    catch (Exception)
+    {
+        return false;
+    }
+}
+
 class Stream
 {
 private:
     Entry[] window;
+    size_t entriesOnDisk;
 
     static bool parse(string line, out Entry entry)
     {
@@ -102,51 +115,100 @@ private:
         return Entry.parse(data, entry);
     }
 
-    void load()
+    Entry[] readEntries(string targetPath, size_t byteLimit)
     {
-        if (!exists(path))
-            return;
+        if (!exists(targetPath))
+            return null;
 
-        File file = openFile(path, O_RDONLY);
+        if (isSymlinkSafe(targetPath))
+            throw new Exception("Storage file must not be a symlink");
+
+        File file = openFile(targetPath, O_RDONLY);
         scope(exit)
             file.close();
 
         bool tail;
-        if (file.size > MAX_LOG_BYTES)
+        if (file.size > byteLimit)
         {
-            file.seek(cast(long)file.size - MAX_LOG_BYTES);
+            file.seek(cast(long)file.size - byteLimit);
             tail = true;
         }
 
         string content = cast(string)file.byChunk(4096).join;
         if (tail)
         {
-            size_t start = content.indexOf('\n');
-            content = start < 0 ? null : content[start + 1..$];
+            ptrdiff_t start = content.indexOf('\n');
+            content = (start < 0 || start + 1 >= content.length) ? null : content[start + 1..$];
         }
 
-        Entry[] loaded;
+        Entry[] ret;
         if (content.length)
         {
             foreach (line; content.splitLines())
             {
                 Entry entry;
                 if (parse(line, entry))
-                    loaded ~= entry;
+                    ret ~= entry;
             }
         }
 
-        window = loaded.length <= MAX_ENTRIES ? loaded : loaded[$-MAX_ENTRIES..$];
+        return ret;
+    }
+
+    void load()
+    {
+        Entry[] loaded;
+        if (exists(path))
+        {
+            if (isSymlinkSafe(path))
+                throw new Exception("Storage file must not be a symlink");
+
+            Entry[] current = readEntries(path, maxBytes);
+            entriesOnDisk = current.length;
+            if (current.length < maxEntries)
+            {
+                string rotated = path ~ ".1";
+                if (exists(rotated))
+                {
+                    if (isSymlinkSafe(rotated))
+                        throw new Exception("Storage file must not be a symlink");
+
+                    loaded = readEntries(rotated, maxBytes) ~ current;
+                }
+                else
+                    loaded = current;
+            }
+            else
+                loaded = current;
+        }
+        else
+        {
+            entriesOnDisk = 0;
+            string rotated = path ~ ".1";
+            if (exists(rotated))
+            {
+                if (isSymlinkSafe(rotated))
+                    throw new Exception("Storage file must not be a symlink");
+
+                loaded = readEntries(rotated, maxBytes);
+            }
+        }
+
+        window = loaded.length <= maxEntries ? loaded : loaded[$-maxEntries..$];
     }
 
 public:
     const string name;
     const string path;
+    const size_t maxBytes;
+    const size_t maxEntries;
 
-    this(string name, string path)
+    this(string name, string path, size_t maxBytes = MAX_LOG_BYTES, size_t maxEntries = MAX_ENTRIES)
     {
         this.name = name.idup;
         this.path = path.idup;
+        this.maxBytes = maxBytes;
+        this.maxEntries = maxEntries;
         load();
     }
 
@@ -165,14 +227,28 @@ public:
     {
         mkdirRecurse(dirName(path));
         File file = openFile(path, O_RDWR | O_CREAT | O_APPEND);
+        if (entriesOnDisk >= maxEntries || file.size >= maxBytes)
+        {
+            file.close();
+            string rotated = path ~ ".1";
+            if (isSymlinkSafe(rotated))
+                throw new Exception("Storage file must not be a symlink");
+
+            rename(path, rotated);
+            entriesOnDisk = 0;
+            file = openFile(path, O_RDWR | O_CREAT | O_APPEND);
+        }
+
         scope(exit)
             file.close();
 
         file.write(entry.toJSON().toString());
         file.write("\n");
         file.flush();
+        entriesOnDisk++;
+
         window ~= entry;
-        if (window.length > MAX_ENTRIES)
-            window = window[$-MAX_ENTRIES..$];
+        if (window.length > maxEntries)
+            window = window[$-maxEntries..$];
     }
 }
