@@ -69,7 +69,8 @@ protocol and lifecycle behavior; isolated real CLI integration establishes the
 tested database/metadata contract. Neither proves native Desktop presentation.
 
 The source cutover was explicitly authorized with live compatibility unverified.
-The installed Desktop commit differs from the pinned build. Native UI behavior,
+The pinned build was re-based to the installed Desktop commit without live
+re-validation. Native UI behavior,
 hook/ACP permission coverage, and representative large-history loading remain
 open acceptance gates. Installed registry/configuration cutover has not been
 performed. Follow the [Desktop contract](COMMAND_CENTER.md) and
