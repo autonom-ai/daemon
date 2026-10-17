@@ -24,7 +24,7 @@ import std.conv : octal, to;
 import std.datetime : Clock, UTC;
 import std.exception : ErrnoException;
 import std.file;
-import std.json : JSONValue;
+import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath, dirName;
 import std.process;
 import std.stdio : File;
@@ -81,7 +81,6 @@ private:
     State _state;
     bool stopRequested;
     bool joined;
-    MonoTime settled;
     MonoTime deadline;
     bool steerable;
     size_t steerDepth;
@@ -163,6 +162,7 @@ public:
     string profileName;
     string mode;
     bool trusted;
+    MonoTime settled;
 
     this(
         string directory,
@@ -367,28 +367,133 @@ private:
     Observed[string] observed;
     MonoTime[string] connections;
 
+    struct ExecutionRecord
+    {
+        string id;
+        string sessionId;
+        string createdAt;
+        string finishedAt;
+        string status;
+        string model;
+        string workspace;
+        string mode;
+
+        JSONValue toJSON() const
+        {
+            JSONValue ret = JSONValue.emptyObject;
+            ret["id"] = JSONValue(id);
+            ret["sessionId"] = sessionId.length ? JSONValue(sessionId) : JSONValue(null);
+            ret["createdAt"] = JSONValue(createdAt);
+            ret["finishedAt"] = finishedAt.length ? JSONValue(finishedAt) : JSONValue(null);
+            ret["status"] = JSONValue(status);
+            ret["model"] = JSONValue(model);
+            ret["workspace"] = JSONValue(workspace);
+            ret["mode"] = JSONValue(mode);
+            return ret;
+        }
+    }
+
+    ExecutionRecord[string] executionRecords;
+    string[] executionOrder;
+    enum MAX_INDEXED_EXECUTIONS = 10_000;
+
+    string executionIndexPath() const
+        => buildPath(executionDir, "index.json");
+
+    void loadExecutionIndex()
+    {
+        string path = executionIndexPath();
+        if (!exists(path))
+            return;
+
+        try
+        {
+            JSONValue data = readJSON(path, 10 * 1024 * 1024);
+            if (data.type != JSONType.object)
+                return;
+
+            if ("executions" in data.object && data["executions"].type == JSONType.object)
+            {
+                foreach (id, item; data["executions"].object)
+                {
+                    if (item.type != JSONType.object)
+                        continue;
+
+                    ExecutionRecord rec;
+                    rec.id = id.idup;
+                    if ("sessionId" in item.object && item["sessionId"].type == JSONType.string)
+                        rec.sessionId = item["sessionId"].str.idup;
+                    if ("createdAt" in item.object && item["createdAt"].type == JSONType.string)
+                        rec.createdAt = item["createdAt"].str.idup;
+                    if ("finishedAt" in item.object && item["finishedAt"].type == JSONType.string)
+                        rec.finishedAt = item["finishedAt"].str.idup;
+                    if ("status" in item.object && item["status"].type == JSONType.string)
+                        rec.status = item["status"].str.idup;
+                    if ("model" in item.object && item["model"].type == JSONType.string)
+                        rec.model = item["model"].str.idup;
+                    if ("workspace" in item.object && item["workspace"].type == JSONType.string)
+                        rec.workspace = item["workspace"].str.idup;
+                    if ("mode" in item.object && item["mode"].type == JSONType.string)
+                        rec.mode = item["mode"].str.idup;
+
+                    executionRecords[rec.id] = rec;
+                    executionOrder ~= rec.id;
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    void saveExecutionIndex()
+    {
+        try
+        {
+            mkdirRecurse(executionDir);
+            JSONValue data = JSONValue.emptyObject;
+            data["version"] = JSONValue(1);
+            JSONValue execs = JSONValue.emptyObject;
+            foreach (id, rec; executionRecords)
+                execs[id] = rec.toJSON();
+            data["executions"] = execs;
+            atomicWrite(executionIndexPath(), data.toString());
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    void recordExecution(Call call)
+    {
+        ExecutionRecord rec;
+        rec.id = call.id;
+        rec.sessionId = call.sessionId;
+        rec.createdAt = call.createdAt;
+        rec.finishedAt = call.finishedAt;
+        rec.status = cast(string)call.status;
+        rec.model = call.model;
+        rec.workspace = call.workspace;
+        rec.mode = call.mode;
+
+        if (rec.id !in executionRecords)
+        {
+            if (executionOrder.length >= MAX_INDEXED_EXECUTIONS)
+            {
+                string oldest = executionOrder[0];
+                executionOrder = executionOrder[1..$];
+                executionRecords.remove(oldest);
+            }
+            executionOrder ~= rec.id;
+        }
+        executionRecords[rec.id] = rec;
+        saveExecutionIndex();
+    }
+
     void dropObserved(string id)
     {
         observed.remove(id);
         access.revokeMcp(id);
-    }
-
-    Call newCall(
-        CallKind kind,
-        string directory,
-        string model,
-        string sessionId = null
-    )
-    {
-        return new Call(
-            executionDir,
-            logDir,
-            randomUUID().toString(),
-            kind,
-            directory,
-            model,
-            sessionId
-        );
     }
 
     void checkCapacity()
@@ -397,7 +502,7 @@ private:
         foreach (entry; executions)
             active += entry.running;
 
-        if (active >= 8)
+        if (active >= maxConcurrentCalls)
             throw new ConflictException("Call capacity reached");
     }
 
@@ -407,6 +512,7 @@ private:
         checkCapacity();
         string runToken = access.begin(call);
         executions[call.id] = call;
+        recordExecution(call);
         call._timeout = call.kind == CallKind.Remove ? 10.seconds : executionTimeout;
         call.deadline = MonoTime.currTime + call.timeout;
         call.monitor = new Thread({
@@ -445,6 +551,9 @@ private:
 public:
     Access access;
     Duration executionTimeout = 30 * 60.seconds;
+    size_t callCapacity = 128;
+    Duration callSettleTimeout = 300.seconds;
+    size_t maxConcurrentCalls = 8;
     const string command;
     const string logDir;
     const string executionDir;
@@ -458,6 +567,9 @@ public:
         dataDir = configuration.dataDir;
         mcpPort = environment.get("AUTONOM_PORT", "8080");
         executionTimeout = configuration.executionTimeout;
+        callCapacity = configuration.callCapacity;
+        callSettleTimeout = configuration.callSettleTimeout;
+        maxConcurrentCalls = configuration.maxConcurrentCalls;
         controlMutex = new Mutex();
         access = new Access(dirName(logDir));
         executionDir = buildPath(dirName(logDir), "executions");
@@ -465,7 +577,62 @@ public:
             (exists(executionDir) && isSymlink(executionDir)))
             throw new Exception("Backend storage must not be a symlink");
 
+        loadExecutionIndex();
         collect();
+    }
+
+    string sessionForExecution(string id)
+    {
+        if (Call* call = id in executions)
+        {
+            if ((*call).sessionId.length)
+                return (*call).sessionId;
+        }
+        if (ExecutionRecord* rec = id in executionRecords)
+            return rec.sessionId;
+
+        return null;
+    }
+
+    JSONValue executionRecord(string id)
+    {
+        if (Call* call = id in executions)
+            return (*call).toJSON();
+
+        if (ExecutionRecord* rec = id in executionRecords)
+            return rec.toJSON();
+
+        return JSONValue(null);
+    }
+
+    size_t executionCount() const
+        => executions.length;
+
+    ref inout(Call[string]) callExecutions() inout
+        => executions;
+
+    Call newCall(
+        CallKind kind,
+        string directory,
+        string model,
+        string sessionId = null
+    )
+    {
+        return new Call(
+            executionDir,
+            logDir,
+            randomUUID().toString(),
+            kind,
+            directory,
+            model,
+            sessionId
+        );
+    }
+
+    void registerExecution(Call call)
+    {
+        executions[call.id] = call;
+        recordExecution(call);
     }
 
     Session session(string id)
@@ -753,13 +920,36 @@ public:
             collected[execution.id] = true;
         }
 
-        foreach (id; executions.keys)
+        Call[] settledCalls;
+        foreach (call; executions.byValue)
         {
-            Call call = executions[id];
-            if (!call.running && (MonoTime.currTime - call.settled > 300.seconds || executions.length > 128))
+            if (!call.running)
+                settledCalls ~= call;
+        }
+
+        settledCalls.sort!((left, right)
+        {
+            if (left.settled != right.settled)
+                return left.settled < right.settled;
+            if (left.createdAt != right.createdAt)
+                return left.createdAt < right.createdAt;
+            return left.id < right.id;
+        });
+
+        MonoTime now = MonoTime.currTime;
+        foreach (call; settledCalls)
+        {
+            bool expired = (now - call.settled > callSettleTimeout);
+            bool overCapacity = (executions.length > callCapacity);
+            if (expired || overCapacity)
             {
-                executions.remove(id);
-                collected.remove(id);
+                recordExecution(call);
+                executions.remove(call.id);
+                collected.remove(call.id);
+            }
+            else
+            {
+                break;
             }
         }
         access.collect();
