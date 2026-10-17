@@ -115,7 +115,7 @@ async function dispatch(context: BridgeContext, message: Record<string, unknown>
             return context.client.request("/api/profiles");
 
         case "getEvents":
-            return context.client.request(`/api/client/events?profile=${encodeURIComponent(text(message.profile, "human"))}`);
+            return context.client.request(`/api/events?profile=${encodeURIComponent(text(message.profile, "human"))}`);
 
         case "acknowledgeEvents":
             return context.client.request(`/api/events?profile=${encodeURIComponent(text(message.profile, "human"))}`);

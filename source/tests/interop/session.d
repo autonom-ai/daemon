@@ -442,7 +442,7 @@ unittest
     string callId = res["id"].str;
     callId.length.should == 36;
 
-    JSONValue transcript = request("/api/client/transcript/" ~ callId);
+    JSONValue transcript = request("/api/executions/" ~ callId ~ "/transcript");
     (transcript["session"].type != JSONType.null_).should == true;
     transcript["session"]["id"].str.should == "managed-hist-session";
     (transcript["messages"].type == JSONType.array).should == true;
