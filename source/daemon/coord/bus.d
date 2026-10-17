@@ -35,6 +35,7 @@ string canonicalRoomName(string name)
 class Bus
 {
 private:
+    Config configuration;
     ProfileStore store;
     Room[string] rooms;
     Stream[string] streams;
@@ -60,7 +61,9 @@ private:
         if (Stream* found = name in streams)
             return *found;
 
-        Stream ret = new Stream(name, path);
+        size_t maxBytes = configuration is null ? MAX_LOG_BYTES : configuration.maxStreamBytes;
+        size_t maxEntries = configuration is null ? MAX_ENTRIES : configuration.maxStreamEntries;
+        Stream ret = new Stream(name, path, maxBytes, maxEntries);
         streams[name] = ret;
         return ret;
     }
@@ -196,6 +199,7 @@ public:
 
     this(Config configuration, ProfileStore store)
     {
+        this.configuration = configuration;
         this.store = store;
         directory = buildPath(configuration.dataDir, "coord");
         if (exists(directory) && isSymlink(directory))
