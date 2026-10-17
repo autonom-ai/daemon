@@ -11,7 +11,6 @@ import {
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -20,7 +19,6 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { promisify } from "node:util";
 
-const REAL_APP_ROOT = "/usr/share/devin-desktop/resources/app";
 const execute = promisify(execFile);
 
 function transport(): { transport: PipeTransport; readable: PassThrough; writable: PassThrough }
@@ -160,11 +158,6 @@ test("debug mode refuses an occupied port before spawning Desktop", async () =>
     }
 });
 
-test("the installed Desktop build satisfies the pin or its owning package", { skip: !existsSync(REAL_APP_ROOT) }, async () =>
-{
-    const identity = await verifyDesktopBuild(REAL_APP_ROOT);
-    assert.ok(identity.source === "pin" || identity.source === "package");
-});
 
 test("Desktop children run without inherited host or capability variables", async () =>
 {

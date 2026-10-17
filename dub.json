@@ -20,7 +20,7 @@
 			},
 			"excludedSourceFiles": [
 				"source/daemon/app.d",
-				"source/daemon/relay/package.d",
+				"source/acp.d",
 				"source/evals/**"
 			],
 			"mainSourceFile": "bin/ut.d",
@@ -43,7 +43,7 @@
 				"source/tests/**",
 				"source/evals/**"
 			],
-			"mainSourceFile": "source/daemon/relay/package.d",
+			"mainSourceFile": "source/acp.d",
 			"name": "relay",
 			"sourcePaths": [
 				"source/daemon"

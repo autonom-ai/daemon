@@ -15,13 +15,13 @@ SessionMetadata readSessionMetadata(string database, string id)
     if (!available(database))
         return ret;
 
-    Sqlite connection = new Sqlite(database, SQLITE_OPEN_READONLY);
+    Sqlite connection = openDatabase(database);
     scope(exit)
         destroy(connection);
 
     ResultSet result = connection.query(
         "select id, model, working_directory, coalesce(title, '') as title, agent_mode, backend_type, "~
-        "created_at, last_activity_at, hidden, coalesce(workspace_dirs, '[]') as workspace_dirs "~
+        "created_at, last_activity_at, hidden, coalesce(workspace_dirs, '[]') as workspace_dirs, metadata "~
         "from sessions where id = ?",
         id
     );
@@ -30,13 +30,64 @@ SessionMetadata readSessionMetadata(string database, string id)
     if (result.empty)
         return ret;
 
-    Row row = result.front;
+    return metadata(result.front);
+}
+
+SessionMetadata[] readSessionCatalog(string database)
+{
+    SessionMetadata[] ret;
+    if (!available(database))
+        return ret;
+
+    Sqlite connection = openDatabase(database);
+    scope(exit)
+        destroy(connection);
+
+    ResultSet result = connection.query(
+        "select id, model, working_directory, coalesce(title, '') as title, agent_mode, backend_type, "~
+        "created_at, last_activity_at, hidden, coalesce(workspace_dirs, '[]') as workspace_dirs, metadata "~
+        "from sessions order by created_at, id"
+    );
+    scope(exit)
+        destroy(result);
+
+    foreach (Row row; result)
+        ret ~= metadata(row);
+
+    return ret;
+}
+
+private Sqlite openDatabase(string database)
+{
+    Sqlite ret = new Sqlite(database, SQLITE_OPEN_READONLY);
+    scope(failure)
+        destroy(ret);
+
+    ret.query("pragma busy_timeout = 250");
+    return ret;
+}
+
+private SessionMetadata metadata(Row row)
+{
+    SessionMetadata ret;
     ret.id = row["id"].toString();
     ret.model = row["model"].toString();
     ret.directory = row["working_directory"].toString();
     ret.title = row["title"].toString();
     ret.mode = row["agent_mode"].toString();
     ret.backend = row["backend_type"].toString();
+    string stored = row["metadata"].toString();
+    if (stored.length)
+    {
+        JSONValue data = parseJSON(stored);
+        if (data.type == JSONType.object && "client_meta" in data.object &&
+            data["client_meta"].type == JSONType.object)
+        {
+            JSONValue* connector = "autonom/connector" in data["client_meta"].object;
+            if (connector !is null && connector.type == JSONType.string)
+                ret.acp = connector.str;
+        }
+    }
     ret.createdAt = row["created_at"].toString().to!long;
     ret.lastActivityAt = row["last_activity_at"].toString().to!long;
     ret.hidden = row["hidden"].toString() != "0";
@@ -53,7 +104,7 @@ JSONValue readSessionMessages(string database, string id, size_t limit = 300)
     if (!available(database))
         return ret;
 
-    Sqlite connection = new Sqlite(database, SQLITE_OPEN_READONLY);
+    Sqlite connection = openDatabase(database);
     scope(exit)
         destroy(connection);
 

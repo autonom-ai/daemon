@@ -1,11 +1,12 @@
-module tests.session;
+module tests.interop.session;
 
 import daemon.agent;
 import daemon.interop;
+import daemon.interop.api : removeSessions;
 import daemon.interop.session;
 import tests.common;
 import serverino : endpoint, route;
-import unit_threaded : Name, Serial, should, shouldThrow;
+import unit_threaded;
 
 import core.sys.linux.sys.file : flock, LOCK_EX;
 import std.algorithm : canFind;
@@ -83,9 +84,9 @@ unittest
 
     installFake(fixture);
     write(buildPath(fixture.root, "next-session-id"), "fresh-session");
-    Execution execution = fixture.bridge.start("create work", fixture.root, "SWE-2");
+    Call execution = fixture.bridge.start("create work", fixture.root, "SWE-2");
     execution.wait();
-    execution.status.should == ExecutionStatus.Succeeded;
+    execution.status.should == CallStatus.Succeeded;
     execution.sessionId.should == "fresh-session";
     Session session = fixture.bridge.session(execution.sessionId);
     fixture.bridge.collect();
@@ -104,9 +105,9 @@ unittest
 
     installFake(fixture);
     write(buildPath(fixture.root, "fail-new"), "");
-    Execution execution = fixture.bridge.start("create work", fixture.root);
+    Call execution = fixture.bridge.start("create work", fixture.root);
     execution.wait();
-    execution.status.should == ExecutionStatus.Failed;
+    execution.status.should == CallStatus.Failed;
     execution.sessionId.length.should == 0;
 }
 
@@ -247,68 +248,26 @@ unittest
     session.exitStatus.get.should == 0;
 }
 
-@Name("Bridge marks an execution interrupted when its recorded process was lost")
+
+@Name("Bridge restart preserves backend sessions and logs without restoring call tickets")
 unittest
 {
     Fixture fixture = Fixture.create();
-    scope(exit)
-        fixture.close();
-
+    scope(exit) fixture.close();
     installFake(fixture);
-    Session session = fixture.bridge.session("session-1");
-    session.resume("hang", fixture.root);
-    waitUntil(delegate bool()
-    {
-        return session.isRunning();
-    });
-
-    string id = session.execution.id;
+    Call call = fixture.bridge.start("preserved reply", fixture.root);
+    call.wait();
+    fixture.bridge.collect();
+    string id = call.sessionId;
+    string log = readText(fixture.bridge.logPath(id));
+    string record = buildPath(fixture.bridge.executionDir, "old-record.json");
+    string original = `{"version":2,"status":"running","sessionId":"legacy"}`;
+    write(record, original);
     fixture.bridge.close();
-    string recordPath = buildPath(fixture.config.dataDir, "executions", id~".json");
-    JSONValue data = parseJSON(readText(recordPath));
-    data["status"] = JSONValue("running");
-    data["exitStatus"] = JSONValue(null);
-    write(recordPath, data.toString());
-
-    Devin restarted = new Devin(fixture.config);
-    scope(exit)
-        restarted.close();
-
-    Session recovered = restarted.session("session-1");
-    recovered.execution.status.should == ExecutionStatus.Interrupted;
-    recovered.status.should == SessionStatus.Failed;
-    recovered.exitStatus.isNull.should == true;
-}
-
-@Name("Execution records retain their readable versions and interrupted state")
-unittest
-{
-    Fixture fixture = Fixture.create();
-    scope(exit)
-        fixture.close();
-
-    mkdirRecurse(fixture.bridge.executionDir);
-    string[] ids;
-    foreach (recordVersion; [1, 2, 3])
-    {
-        string id = randomUUID().toString();
-        ids ~= id;
-        write(buildPath(fixture.bridge.executionDir, id~".json"),
-            `{"version":`~recordVersion.to!string~`,"id":"`~id~`","kind":"print",`~
-            `"workspace":"`~fixture.root~`","model":"","createdAt":"2026-10-15T00:00:00Z",`~
-            `"status":"running","sessionId":"session-`~recordVersion.to!string~`","exitStatus":null,"error":null`~
-            (recordVersion == 1 ? "" : `,"finishedAt":null`)~
-            (recordVersion == 3 ? `,"reply":null,"profile":"","mode":"","trusted":false}` : `}`));
-    }
-
-    Devin restarted = new Devin(fixture.config);
-    scope(exit)
-        restarted.close();
-
-    foreach (index, id; ids)
-    {
-        Execution execution = restarted.execution(id);
-        execution.status.should == ExecutionStatus.Interrupted;
-        execution.sessionId.should == "session-"~(index + 1).to!string;
-    }
+    Bridge restarted = new Bridge(fixture.config);
+    scope(exit) restarted.close();
+    restarted.execution(call.id).shouldBeNull;
+    restarted.findSession(id).shouldNotBeNull;
+    readText(restarted.logPath(id)).should == log;
+    readText(record).should == original;
 }

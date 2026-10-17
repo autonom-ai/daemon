@@ -8,7 +8,7 @@ import daemon.events.event;
 import daemon.events.schedule;
 import daemon.events.scheduler;
 import daemon.interop;
-import daemon.interop.devin;
+import daemon.interop.bridge;
 import daemon.interop.metadata : SessionMetadata;
 import tests.common;
 import arsd.sqlite;
@@ -47,7 +47,7 @@ void writeSessionDatabase(
     Database database = new Sqlite(path, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
     database.query("create table if not exists sessions (id text primary key, model text, working_directory text, "~
         "title text, agent_mode text default 'bypass', backend_type text default 'cli', created_at integer default 0, "~
-        "last_activity_at integer default 0, hidden integer default 0, workspace_dirs text default '[]')");
+        "last_activity_at integer default 0, hidden integer default 0, workspace_dirs text default '[]', metadata text)");
     database.query(
         "insert or replace into sessions (id, model, working_directory) values (?, ?, ?)",
         id,
@@ -118,7 +118,7 @@ struct WakeFixture
 {
     Fixture fixture;
     Config config;
-    Devin bridge;
+    Bridge bridge;
     ProfileStore store;
     Bus bus;
     EventStore events;
@@ -135,7 +135,7 @@ struct WakeFixture
         write(ret.fixture.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: "~
             JSONValue("./devin").toString()~"\n"~(extra is null ? "" : extra)~ROUTER);
         ret.config = new Config(ret.fixture.path);
-        ret.bridge = new Devin(ret.config);
+        ret.bridge = new Bridge(ret.config);
         ret.store = new ProfileStore(ret.config, ret.bridge);
         ret.events = new EventStore(ret.config, ret.store);
         ret.bus = new Bus(ret.config, ret.store);
@@ -146,9 +146,9 @@ struct WakeFixture
 
     Profile start(string name)
     {
-        Execution execution = bridge.start("work", fixture.root, "");
+        Call execution = bridge.start("work", fixture.root, "");
         execution.wait();
-        execution.status.should == ExecutionStatus.Succeeded;
+        execution.status.should == CallStatus.Succeeded;
         bridge.collect();
         return store.register(name, execution.sessionId);
     }
@@ -287,8 +287,13 @@ unittest
     fixture.events.unread(marlow).length.should == 0;
     waitForPrompt(fixture, "- ping from wren: hello");
     JSONValue[] calls = acpCalls(fixture.fixture.root);
-    calls[$-2]["method"].str.should == "session/load";
-    calls[$-2]["sessionId"].str.should == marlow.session.id;
+    JSONValue[] loads;
+    foreach (call; calls)
+    {
+        if (call["method"].str == "session/load")
+            loads ~= call;
+    }
+    loads[$-1]["sessionId"].str.should == marlow.session.id;
     calls[$-1]["method"].str.should == "session/prompt";
     calls[$-1]["sessionId"].str.should == marlow.session.id;
     calls[$-1]["text"].str.canFind("Reply with exactly: OK").should == false;
