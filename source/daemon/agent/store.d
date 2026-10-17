@@ -6,7 +6,7 @@ import daemon.exception;
 import daemon.interop.bridge;
 import daemon.interop.session;
 import daemon.http;
-import daemon.runtime;
+import daemon.api;
 import daemon.storage;
 import serverino;
 
@@ -97,11 +97,16 @@ class ProfileConflictException : ConflictException
 class ProfileStore
 {
 private:
+    static ProfileStore instance;
     Bridge bridge;
     Profile human;
     Profile[string] profiles;
     string[string] assignments;
     string[string] bindings;
+
+public:
+    static ProfileStore get() => instance;
+    static void set(ProfileStore s) { instance = s; }
 
     string statePath() const
         => buildPath(directory, "state.json");

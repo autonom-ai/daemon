@@ -59,8 +59,9 @@ def call(method, path, body=None, session=None):
     data = json.dumps(body).encode() if body is not None else None
     if data is not None:
         headers["content-type"] = "application/json"
+    port = os.environ.get("AUTONOM_PORT", PORT)
     request = urllib.request.Request(
-        "http://127.0.0.1:{}{}".format(PORT, path), data=data, headers=headers, method=method
+        "http://127.0.0.1:{}{}".format(port, path), data=data, headers=headers, method=method
     )
     try:
         with HTTP.open(request, timeout=10) as response:

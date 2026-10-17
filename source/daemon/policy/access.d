@@ -4,7 +4,7 @@ import daemon.config;
 import daemon.exception;
 import daemon.policy.rule;
 import daemon.http : acceptMethod, onlyFields, readBody, respond, respondError;
-import daemon.runtime : policy;
+import daemon.api : policy;
 import intuit.response.decision;
 import intuit.router : IRouter, decisions;
 import serverino;

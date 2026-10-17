@@ -1,141 +1,25 @@
 module daemon.config;
 
+public import daemon.config.parse;
+
 import daemon.storage;
-import intuit.router : IRouter, OpenRouter;
+import intuit.router : IRouter;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
 
 import core.time : Duration, hours, minutes, seconds;
-import std.algorithm.searching : canFind, startsWith;
-import std.ascii : isDigit;
-import std.conv : to;
+import std.algorithm.searching : canFind;
 import std.path;
-import std.process : environment, thisProcessID;
-
-private:
-
-string resolvePath(string path, string base)
-    => buildNormalizedPath(absolutePath(expandTilde(path), base));
-
-Duration parseDuration(string text, string name)
-{
-    if (!text.length)
-        throw new Exception(name~" must be a duration such as 30m or 1h");
-
-    long scale = 1;
-    string digits = text;
-    char unit = text[$-1];
-    if (!isDigit(unit))
-    {
-        switch (unit)
-        {
-        case 's':
-            break;
-
-        case 'm':
-            scale = 60;
-            break;
-
-        case 'h':
-            scale = 3600;
-            break;
-
-        case 'd':
-            scale = 86400;
-            break;
-
-        default:
-            throw new Exception(name~" must be a duration such as 30m or 1h");
-        }
-
-        digits = text[0..$-1];
-    }
-
-    long value;
-    try
-        value = digits.to!long;
-    catch (Exception)
-        throw new Exception(name~" must be a duration such as 30m or 1h");
-
-    if (value < 1)
-        throw new Exception(name~" must be a positive duration");
-
-    return (value * scale).seconds;
-}
-
-Duration readDuration(YamlAlgebraic value, string name)
-{
-    if (value.kind == YamlAlgebraic.Kind.integer)
-    {
-        long seconds = value.get!long;
-        if (seconds < 1)
-            throw new Exception(name~" must be a positive duration");
-
-        return seconds.seconds;
-    }
-
-    if (value.kind != YamlAlgebraic.Kind.string)
-        throw new Exception(name~" must be a duration such as 30m or 1h");
-
-    return parseDuration(value.get!string, name);
-}
-
-IRouter createRouter(YamlAlgebraic settings)
-{
-    if (settings.kind != YamlAlgebraic.Kind.object)
-        throw new Exception("Router configuration must be a mapping");
-
-    string[string] values;
-    foreach (pair; settings.object.pairs)
-    {
-        if (pair.key.kind != YamlAlgebraic.Kind.string)
-            throw new Exception("Router setting names must be strings");
-
-        string field = pair.key.get!string.idup;
-        if (field in values)
-            throw new Exception("Duplicate router setting: "~field);
-        if (pair.value.kind != YamlAlgebraic.Kind.string)
-            throw new Exception("Router settings must be strings");
-
-        string value = pair.value.get!string.idup;
-        if (value.canFind('\0'))
-            throw new Exception("Invalid router setting");
-
-        switch (field)
-        {
-        case "type", "key", "url", "name", "referer", "title":
-            values[field] = value;
-            break;
-
-        default:
-            throw new Exception("Unknown router setting: "~field);
-        }
-    }
-
-    foreach (field; ["type", "key", "url", "name"])
-    {
-        if (field !in values || !values[field].length)
-            throw new Exception("Router requires "~field);
-    }
-
-    string url = values["url"];
-    if (!((url.startsWith("https://") && url.length > 8) ||
-        (url.startsWith("http://") && url.length > 7)))
-        throw new Exception("Router URL must use HTTP or HTTPS");
-
-    if (values["type"] != "openrouter")
-        throw new Exception("Unsupported router type");
-
-    OpenRouter ret = new OpenRouter(values["key"], url, values["name"]);
-    ret.referer = values.get("referer", null);
-    ret.title = values.get("title", null);
-    return ret;
-}
+import std.process : environment;
 
 public:
 
 class Config
 {
+private:
+    static Config instance;
+
+public:
     string path;
     Duration executionTimeout = 30.minutes;
     string dataDir;
@@ -145,6 +29,13 @@ class Config
     bool compactOnResume;
     Duration offlineStartAfter = 1.hours;
     Duration offlineCompactAfter = 1.hours;
+    size_t maxStreamBytes = 4 * 1024 * 1024;
+    size_t maxStreamEntries = 1000;
+    size_t callCapacity = 128;
+    Duration callSettleTimeout = 300.seconds;
+    size_t maxConcurrentCalls = 8;
+    bool pruneExecutionArtifacts;
+    bool allowDestructivePruning;
     IRouter router;
 
     static string defaultPath()
@@ -157,6 +48,24 @@ class Config
             "cli",
             "session_locks"
         );
+
+    static Config get(string configPath = null)
+    {
+        if (instance !is null && configPath is null)
+            return instance;
+
+        string target = configPath.length ? configPath : environment.get("AUTONOM_CONFIG", defaultPath);
+        string normalized = buildNormalizedPath(absolutePath(expandTilde(target)));
+        if (instance is null || instance.path != normalized)
+            instance = new Config(target);
+
+        return instance;
+    }
+
+    static void set(Config conf)
+    {
+        instance = conf;
+    }
 
     this(string path = defaultPath)
     {
@@ -205,6 +114,40 @@ class Config
 
             case "offlineCompactAfter":
                 offlineCompactAfter = readDuration(pair.value, key);
+                continue;
+
+            case "callSettleTimeout":
+                callSettleTimeout = readDuration(pair.value, key);
+                continue;
+
+            case "callCapacity":
+                callCapacity = readPositiveInteger(pair.value, key);
+                continue;
+
+            case "maxStreamBytes":
+                maxStreamBytes = readByteSize(pair.value, key);
+                continue;
+
+            case "maxStreamEntries":
+                maxStreamEntries = readPositiveInteger(pair.value, key);
+                continue;
+
+            case "maxConcurrentCalls":
+                maxConcurrentCalls = readPositiveInteger(pair.value, key);
+                continue;
+
+            case "pruneExecutionArtifacts":
+                if (pair.value.kind != YamlAlgebraic.Kind.boolean)
+                    throw new Exception("pruneExecutionArtifacts must be true or false");
+
+                pruneExecutionArtifacts = pair.value.get!bool;
+                continue;
+
+            case "allowDestructivePruning":
+                if (pair.value.kind != YamlAlgebraic.Kind.boolean)
+                    throw new Exception("allowDestructivePruning must be true or false");
+
+                allowDestructivePruning = pair.value.get!bool;
                 continue;
 
             default:
