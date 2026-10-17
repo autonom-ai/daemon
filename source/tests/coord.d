@@ -653,7 +653,7 @@ unittest
     Profile wren = fixture.store.register("wren", "session-wren");
     Profile marlow = fixture.store.register("marlow", "session-marlow");
     Profile quill = fixture.store.register("quill", "session-quill");
-    Profile human = Profile(HUMAN_NAME);
+    Profile human = new Profile(HUMAN_NAME);
 
     Bus bus = new Bus(fixture.config, fixture.store);
     Room room = bus.createRoom("stress", wren.name);
