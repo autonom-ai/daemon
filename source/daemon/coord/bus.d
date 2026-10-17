@@ -122,7 +122,10 @@ private:
             if (position is null)
                 continue;
 
+            size_t original = *position;
             *position = *position < trimmed ? 0 : *position - trimmed;
+            if (*position != original)
+                saveCursors(profileName);
         }
     }
 
@@ -141,13 +144,13 @@ private:
 
     Entry[] read(Stream target, Profile profile, size_t limit)
     {
-        size_t position = cursor(profile.name, target.name);
-        if (!position && target.entries.length > limit)
+        if (!hasCursor(profile.name, target.name) && target.entries.length > limit)
         {
             advance(profile.name, target.name, target.entries.length);
             return target.entries[$-limit..$];
         }
 
+        size_t position = cursor(profile.name, target.name);
         Entry[] ret = target.since(position);
         if (ret.length > limit)
             ret = ret[0..limit];
@@ -190,6 +193,7 @@ private:
             }
         }
 
+        cursors[HUMAN_NAME] = loadCursors(HUMAN_NAME);
         foreach (Profile profile; store.list())
             cursors[profile.name] = loadCursors(profile.name);
     }
@@ -218,6 +222,15 @@ public:
     Stream pings(string profileName)
         => stream(pingStream(profileName), buildPath(inboxDir(profileName), PINGS_FILE));
 
+    bool hasCursor(string profileName, string streamName)
+    {
+        size_t[string]* positions = profileName in cursors;
+        if (positions is null)
+            return false;
+
+        return (streamName in *positions) !is null;
+    }
+
     size_t cursor(string profileName, string streamName)
     {
         size_t[string]* positions = profileName in cursors;
@@ -230,7 +243,7 @@ public:
 
     void advance(string profileName, string streamName, size_t position)
     {
-        if (position <= cursor(profileName, streamName))
+        if (hasCursor(profileName, streamName) && position <= cursor(profileName, streamName))
             return;
 
         cursors[profileName][streamName] = position;
