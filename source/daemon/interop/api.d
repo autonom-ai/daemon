@@ -5,7 +5,7 @@ import daemon.exception;
 import daemon.http;
 import daemon.interop.bridge;
 import daemon.interop.session;
-import daemon.runtime : bridge, profileStore;
+import daemon.api : bridge, profileStore;
 import daemon.storage;
 import serverino;
 

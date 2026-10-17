@@ -38,11 +38,12 @@ public:
         File peerOutput,
         string token = null,
         string port = "8080",
+        string id = null,
         string socketPath = null,
         string daemonSockPath = null
     )
     {
-        this.id = randomUUID().toString();
+        this.id = id.length ? id : randomUUID().toString();
         this.agent = agent;
         this.peerInput = peerInput;
         this.peerOutput = peerOutput;
@@ -126,7 +127,7 @@ int runAcpHost(string devinCommand = null, string configPath = null)
     string socketPath = data.length ? buildPath(data, "acp", id ~ ".sock") : null;
     string daemonSockPath = data.length ? buildPath(data, "acp", "daemon.sock") : null;
 
-    AcpHostConnection host = new AcpHostConnection(agent, stdin, stdout, token, port, socketPath, daemonSockPath);
+    AcpHostConnection host = new AcpHostConnection(agent, stdin, stdout, token, port, id, socketPath, daemonSockPath);
     scope(exit) host.close();
 
     return host.run();

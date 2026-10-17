@@ -20,8 +20,8 @@
 
 # Ownership
 
-- `daemon.app` / `daemon.server`: entrypoint and one persistent Serverino
-  worker. `daemon.runtime` assembles the worker-owned domain objects.
+- `app`: unified daemon and ACP entrypoint with one persistent Serverino
+  worker. `daemon.api` assembles the worker-owned domain objects.
 - `daemon.interop`: CLI processes, canonical sessions, ACP, and capabilities.
   The read-only CLI database supplies session metadata and conversation history.
 - `daemon.agent`: profiles and durable assignments. `daemon.coord`: rooms,
