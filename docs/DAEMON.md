@@ -1,6 +1,6 @@
 # Daemon architecture and source cutover
 
-The daemon runs one persistent Serverino worker. `daemon.runtime` owns the
+The daemon runs one persistent Serverino worker. `daemon.api` owns the
 bridge, profiles, coordination streams, pending events, schedules, and policy.
 HTTP handlers validate inputs and invoke those owners. CLI child work runs in
 monitor threads; human permission waits never occupy the HTTP worker.
