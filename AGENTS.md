@@ -43,8 +43,9 @@ HTTP, permission, and deployment contracts.
 - Keep child work and human waits outside the HTTP worker. Bound processes,
   output, requests, and deadlines; cancel and reap owned children safely.
 - Discovery does not grant control. Scope capabilities to their session/run;
-  never expose operator credentials to pages, children, or logs. Scrub inherited
-  host ACP/Desktop variables. Keep credential-bearing configuration private.
+  never expose operator credentials to pages, children, or logs. Remove inherited
+  `ACP_BACKEND` when invoking Devin CLI; keep Desktop startup environment handling
+  local to the launcher. Keep credential-bearing configuration private.
 - Open the CLI database read-only. A held foreign lock means loaded elsewhere,
   not active generation or permission to control that process.
 - Preserve configuration, data, sessions, and file logs. Reconcile uncertain

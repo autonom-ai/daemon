@@ -7,47 +7,7 @@ import core.sys.posix.unistd : setpgid;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs;
 import std.exception : ErrnoException;
-import std.process : Pid, environment, tryWait, wait;
-import std.string : startsWith;
-
-public:
-
-enum SCRUB_PREFIXES = [
-    "ACP_",
-    "ELECTRON_",
-    "OPENROUTER_API_KEY",
-    "VSCODE_",
-    "WINDSURF_",
-    "AUTONOM_RUN_",
-    "AUTONOM_CLIENT_",
-    "AUTONOM_MCP_",
-    "AUTONOM_RELAY_"
-];
-
-string[string] childEnvironment() nothrow
-{
-    string[string] ret;
-    try
-    {
-        ret = environment.toAA();
-        foreach (name; ret.keys)
-        {
-            foreach (prefix; SCRUB_PREFIXES)
-            {
-                if (name.startsWith(prefix))
-                {
-                    ret.remove(name);
-                    break;
-                }
-            }
-        }
-    }
-    catch (Exception)
-    {
-    }
-
-    return ret;
-}
+import std.process : Pid, tryWait, wait;
 
 bool createProcessGroup() nothrow @nogc @trusted
 {
