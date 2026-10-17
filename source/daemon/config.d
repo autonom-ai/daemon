@@ -6,11 +6,12 @@ import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
 
 import core.time : Duration, hours, minutes, seconds;
-import std.algorithm.searching : canFind, startsWith;
+import std.algorithm.searching : canFind, endsWith, startsWith;
 import std.ascii : isDigit;
 import std.conv : to;
 import std.path;
 import std.process : environment, thisProcessID;
+import std.string : strip;
 
 private:
 
@@ -80,6 +81,66 @@ Duration readDuration(YamlAlgebraic value, string name)
     return parseDuration(value.get!string, name);
 }
 
+size_t readPositiveInteger(YamlAlgebraic value, string name)
+{
+    long integer;
+    if (value.kind == YamlAlgebraic.Kind.integer)
+        integer = value.get!long;
+    else if (value.kind == YamlAlgebraic.Kind.string)
+    {
+        try
+            integer = value.get!string.strip.to!long;
+        catch (Exception)
+            throw new Exception(name ~ " must be a positive integer");
+    }
+    else
+        throw new Exception(name ~ " must be a positive integer");
+
+    if (integer < 1)
+        throw new Exception(name ~ " must be a positive integer");
+
+    return cast(size_t)integer;
+}
+
+size_t readByteSize(YamlAlgebraic value, string name)
+{
+    if (value.kind == YamlAlgebraic.Kind.integer)
+    {
+        long bytes = value.get!long;
+        if (bytes < 1)
+            throw new Exception(name ~ " must be a positive byte size");
+
+        return cast(size_t)bytes;
+    }
+    if (value.kind != YamlAlgebraic.Kind.string)
+        throw new Exception(name ~ " must be a byte size such as 4MB or 16MiB");
+
+    string text = value.get!string.strip;
+    if (!text.length)
+        throw new Exception(name ~ " must not be empty");
+
+    size_t scale = 1;
+    string digits = text;
+    if (text.endsWith("GiB") || text.endsWith("gib")) { scale = 1024 * 1024 * 1024; digits = text[0..$-3].strip; }
+    else if (text.endsWith("GB") || text.endsWith("gb")) { scale = 1000 * 1000 * 1000; digits = text[0..$-2].strip; }
+    else if (text.endsWith("MiB") || text.endsWith("mib")) { scale = 1024 * 1024; digits = text[0..$-3].strip; }
+    else if (text.endsWith("MB") || text.endsWith("mb")) { scale = 1000 * 1000; digits = text[0..$-2].strip; }
+    else if (text.endsWith("KiB") || text.endsWith("kib")) { scale = 1024; digits = text[0..$-3].strip; }
+    else if (text.endsWith("KB") || text.endsWith("kb")) { scale = 1000; digits = text[0..$-2].strip; }
+    else if (text.endsWith("B") || text.endsWith("b")) { scale = 1; digits = text[0..$-1].strip; }
+
+    long val;
+    try
+        val = digits.to!long;
+    catch (Exception)
+        throw new Exception(name ~ " must be a byte size such as 4MiB or 16MB");
+
+    if (val < 1)
+        throw new Exception(name ~ " must be a positive byte size");
+
+    return cast(size_t)(val * scale);
+}
+
 IRouter createRouter(YamlAlgebraic settings)
 {
     if (settings.kind != YamlAlgebraic.Kind.object)
@@ -145,6 +206,13 @@ class Config
     bool compactOnResume;
     Duration offlineStartAfter = 1.hours;
     Duration offlineCompactAfter = 1.hours;
+    size_t maxStreamBytes = 4 * 1024 * 1024;
+    size_t maxStreamEntries = 1000;
+    size_t callCapacity = 128;
+    Duration callSettleTimeout = 300.seconds;
+    size_t maxConcurrentCalls = 8;
+    bool pruneExecutionArtifacts;
+    bool allowDestructivePruning;
     IRouter router;
 
     static string defaultPath()
@@ -205,6 +273,40 @@ class Config
 
             case "offlineCompactAfter":
                 offlineCompactAfter = readDuration(pair.value, key);
+                continue;
+
+            case "callSettleTimeout":
+                callSettleTimeout = readDuration(pair.value, key);
+                continue;
+
+            case "callCapacity":
+                callCapacity = readPositiveInteger(pair.value, key);
+                continue;
+
+            case "maxStreamBytes":
+                maxStreamBytes = readByteSize(pair.value, key);
+                continue;
+
+            case "maxStreamEntries":
+                maxStreamEntries = readPositiveInteger(pair.value, key);
+                continue;
+
+            case "maxConcurrentCalls":
+                maxConcurrentCalls = readPositiveInteger(pair.value, key);
+                continue;
+
+            case "pruneExecutionArtifacts":
+                if (pair.value.kind != YamlAlgebraic.Kind.boolean)
+                    throw new Exception("pruneExecutionArtifacts must be true or false");
+
+                pruneExecutionArtifacts = pair.value.get!bool;
+                continue;
+
+            case "allowDestructivePruning":
+                if (pair.value.kind != YamlAlgebraic.Kind.boolean)
+                    throw new Exception("allowDestructivePruning must be true or false");
+
+                allowDestructivePruning = pair.value.get!bool;
                 continue;
 
             default:
