@@ -49,44 +49,6 @@ JSONValue injectCoord(JSONValue params, string port, string token)
     return params;
 }
 
-@endpoint @route!"/api/acp/admit"
-void admit(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Post]))
-        return;
-
-    JSONValue data = readBody(request);
-    onlyFields(data, ["connection", "session", "token", "directory"]);
-    foreach (required; ["connection", "session", "token"])
-    {
-        if (required !in data.object || data[required].type != JSONType.string)
-            throw new InvalidInputException("Expected string connection, session, and token");
-    }
-    try
-        UUID(data["connection"].str);
-    catch (Exception)
-        throw new InvalidInputException("Invalid connection ID");
-    if (data["token"].str.length != 64)
-        throw new InvalidInputException("Invalid MCP credential");
-    foreach (character; data["token"].str)
-    {
-        if (!(character >= '0' && character <= '9') && !(character >= 'a' && character <= 'f'))
-            throw new InvalidInputException("Invalid MCP credential");
-    }
-    if ("directory" in data.object &&
-        (data["directory"].type != JSONType.string || data["directory"].str.canFind('\0')))
-        throw new InvalidInputException("Invalid directory");
-
-    bridge.admitObserved(data["connection"].str, data["session"].str,
-        "directory" in data.object ? data["directory"].str : null);
-    if (!bridge.access.admitMcp(data["token"].str, data["session"].str))
-        throw new ConflictException("MCP credential is already bound to another session");
-
-    bridge.access.remember(data["session"].str);
-
-    respond(output, JSONValue(["session": data["session"]]));
-}
-
 @endpoint @route!"/api/mcp/session"
 void mcpSession(Request request, Output output)
 {

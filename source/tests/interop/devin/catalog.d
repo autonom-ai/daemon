@@ -1,6 +1,7 @@
-module tests.interop.catalog;
+module tests.interop.devin.catalog;
 
 import daemon.interop;
+import daemon.interop.devin.bridge : Bridge;
 import tests.common;
 import tests.interop.devin.common : database;
 

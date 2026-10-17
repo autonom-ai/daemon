@@ -3,7 +3,7 @@ module daemon.hooks;
 import daemon.agent;
 import daemon.events.event : Event;
 import daemon.exception;
-import daemon.interop.bridge;
+import daemon.interop.call;
 import daemon.interop.session;
 import daemon.policy;
 import daemon.http;

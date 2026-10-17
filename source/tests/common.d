@@ -2,7 +2,8 @@ module tests.common;
 
 import daemon.agent;
 import daemon.config;
-import daemon.interop.bridge;
+import daemon.interop.devin.bridge : Bridge;
+import daemon.interop.call;
 
 import std.algorithm.searching : startsWith;
 import core.thread : Thread;
@@ -106,6 +107,7 @@ public:
 
     void close()
     {
+        bridge.close();
         rmdirRecurse(root);
     }
 }

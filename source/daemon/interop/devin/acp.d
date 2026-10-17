@@ -3,7 +3,7 @@ module daemon.interop.devin.acp;
 import daemon.exception;
 import daemon.interop.access : Access;
 import daemon.interop.acp;
-import daemon.interop.bridge : Call, CallResult;
+import daemon.interop.call : Call, CallResult;
 import daemon.interop.mcp : injectCoord;
 import daemon.interop.devin.process : cliEnvironment;
 import daemon.interop.process;

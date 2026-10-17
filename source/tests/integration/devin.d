@@ -5,7 +5,7 @@ version(devin)
 {
     import daemon.config : Config;
     import daemon.interop.acp : AcpClient, AcpException, Frame, FRAME_LIMIT;
-    import daemon.interop.bridge : Bridge;
+    import daemon.interop.devin.bridge : Bridge;
     import daemon.interop.devin.acp : promptParams, sessionParams;
     import daemon.interop.devin.db : readSessionMetadata;
     import daemon.interop.metadata : SessionMetadata;

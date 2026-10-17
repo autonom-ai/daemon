@@ -1,6 +1,7 @@
-module tests.interop.bridge;
+module tests.interop.devin.bridge;
 
 import daemon.interop;
+import daemon.interop.devin.bridge : Bridge;
 import tests.common;
 import unit_threaded : Name, should, shouldThrow;
 
@@ -54,7 +55,11 @@ unittest
     failed.wait();
     failed.status.should == CallStatus.Failed;
     failed.toJSON()["error"].str.canFind("prompt failed").should == true;
-    fixture.bridge.run(["slow"], fixture.root, 100.msecs).shouldThrow!Exception();
+    fixture.bridge.executionTimeout = 100.msecs;
+    Call timedOut = fixture.bridge.print("hang", fixture.root);
+    timedOut.wait();
+    timedOut.status.should == CallStatus.Failed;
+    timedOut.toJSON()["error"].str.canFind("timed out").should == true;
 }
 
 @Name("Session removal deletes the CLI session and its log")

@@ -3,7 +3,8 @@ module daemon.agent.store;
 import daemon.agent.profile;
 import daemon.config;
 import daemon.exception;
-import daemon.interop.bridge;
+import daemon.interop.provider : IProvider;
+import daemon.interop.call;
 import daemon.interop.session;
 import daemon.http;
 import daemon.api;
@@ -98,7 +99,7 @@ class ProfileStore
 {
 private:
     static ProfileStore instance;
-    Bridge bridge;
+    IProvider bridge;
     Profile human;
     Profile[string] profiles;
     string[string] assignments;
@@ -229,7 +230,7 @@ public:
 public:
     const string directory;
 
-    this(Config configuration, Bridge bridge)
+    this(Config configuration, IProvider bridge)
     {
         this.bridge = bridge;
         human = new Profile(HUMAN_NAME);
