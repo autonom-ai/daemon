@@ -183,7 +183,14 @@ def on_prompt(request_id, params):
     if text.startswith("auth:") or text == "hang":
         pending[request_id] = session_id
         return
-    if text == "Reply with exactly: OK":
+    if text == "/compact":
+        if os.path.exists(path("fail-compact")):
+            send_error(request_id, -32603, "compaction failed")
+            return
+        if os.path.exists(path("hang-compact")):
+            pending[request_id] = session_id
+            return
+        update(session_id, "COMPACTED")
         finish(request_id, session_id)
         return
 
@@ -311,9 +318,6 @@ def cli_main():
     if os.path.exists(path("want-environ")):
         with open(path("environ.txt"), "w") as handle:
             handle.write("\n".join("%s=%s" % item for item in os.environ.items()))
-    if os.environ.get("DEVIN_COMPACTION_THRESHOLDS"):
-        with open(path("compaction-thresholds.txt"), "w") as handle:
-            handle.write(os.environ["DEVIN_COMPACTION_THRESHOLDS"])
 
     if argv[:1] == ["acp"]:
         return acp_main()

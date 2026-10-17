@@ -9,6 +9,7 @@ import daemon.interop.process;
 import daemon.storage;
 
 import core.stdc.errno : errno, EAGAIN, EINTR, EWOULDBLOCK;
+import core.sync.mutex : Mutex;
 import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_RDWR;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
@@ -81,12 +82,11 @@ CallResult runAcp(
     string prompt,
     string model,
     string mode,
-    string[string] environment,
     string runToken,
     string port,
     string dataDir,
     Access access,
-    bool steerable = true
+    bool compactFirst = false
 )
 {
     string[string] child = childEnvironment();
@@ -94,8 +94,6 @@ CallResult runAcp(
     child["AUTONOM_DATA_DIR"] = dataDir;
     if (runToken.length)
         child["AUTONOM_RUN_TOKEN"] = runToken;
-    foreach (name, value; environment)
-        child[name] = value;
 
     File output = openFile(execution.outputPath, O_RDWR | O_CREAT | O_APPEND);
     File errors = openFile(execution.errorPath, O_RDWR | O_CREAT | O_APPEND);
@@ -114,33 +112,37 @@ CallResult runAcp(
     size_t written;
     bool live;
     string bound;
+    Mutex replyMutex = new Mutex();
     agent.notification = (JSONValue message) {
-        if (!live || "params" !in message.object)
-            return;
-
-        JSONValue params = message["params"];
-        if ("sessionId" !in params.object || params["sessionId"].type != JSONType.string ||
-            params["sessionId"].str != bound || "update" !in params.object)
-            return;
-
-        JSONValue update = params["update"];
-        if (update.type != JSONType.object ||
-            "sessionUpdate" !in update.object || update["sessionUpdate"].str != "agent_message_chunk" ||
-            "content" !in update.object || update["content"].type != JSONType.object ||
-            "text" !in update["content"].object || update["content"]["text"].type != JSONType.string)
-            return;
-
-        string text = update["content"]["text"].str;
-        if (reply.length + text.length > REPLY_LIMIT)
-            text = text[0..REPLY_LIMIT - reply.length];
-        if (!text.length)
-            return;
-
-        reply ~= text;
-        if (written < REPLY_LIMIT)
+        synchronized (replyMutex)
         {
-            output.rawWrite(cast(ubyte[])text);
-            written += text.length;
+            if (!live || "params" !in message.object)
+                return;
+
+            JSONValue params = message["params"];
+            if ("sessionId" !in params.object || params["sessionId"].type != JSONType.string ||
+                params["sessionId"].str != bound || "update" !in params.object)
+                return;
+
+            JSONValue update = params["update"];
+            if (update.type != JSONType.object ||
+                "sessionUpdate" !in update.object || update["sessionUpdate"].str != "agent_message_chunk" ||
+                "content" !in update.object || update["content"].type != JSONType.object ||
+                "text" !in update["content"].object || update["content"]["text"].type != JSONType.string)
+                return;
+
+            string text = update["content"]["text"].str;
+            if (reply.length + text.length > REPLY_LIMIT)
+                text = text[0..REPLY_LIMIT - reply.length];
+            if (!text.length)
+                return;
+
+            reply ~= text;
+            if (written < REPLY_LIMIT)
+            {
+                output.rawWrite(cast(ubyte[])text);
+                written += text.length;
+            }
         }
     };
 
@@ -177,9 +179,12 @@ CallResult runAcp(
     access.admitMcp(mcpToken, bound);
     applyOptions(agent, created, bound, model, mode);
 
-    live = true;
-    long[] pending = [agent.send("session/prompt", promptParams(bound, prompt))];
-    execution.markSteerable(steerable);
+    bool compacting = compactFirst;
+    bool accepting = !compacting;
+    synchronized (replyMutex)
+        live = !compacting;
+    long[] pending = [agent.send("session/prompt", promptParams(bound, compacting ? "/compact" : prompt))];
+    execution.markSteerable(accepting);
 
     bool[long] steered;
     MonoTime deadline = execution.expiresAt;
@@ -187,9 +192,33 @@ CallResult runAcp(
     bool failed;
     string failure;
     MonoTime cancelDeadline;
-    for (;;)
+    while (pending.length || compacting || accepting)
     {
-        string[] queued = pending.length ? execution.takeSteering() : execution.closeSteering();
+        if (!pending.length && compacting)
+        {
+            if (failed || cancelled || execution.stopped)
+                break;
+
+            compacting = false;
+            synchronized (replyMutex)
+                live = true;
+            pending ~= agent.send("session/prompt", promptParams(bound, prompt));
+            accepting = true;
+            execution.markSteerable();
+        }
+
+        string[] queued;
+        if (accepting)
+        {
+            if (pending.length)
+                queued = execution.takeSteering();
+            else
+            {
+                queued = execution.closeSteering();
+                accepting = false;
+            }
+        }
+
         foreach (promptText; queued)
         {
             try
@@ -269,17 +298,6 @@ CallResult runAcp(
             Thread.sleep(500.msecs);
             break;
         }
-        if (agent.disconnected)
-        {
-            if (!failed)
-            {
-                failed = true;
-                failure = "Agent disconnected";
-            }
-
-            break;
-        }
-
         Thread.sleep(10.msecs);
     }
 

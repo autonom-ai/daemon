@@ -296,7 +296,7 @@ unittest
     loads[$-1]["sessionId"].str.should == marlow.session.id;
     calls[$-1]["method"].str.should == "session/prompt";
     calls[$-1]["sessionId"].str.should == marlow.session.id;
-    calls[$-1]["text"].str.canFind("Reply with exactly: OK").should == false;
+    calls[$-1]["text"].str.canFind("/compact").should == false;
     calls[$-1]["text"].str.canFind("You were woken by 1 event").should == true;
     calls[$-1]["text"].str.canFind("- ping from wren: hello").should == true;
     calls[$-1]["text"].str.canFind("Continue your work.").should == true;
@@ -324,11 +324,10 @@ unittest
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, [marlow]);
 
     waitForPrompt(fixture, "- ping from wren: hello");
-    invocations(fixture.fixture.root).length.should == 3;
+    invocations(fixture.fixture.root).length.should == 2;
     string[] prompts = promptTexts(fixture.fixture.root);
-    prompts[1].should == "Reply with exactly: OK";
-    readText(buildPath(fixture.fixture.root, "compaction-thresholds.txt")).should == fixture.config.compactionThresholds;
-    prompts[2].canFind("Reply with exactly: OK").should == false;
+    prompts[1].should == "/compact";
+    prompts[2].canFind("/compact").should == false;
     prompts[2].canFind("You were woken by 1 event").should == true;
     prompts[2].canFind("- ping from wren: hello").should == true;
 }
@@ -347,11 +346,10 @@ unittest
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, [marlow]);
 
     waitForPrompt(fixture, "- ping from wren: hello");
-    invocations(fixture.fixture.root).length.should == 3;
+    invocations(fixture.fixture.root).length.should == 2;
     string[] prompts = promptTexts(fixture.fixture.root);
-    prompts[1].should == "Reply with exactly: OK";
-    readText(buildPath(fixture.fixture.root, "compaction-thresholds.txt")).should == fixture.config.compactionThresholds;
-    prompts[2].canFind("Reply with exactly: OK").should == false;
+    prompts[1].should == "/compact";
+    prompts[2].canFind("/compact").should == false;
     prompts[2].canFind("- ping from wren: hello").should == true;
 }
 

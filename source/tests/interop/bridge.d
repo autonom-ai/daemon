@@ -80,3 +80,46 @@ unittest
     missing.wait();
     missing.status.should == CallStatus.Failed;
 }
+
+@Name("Compaction and resume share one loaded connection without leaking compaction output")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit) fixture.close();
+    installFake(fixture);
+
+    Call first = fixture.bridge.start("work", fixture.root);
+    first.wait();
+    Call resumed = fixture.bridge.resume(first.sessionId, "continue", fixture.root, null, true);
+    resumed.wait();
+    resumed.status.should == CallStatus.Succeeded;
+    resumed.toJSON()["reply"].str.should == "continue";
+    readText(resumed.outputPath).should == "continue";
+}
+
+@Name("Failed or cancelled compaction never delivers the resume prompt")
+unittest
+{
+    foreach (marker; ["fail-compact", "hang-compact"])
+    {
+        Fixture fixture = Fixture.create();
+        scope(exit) fixture.close();
+        installFake(fixture);
+
+        Call first = fixture.bridge.start("work", fixture.root);
+        first.wait();
+        write(buildPath(fixture.root, marker), "");
+        Call resumed = fixture.bridge.resume(first.sessionId, "must not run", fixture.root, null, true);
+        waitUntil(delegate bool()
+        {
+            return readText(buildPath(fixture.root, "acp-calls.jsonl")).canFind("/compact");
+        });
+        if (marker == "hang-compact")
+            resumed.stop();
+        else
+            resumed.wait();
+
+        resumed.status.should == (marker == "hang-compact" ? CallStatus.Stopped : CallStatus.Failed);
+        readText(buildPath(fixture.root, "acp-calls.jsonl")).canFind("must not run").should == false;
+    }
+}
