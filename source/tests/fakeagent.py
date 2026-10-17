@@ -150,7 +150,7 @@ def on_prompt(request_id, params):
         update(session_id, "AUTONOM_READY")
         finish(request_id, session_id)
         return
-    if text == "permission":
+    if text in ("permission", "cancel-permission"):
         request_key = "fake-permission-%d" % request_id if isinstance(request_id, int) \
             else "fake-permission"
         permitted[json.dumps(request_key)] = (request_id, session_id)
@@ -162,6 +162,9 @@ def on_prompt(request_id, params):
                                       "name": "Approve"},
                                      {"optionId": "reject_once", "kind": "reject_once",
                                       "name": "Reject"}]}})
+        if text == "cancel-permission":
+            send({"jsonrpc": "2.0", "method": "$/cancel_request",
+                  "params": {"requestId": request_key}, "_meta": {"extension": True}})
         return
     if text == "probe-unknown":
         request_key = "fake-probe"
@@ -290,6 +293,12 @@ def acp_main():
                 send_result(key, {"sessionId": session_id, "stopReason": "cancelled"})
             pending.clear()
             timers.clear()
+        elif method == "$/cancel_request":
+            identity = params.get("requestId")
+            if identity in pending:
+                if identity in timers:
+                    timers.pop(identity).cancel()
+                finish(identity, pending.pop(identity), "cancelled")
         elif method == "session/set_config_option":
             record_call({"method": "session/set_config_option",
                          "sessionId": params.get("sessionId"),

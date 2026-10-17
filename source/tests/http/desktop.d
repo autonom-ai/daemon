@@ -80,6 +80,8 @@ unittest
     request(path, 200, decision.toString());
     request(path, 409, decision.toString());
     waitUntil(delegate bool() { return !find(null, JSONValue("autonom:1")).isNull; });
+    waitUntil(delegate bool() { return !find("$/cancel_request").isNull; });
+    find("$/cancel_request")["params"]["requestId"].should == native["id"];
     // A late native answer must not be forwarded or matched to another request.
     send(JSONValue([
         "jsonrpc": JSONValue("2.0"), "id": native["id"],
@@ -89,8 +91,28 @@ unittest
     ]));
     request(path).array.length.should == 0;
 
-    send(parseJSON(`{"jsonrpc":"2.0","id":"native","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"permission"}]}}`));
     JSONValue previous = native["id"];
+    send(parseJSON(`{"jsonrpc":"2.0","id":"backend-cancel","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"cancel-permission"}]}}`));
+    waitUntil(delegate bool()
+    {
+        native = find("session/request_permission");
+        return native["id"] != previous && find("$/cancel_request")["params"]["requestId"] == native["id"];
+    });
+    find("$/cancel_request")["_meta"]["extension"].boolean.should == true;
+    send(JSONValue([
+        "jsonrpc": JSONValue("2.0"),
+        "id": native["id"],
+        "result": JSONValue(["outcome": JSONValue(["outcome": JSONValue("cancelled")])])
+    ]));
+    waitUntil(delegate bool() { return !find(null, JSONValue("backend-cancel")).isNull; });
+
+    send(parseJSON(`{"jsonrpc":"2.0","id":"peer-cancel","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"hang"}]}}`));
+    send(parseJSON(`{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":"peer-cancel"}}`));
+    waitUntil(delegate bool() { return !find(null, JSONValue("peer-cancel")).isNull; });
+    find(null, JSONValue("peer-cancel"))["result"]["stopReason"].str.should == "cancelled";
+
+    send(parseJSON(`{"jsonrpc":"2.0","id":"native","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"permission"}]}}`));
+    previous = native["id"];
     waitUntil(delegate bool()
     {
         native = find("session/request_permission");

@@ -6,7 +6,7 @@ import tests.interop.acp.common;
 
 import unit_threaded;
 
-import core.time : seconds;
+import core.time : msecs, seconds;
 import std.algorithm : canFind;
 import std.json : JSONValue;
 import std.stdio : File;
@@ -91,5 +91,47 @@ unittest
     waitUntil(delegate bool() { return agent.disconnected; });
     agent.await(exiting, 1.seconds)["stopReason"].str.should == "end_turn";
     agent.close();
+}
+
+@Name("ACP permissions clear on session cancellation, backend cancellation, and expiry")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    AcpClient agent = new AcpClient(agentCommand(), agentEnvironment(fixture), fixture.root);
+    scope(exit)
+        agent.close();
+
+    agent.request("initialize", JSONValue([
+        "protocolVersion": JSONValue(1),
+        "clientCapabilities": JSONValue.emptyObject
+    ]), 1.seconds);
+    string session = agent.request("session/new", JSONValue([
+        "cwd": JSONValue(fixture.root),
+        "mcpServers": JSONValue.emptyArray
+    ]), 1.seconds)["sessionId"].str;
+    JSONValue params = JSONValue([
+        "sessionId": JSONValue(session),
+        "prompt": JSONValue([JSONValue([
+            "type": JSONValue("text"),
+            "text": JSONValue("permission")
+        ])])
+    ]);
+    long pending = agent.send("session/prompt", params);
+    waitUntil(delegate bool() { return agent.permissions(session).array.length == 1; });
+    agent.notify("session/cancel", JSONValue(["sessionId": JSONValue(session)]));
+    agent.permissions(session).array.length.should == 0;
+    agent.await(pending, 1.seconds)["stopReason"].str.should == "end_turn";
+
+    params["prompt"][0]["text"] = JSONValue("cancel-permission");
+    agent.request("session/prompt", params, 1.seconds)["stopReason"].str.should == "end_turn";
+    agent.permissions(session).array.length.should == 0;
+
+    agent.permissionTimeout = 10.msecs;
+    params["prompt"][0]["text"] = JSONValue("permission");
+    agent.request("session/prompt", params, 1.seconds)["stopReason"].str.should == "end_turn";
+    agent.permissions(session).array.length.should == 0;
 }
 
