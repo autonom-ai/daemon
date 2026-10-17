@@ -16,6 +16,7 @@ docs/*
 !/docs/
 !/docs/COMMAND_CENTER.md
 !/docs/COMMAND_CENTER_VALIDATION.md
+!/docs/DAEMON.md
 
 # Launcher build output and dependencies.
 source/launcher/node_modules/
@@ -29,6 +30,7 @@ research/*
 !research/repo-map.md
 !research/sessions-acp.md
 !research/permissions.md
-!research/reference-style.md
 !research/verification.md
 !research/style-rules-revision.md
+!research/plan.md
+!research/disposition.md

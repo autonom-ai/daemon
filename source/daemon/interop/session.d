@@ -2,7 +2,6 @@ module daemon.interop.session;
 
 import daemon.exception;
 import daemon.interop.bridge;
-import daemon.interop.bridge;
 import daemon.interop.metadata : SessionMetadata;
 
 import std.ascii;

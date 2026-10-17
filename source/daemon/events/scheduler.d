@@ -8,7 +8,6 @@ import daemon.events.event : Event, EventStore, EventType;
 import daemon.events.schedule : Schedule, ScheduleStore;
 import daemon.interop.bridge;
 import daemon.interop.metadata : SessionMetadata;
-import daemon.interop.bridge;
 import daemon.interop.session;
 import daemon.storage;
 import core.atomic : atomicLoad, atomicStore;

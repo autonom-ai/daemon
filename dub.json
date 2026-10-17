@@ -2,9 +2,7 @@
 	"configurations": [
 		{
 			"excludedSourceFiles": [
-				"source/tests/**",
-				"source/evals/**",
-				"source/daemon/relay/**"
+				"source/tests/**"
 			],
 			"mainSourceFile": "source/daemon/app.d",
 			"name": "daemon",
@@ -20,8 +18,7 @@
 			},
 			"excludedSourceFiles": [
 				"source/daemon/app.d",
-				"source/acp.d",
-				"source/evals/**"
+				"source/acp.d"
 			],
 			"mainSourceFile": "bin/ut.d",
 			"name": "unit",
@@ -40,8 +37,7 @@
 		{
 			"excludedSourceFiles": [
 				"source/daemon/app.d",
-				"source/tests/**",
-				"source/evals/**"
+				"source/tests/**"
 			],
 			"mainSourceFile": "source/acp.d",
 			"name": "relay",
