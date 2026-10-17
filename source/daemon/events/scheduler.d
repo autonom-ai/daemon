@@ -6,7 +6,8 @@ import daemon.coord;
 import daemon.coord.stream : HECTONANOSECONDS_PER_MILLISECOND;
 import daemon.events.event : Event, EventStore, EventType;
 import daemon.events.schedule : Schedule, ScheduleStore;
-import daemon.interop.bridge;
+import daemon.interop.provider : IProvider;
+import daemon.interop.call;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.session;
 import daemon.storage;
@@ -31,7 +32,7 @@ class Scheduler
 public:
     this(
         Config configuration,
-        Bridge bridge,
+        IProvider bridge,
         ProfileStore store,
         EventStore events,
         ScheduleStore schedules
@@ -196,7 +197,7 @@ private:
     enum POLL_INTERVAL = 1.seconds;
 
     Config config;
-    Bridge bridge;
+    IProvider bridge;
     ProfileStore store;
     EventStore events;
     ScheduleStore schedules;

@@ -7,7 +7,10 @@ monitor threads; human permission waits never occupy the HTTP worker.
 
 ## Sessions and calls
 
-`Bridge` owns canonical `Session` handles. Session discovery reads the CLI's
+`daemon.interop.provider.IProvider` is the session boundary used by profiles and
+scheduling. `daemon.interop.devin.bridge.Bridge` owns canonical Devin `Session`
+handles; `interop/devin/session.d` owns their HTTP routes and transcript queries.
+Root `interop/` contains provider-neutral identity, calls, access, and protocols. Session discovery reads the CLI's
 SQLite database read-only; it does not grant control. A foreign session lock
 means loaded elsewhere, not active generation. Profiles retain assignments to
 canonical handles independently of discovery and admission.

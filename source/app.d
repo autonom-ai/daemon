@@ -28,18 +28,7 @@ import std.socket : AddressFamily, InternetAddress, Socket, SocketType;
 import std.stdio : stderr, stdout, writeln;
 import std.string : split;
 
-mixin ServerinoLoop!(
-    daemon.api,
-    daemon.agent.profile,
-    daemon.agent.store,
-    daemon.coord.api,
-    daemon.events.event,
-    daemon.events.schedule,
-    daemon.hooks,
-    daemon.policy.access,
-    daemon.interop.api,
-    daemon.interop.mcp
-);
+mixin ServerinoLoop!(daemon.api, apiModules);
 
 int main(string[] args)
 {

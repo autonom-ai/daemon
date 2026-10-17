@@ -1,6 +1,6 @@
 module daemon.interop.access;
 
-import daemon.interop.bridge;
+import daemon.interop.call;
 import daemon.interop.session;
 import daemon.storage;
 

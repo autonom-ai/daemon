@@ -1,5 +1,8 @@
-module daemon.interop.bridge;
+module daemon.interop.devin.bridge;
 
+import daemon.agent : Profile, validName;
+static import daemon.api;
+import daemon.http;
 import daemon.config : DaemonConfig = Config;
 import daemon.exception;
 import daemon.interop.devin.acp;
@@ -7,10 +10,15 @@ import daemon.interop.devin.db;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.acp : AcpClient, AcpException;
 import daemon.interop.access;
-import daemon.interop.devin.process : cliEnvironment;
+import daemon.interop.devin.process : removeSession;
 import daemon.interop.process;
-import daemon.interop.session;
+import daemon.interop.session : SessionBase = Session;
+import daemon.interop.devin.session : Session;
+import daemon.interop.provider : IProvider;
+import daemon.interop.call;
 import daemon.storage;
+
+import serverino;
 
 import core.stdc.errno : errno, EWOULDBLOCK;
 import core.sync.mutex : Mutex;
@@ -31,327 +39,7 @@ import std.process;
 import std.stdio : File;
 import std.uuid;
 
-enum STEER_LIMIT = 32;
-
-enum CallKind : string
-{
-    Start = "start",
-    Print = "print",
-    Resume = "resume",
-    Compact = "compact",
-    Remove = "remove"
-}
-
-enum CallStatus : string
-{
-    Running = "running",
-    Stopping = "stopping",
-    Succeeded = "succeeded",
-    Failed = "failed",
-    Stopped = "stopped",
-    Interrupted = "interrupted"
-}
-
-struct CallResult
-{
-    bool cancelled;
-    string error;
-    string reply;
-    JSONValue exitStatus = JSONValue(null);
-}
-
-class Call
-{
-private:
-    struct State
-    {
-        CallStatus status = CallStatus.Running;
-        string sessionId;
-        string finishedAt;
-        JSONValue exitStatus = JSONValue(null);
-        string error;
-        string reply;
-    }
-
-    const string directory;
-    const string logDirectory;
-    AcpClient _connection;
-    Mutex mutex;
-    Mutex joinMutex;
-    Thread monitor;
-    State _state;
-    bool stopRequested;
-    bool joined;
-    MonoTime deadline;
-    bool steerable;
-    size_t steerDepth;
-    string[] steering;
-    Duration _timeout = 120.seconds;
-
-    State snapshot()
-    {
-        synchronized (mutex)
-            return _state;
-    }
-
-    JSONValue record(State state)
-    {
-        return JSONValue([
-            "id": JSONValue(id),
-            "kind": JSONValue(cast(string)kind),
-            "workspace": JSONValue(workspace),
-            "model": JSONValue(model),
-            "createdAt": JSONValue(createdAt),
-            "finishedAt": state.finishedAt.length ? JSONValue(state.finishedAt) : JSONValue(null),
-            "status": JSONValue(cast(string)state.status),
-            "sessionId": state.sessionId.length ? JSONValue(state.sessionId) : JSONValue(null),
-            "exitStatus": state.exitStatus,
-            "error": state.error.length ? JSONValue(state.error) : JSONValue(null),
-            "reply": state.reply.length ? JSONValue(state.reply) : JSONValue(null),
-            "profile": JSONValue(profileName),
-            "mode": JSONValue(mode),
-            "trusted": JSONValue(trusted)
-        ]);
-    }
-
-    void appendLog()
-    {
-        if (!_state.sessionId.length || kind == CallKind.Remove)
-            return;
-
-        File log = openFile(buildPath(logDirectory, _state.sessionId~".log"), O_RDWR | O_CREAT | O_APPEND);
-        scope(exit)
-            log.close();
-
-        if (exists(outputPath))
-            log.write(readText(outputPath, 1024 * 1024));
-        if (exists(errorPath))
-            log.write(readText(errorPath, 1024 * 1024));
-
-        log.flush();
-    }
-
-    void finish(CallResult result)
-    {
-        if (result.error.length)
-        {
-            File diagnostic = openFile(errorPath, O_RDWR | O_CREAT | O_APPEND);
-            scope(exit) diagnostic.close();
-            diagnostic.write(result.error~"\n");
-        }
-        synchronized (mutex)
-        {
-            settled = MonoTime.currTime;
-            steerable = false;
-            steering = null;
-            _state.exitStatus = result.exitStatus;
-            _state.reply = result.reply;
-            _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
-            _state.error = result.error;
-            _state.status = result.cancelled || stopRequested ? CallStatus.Stopped :
-                result.error.length ? CallStatus.Failed : CallStatus.Succeeded;
-        }
-        appendLog();
-    }
-
-public:
-    const string id;
-    const CallKind kind;
-    const string workspace;
-    const string model;
-    const string createdAt;
-    string profileName;
-    string mode;
-    bool trusted;
-    MonoTime settled;
-
-    this(
-        string directory,
-        string logDirectory,
-        string id,
-        CallKind kind,
-        string workspace,
-        string model,
-        string sessionId = null,
-        string createdAt = null
-    )
-    {
-        UUID(id);
-        this.directory = directory.idup;
-        this.logDirectory = logDirectory.idup;
-        this.id = id.idup;
-        mkdirRecurse(directory);
-        mkdirRecurse(logDirectory);
-        setAttributes(directory, octal!"700");
-        setAttributes(logDirectory, octal!"700");
-        this.kind = kind;
-        this.workspace = workspace.idup;
-        this.model = model.length ? model.idup : "";
-        this.createdAt = createdAt.length ? createdAt.idup : Clock.currTime().toUTC().toISOExtString();
-        mutex = new Mutex();
-        joinMutex = new Mutex();
-        _state.sessionId = sessionId.idup;
-    }
-
-    AcpClient connection()
-    {
-        synchronized (mutex)
-            return _connection;
-    }
-
-    package(daemon.interop) void connection(AcpClient value)
-    {
-        synchronized (mutex)
-            _connection = value;
-    }
-
-    package(daemon.interop) void identify(string session)
-    {
-        Session.validateId(session);
-        synchronized (mutex)
-        {
-            if (_state.sessionId.length && _state.sessionId != session)
-                throw new Exception("Call is already bound to another session");
-
-            _state.sessionId = session.idup;
-        }
-    }
-
-    package(daemon.interop) bool stopped()
-    {
-        synchronized (mutex)
-            return stopRequested;
-    }
-
-    package(daemon.interop) Duration timeout()
-        => _timeout;
-
-    package(daemon.interop) void markSteerable(bool value = true)
-    {
-        synchronized (mutex)
-            steerable = value;
-    }
-
-    package(daemon.interop) string[] takeSteering()
-    {
-        synchronized (mutex)
-        {
-            string[] ret = steering;
-            steering = null;
-            return ret;
-        }
-    }
-
-    bool enqueueSteer(string prompt)
-    {
-        synchronized (mutex)
-        {
-            if (!steerable || stopRequested || _state.status != CallStatus.Running ||
-                steerDepth >= STEER_LIMIT)
-                return false;
-
-            steerDepth++;
-            steering ~= prompt.idup;
-            return true;
-        }
-    }
-
-    package(daemon.interop) void steerDone()
-    {
-        synchronized (mutex)
-            if (steerDepth)
-                steerDepth--;
-    }
-
-    package(daemon.interop) string[] closeSteering()
-    {
-        synchronized (mutex)
-        {
-            steerable = false;
-            string[] ret = steering;
-            steering = null;
-            return ret;
-        }
-    }
-
-    bool acceptingSteer()
-    {
-        synchronized (mutex)
-            return steerable;
-    }
-
-    MonoTime expiresAt()
-        => deadline;
-
-    CallStatus status()
-        => snapshot.status;
-
-    string sessionId()
-        => snapshot.sessionId;
-
-    string finishedAt()
-        => snapshot.finishedAt;
-
-    JSONValue exitStatus()
-        => snapshot.exitStatus;
-
-    bool running()
-        => status == CallStatus.Running || status == CallStatus.Stopping;
-
-    string outputPath() const
-        => buildPath(directory, id~".out");
-
-    string errorPath() const
-        => buildPath(directory, id~".err");
-
-    void requestStop()
-    {
-        synchronized (mutex)
-        {
-            if (_state.status != CallStatus.Running && _state.status != CallStatus.Stopping)
-                return;
-
-            stopRequested = true;
-            _state.status = CallStatus.Stopping;
-        }
-    }
-
-    void wait()
-    {
-        synchronized (joinMutex)
-        {
-            if (monitor !is null && !joined)
-            {
-                monitor.join();
-                joined = true;
-            }
-        }
-    }
-
-    void stop()
-    {
-        requestStop();
-        wait();
-    }
-
-    JSONValue toJSON()
-    {
-        State state = snapshot;
-        JSONValue ret = record(state);
-        if (state.reply.length)
-            ret["reply"] = JSONValue(state.reply);
-        else if (state.status == CallStatus.Succeeded && kind == CallKind.Print &&
-            exists(outputPath))
-            ret["reply"] = JSONValue(readText(outputPath, 1024 * 1024));
-        else
-            ret["reply"] = JSONValue(null);
-
-        return ret;
-    }
-
-}
-
-class Bridge
+class Bridge : IProvider
 {
 private:
     struct Observed
@@ -361,42 +49,16 @@ private:
         bool active;
     }
 
+    Access _access;
     Session[string] sessions;
     Call[string] executions;
-    bool[string] collected;
     bool[string] removed;
     Observed[string] observed;
     MonoTime[string] connections;
 
-    struct ExecutionRecord
-    {
-        string id;
-        string sessionId;
-        string createdAt;
-        string finishedAt;
-        string status;
-        string model;
-        string workspace;
-        string mode;
-
-        JSONValue toJSON() const
-        {
-            JSONValue ret = JSONValue.emptyObject;
-            ret["id"] = JSONValue(id);
-            ret["sessionId"] = sessionId.length ? JSONValue(sessionId) : JSONValue(null);
-            ret["createdAt"] = JSONValue(createdAt);
-            ret["finishedAt"] = finishedAt.length ? JSONValue(finishedAt) : JSONValue(null);
-            ret["status"] = JSONValue(status);
-            ret["model"] = JSONValue(model);
-            ret["workspace"] = JSONValue(workspace);
-            ret["mode"] = JSONValue(mode);
-            return ret;
-        }
-    }
-
-    ExecutionRecord[string] executionRecords;
+    JSONValue[string] executionRecords;
     string[] executionOrder;
-    enum MAX_INDEXED_EXECUTIONS = 10_000;
+    enum maxIndexedExecutions = 10_000;
 
     string executionIndexPath() const
         => buildPath(executionDir, "index.json");
@@ -420,30 +82,36 @@ private:
                     if (item.type != JSONType.object)
                         continue;
 
-                    ExecutionRecord rec;
-                    rec.id = id.idup;
-                    if ("sessionId" in item.object && item["sessionId"].type == JSONType.string)
-                        rec.sessionId = item["sessionId"].str.idup;
-                    if ("createdAt" in item.object && item["createdAt"].type == JSONType.string)
-                        rec.createdAt = item["createdAt"].str.idup;
-                    if ("finishedAt" in item.object && item["finishedAt"].type == JSONType.string)
-                        rec.finishedAt = item["finishedAt"].str.idup;
-                    if ("status" in item.object && item["status"].type == JSONType.string)
-                        rec.status = item["status"].str.idup;
-                    if ("model" in item.object && item["model"].type == JSONType.string)
-                        rec.model = item["model"].str.idup;
-                    if ("workspace" in item.object && item["workspace"].type == JSONType.string)
-                        rec.workspace = item["workspace"].str.idup;
-                    if ("mode" in item.object && item["mode"].type == JSONType.string)
-                        rec.mode = item["mode"].str.idup;
+                    JSONValue record = JSONValue.emptyObject;
+                    record["id"] = JSONValue(id.idup);
+                    foreach (field; ["sessionId", "createdAt", "finishedAt", "status", "model", "workspace", "mode"])
+                    {
+                        record[field] = field in item.object && item[field].type == JSONType.string
+                            ? JSONValue(item[field].str.idup)
+                            : JSONValue(null);
+                    }
 
-                    executionRecords[rec.id] = rec;
-                    executionOrder ~= rec.id;
+                    executionRecords[id.idup] = record;
+                    executionOrder ~= id.idup;
                 }
+            }
+
+            executionOrder.sort!((left, right) {
+                string leftTime = executionRecords[left]["createdAt"].isNull ? "" : executionRecords[left]["createdAt"].str;
+                string rightTime = executionRecords[right]["createdAt"].isNull ? "" : executionRecords[right]["createdAt"].str;
+                return leftTime == rightTime ? left < right : leftTime < rightTime;
+            });
+            while (executionOrder.length > maxIndexedExecutions)
+            {
+                executionRecords.remove(executionOrder[0]);
+                executionOrder = executionOrder[1..$];
             }
         }
         catch (Exception)
         {
+            // Transcript files remain available if the optional lookup index is damaged.
+            executionRecords = null;
+            executionOrder = null;
         }
     }
 
@@ -456,7 +124,7 @@ private:
             data["version"] = JSONValue(1);
             JSONValue execs = JSONValue.emptyObject;
             foreach (id, rec; executionRecords)
-                execs[id] = rec.toJSON();
+                execs[id] = rec;
             data["executions"] = execs;
             atomicWrite(executionIndexPath(), data.toString());
         }
@@ -467,27 +135,22 @@ private:
 
     void recordExecution(Call call)
     {
-        ExecutionRecord rec;
-        rec.id = call.id;
-        rec.sessionId = call.sessionId;
-        rec.createdAt = call.createdAt;
-        rec.finishedAt = call.finishedAt;
-        rec.status = cast(string)call.status;
-        rec.model = call.model;
-        rec.workspace = call.workspace;
-        rec.mode = call.mode;
+        JSONValue data = call.toJSON();
+        JSONValue record = JSONValue.emptyObject;
+        foreach (field; ["id", "sessionId", "createdAt", "finishedAt", "status", "model", "workspace", "mode"])
+            record[field] = data[field];
 
-        if (rec.id !in executionRecords)
+        if (call.id !in executionRecords)
         {
-            if (executionOrder.length >= MAX_INDEXED_EXECUTIONS)
+            if (executionOrder.length >= maxIndexedExecutions)
             {
                 string oldest = executionOrder[0];
                 executionOrder = executionOrder[1..$];
                 executionRecords.remove(oldest);
             }
-            executionOrder ~= rec.id;
+            executionOrder ~= call.id;
         }
-        executionRecords[rec.id] = rec;
+        executionRecords[call.id] = record;
         saveExecutionIndex();
     }
 
@@ -527,7 +190,7 @@ private:
                     if (call.stopped)
                         result.cancelled = true;
                     else
-                        result = removeProcess(call);
+                        result = removeSession(command, call);
                 }
                 else if (connection.length)
                 {
@@ -550,7 +213,7 @@ private:
     }
 
 public:
-    Access access;
+
     Duration executionTimeout = 30 * 60.seconds;
     size_t callCapacity = 128;
     Duration callSettleTimeout = 300.seconds;
@@ -572,7 +235,7 @@ public:
         callSettleTimeout = configuration.callSettleTimeout;
         maxConcurrentCalls = configuration.maxConcurrentCalls;
         controlMutex = new Mutex();
-        access = new Access(dirName(logDir));
+        _access = new Access(dirName(logDir));
         executionDir = buildPath(dirName(logDir), "executions");
         if ((exists(logDir) && isSymlink(logDir)) ||
             (exists(executionDir) && isSymlink(executionDir)))
@@ -589,8 +252,8 @@ public:
             if ((*call).sessionId.length)
                 return (*call).sessionId;
         }
-        if (ExecutionRecord* rec = id in executionRecords)
-            return rec.sessionId;
+        if (JSONValue* record = id in executionRecords)
+            return (*record)["sessionId"].isNull ? null : (*record)["sessionId"].str;
 
         return null;
     }
@@ -600,8 +263,8 @@ public:
         if (Call* call = id in executions)
             return (*call).toJSON();
 
-        if (ExecutionRecord* rec = id in executionRecords)
-            return rec.toJSON();
+        if (JSONValue* record = id in executionRecords)
+            return *record;
 
         return JSONValue(null);
     }
@@ -609,10 +272,7 @@ public:
     size_t executionCount() const
         => executions.length;
 
-    ref inout(Call[string]) callExecutions() inout
-        => executions;
-
-    Call newCall(
+    private Call newCall(
         CallKind kind,
         string directory,
         string model,
@@ -630,19 +290,16 @@ public:
         );
     }
 
-    void registerExecution(Call call)
-    {
-        executions[call.id] = call;
-        recordExecution(call);
-    }
+    override Access access()
+        => _access;
 
-    Session session(string id)
+    override Session session(string id)
     {
         Session.validateId(id);
         return resolve(id, sessionMetadata(id));
     }
 
-    Session findSession(string id)
+    override Session findSession(string id)
     {
         Session.validateId(id);
         if (id in removed)
@@ -662,9 +319,9 @@ public:
         return null;
     }
 
-    Session[] list(string directory = null, string acp = null)
+    override SessionBase[] list(string directory = null, string acp = null)
     {
-        Session[] ret;
+        SessionBase[] ret;
         bool[string] listed;
         foreach (call; executions)
         {
@@ -714,7 +371,7 @@ public:
         return ret;
     }
 
-    Call execution(string id)
+    override Call execution(string id)
     {
         Session.validateId(id);
         Call* found = id in executions;
@@ -767,7 +424,7 @@ public:
         }
     }
 
-    bool isRemoved(string id)
+    override bool isRemoved(string id)
         => (id in removed) !is null;
 
     bool observedSession(string id)
@@ -858,7 +515,7 @@ public:
         }
     }
 
-    Call[] listCalls(string directory = null)
+    override Call[] listCalls(string directory = null)
     {
         Call[] ret;
         foreach (execution; executions)
@@ -871,7 +528,7 @@ public:
         return ret;
     }
 
-    Call authenticate(string token, string id, bool bind = false)
+    override Call authenticate(string token, string id, bool bind = false)
     {
         Call ret = access.authenticate(token, id, bind);
         if (ret !is null)
@@ -880,13 +537,13 @@ public:
         return ret;
     }
 
-    string[] collect()
+    override string[] collect()
     {
         sweepObserved();
         Call[] ready;
         foreach (execution; executions)
         {
-            if (!execution.running && execution.id !in collected)
+            if (!execution.running && !execution.collected)
                 ready ~= execution;
         }
 
@@ -918,7 +575,7 @@ public:
                 }
             }
 
-            collected[execution.id] = true;
+            execution.collected = true;
         }
 
         Call[] settledCalls;
@@ -946,7 +603,6 @@ public:
             {
                 recordExecution(call);
                 executions.remove(call.id);
-                collected.remove(call.id);
             }
             else
             {
@@ -957,13 +613,13 @@ public:
         return removed.keys;
     }
 
-    void stopSessions()
+    override void stopSessions()
     {
         foreach (execution; executions)
             execution.requestStop();
     }
 
-    void close()
+    override void close()
     {
         Exception failure;
         foreach (execution; executions)
@@ -995,13 +651,6 @@ public:
     string logPath(string id) const
         => buildPath(logDir, id~".log");
 
-    File openLog(string id)
-    {
-        Session.validateId(id);
-        mkdirRecurse(logDir);
-        return openFile(logPath(id), O_RDWR | O_CREAT | O_APPEND);
-    }
-
     void removeLog(string id)
     {
         Session.validateId(id);
@@ -1010,64 +659,12 @@ public:
             std.file.remove(path);
     }
 
-    string run(string[] arguments, string directory = null, Duration timeout = 2.seconds)
-    {
-        File output = File.tmpfile();
-        File errors = File.tmpfile();
-        scope(exit)
-        {
-            output.close();
-            errors.close();
-        }
-
-        Config options = Config.newEnv | Config.retainStdout | Config.retainStderr;
-        options.preExecFunction = &createProcessGroup;
-        Pid process = spawnProcess(
-            [command]~arguments,
-            File("/dev/null", "r"),
-            output,
-            errors,
-            cliEnvironment(),
-            options,
-            directory
-        );
-        bool finished;
-        scope(failure)
-        {
-            if (!finished)
-            {
-                signal(process, SIGKILL);
-                wait(process);
-            }
-        }
-
-        MonoTime deadline = MonoTime.currTime + timeout;
-        typeof(tryWait(Pid.init)) result;
-        while (!(result = tryWait(process)).terminated)
-        {
-            if (MonoTime.currTime >= deadline)
-                throw new BackendException("CLI command timed out");
-
-            Thread.sleep(10.msecs);
-        }
-
-        finished = true;
-        if (result.status != 0)
-            throw new BackendException("CLI command failed (exit "~result.status.to!string~")");
-
-        output.rewind();
-        if (output.size > 1024 * 1024)
-            throw new Exception("CLI response is too large");
-
-        return cast(string)output.byChunk(4096).join;
-    }
-
     const string sessionLockDir;
     const string sessionDatabase;
     const string dataDir;
     const string mcpPort;
 
-    bool online(string id)
+    override bool online(string id)
     {
         Session.validateId(id);
         string path = lockPath(id);
@@ -1085,7 +682,7 @@ public:
         return result != 0;
     }
 
-    SessionMetadata sessionMetadata(string id)
+    override SessionMetadata sessionMetadata(string id)
     {
         Session.validateId(id);
         SessionMetadata ret = readSessionMetadata(sessionDatabase, id);
@@ -1110,7 +707,7 @@ public:
         return ret;
     }
 
-    Call resume(
+    override Call resume(
         string id,
         string prompt,
         string directory,
@@ -1197,7 +794,7 @@ public:
         return ret;
     }
 
-    Call start(
+    override Call start(
         string prompt,
         string directory,
         string model = null,
@@ -1254,50 +851,6 @@ private:
     string controlSocket(string connection) const
         => buildPath(dataDir, "acp", connection~".sock");
 
-    CallResult removeProcess(Call call)
-    {
-        File output = openFile(call.outputPath, O_RDWR | O_CREAT | O_APPEND);
-        File errors = openFile(call.errorPath, O_RDWR | O_CREAT | O_APPEND);
-        File input = File("/dev/null", "r");
-        scope(exit)
-        {
-            output.close();
-            errors.close();
-            input.close();
-        }
-        Config options = Config.newEnv | Config.retainStdin | Config.retainStdout | Config.retainStderr;
-        options.preExecFunction = &createProcessGroup;
-        Pid process = spawnProcess([command, "rm", "--force", "--", call.sessionId],
-            input, output, errors, cliEnvironment(), options);
-        bool reaped;
-        scope(exit)
-        {
-            if (!reaped)
-                terminate(process, 1.seconds);
-        }
-        typeof(tryWait(Pid.init)) result;
-        while (!(result = tryWait(process)).terminated)
-        {
-            if (call.stopped || MonoTime.currTime >= call.deadline ||
-                output.size > 1024 * 1024 || errors.size > 1024 * 1024)
-            {
-                result.status = terminate(process, 1.seconds);
-                result.terminated = true;
-                break;
-            }
-            Thread.sleep(10.msecs);
-        }
-        reaped = true;
-        CallResult ret;
-        ret.cancelled = call.stopped;
-        ret.exitStatus = JSONValue(result.status);
-        if (MonoTime.currTime >= call.deadline)
-            ret.error = "Session removal timed out";
-        else if (result.status != 0)
-            ret.error = "Session removal failed (exit "~result.status.to!string~")";
-        return ret;
-    }
-
     Call submit(
         CallKind kind,
         string prompt,
@@ -1336,4 +889,118 @@ private:
         launch(ret, prompt, compactFirst);
         return ret;
     }
+}
+
+@endpoint @route!"/api/print"
+void printSession(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Post]))
+        return;
+
+    Launch launch = readLaunch(request);
+    respond(output, daemon.api.bridge.print(launch.prompt, launch.directory, launch.model).toJSON(), 202);
+}
+
+@endpoint @route!"/api/acp/observe"
+void observe(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Post]))
+        return;
+
+    JSONValue data = readBody(request, 1024 * 1024);
+    string[string] required = [
+        "connection": "string",
+        "sessions": "array",
+        "closed": "boolean"
+    ];
+    foreach (name, value; data.object)
+    {
+        if (name !in required)
+            throw new InvalidInputException("Invalid observation field");
+    }
+    foreach (name, type; required)
+    {
+        if (name !in data.object)
+            throw new InvalidInputException("Missing observation field "~name);
+        if ((type == "string" && data[name].type != JSONType.string) ||
+            (type == "array" && data[name].type != JSONType.array) ||
+            (type == "boolean" && data[name].type != JSONType.true_ &&
+            data[name].type != JSONType.false_))
+            throw new InvalidInputException("Invalid observation field "~name);
+    }
+
+    try
+        UUID(data["connection"].str);
+    catch (Exception)
+        throw new InvalidInputException("Invalid connection ID");
+
+    string[] ids;
+    string[string] directories;
+    bool[string] active;
+    foreach (entry; data["sessions"].array)
+    {
+        if (entry.type != JSONType.object)
+            throw new InvalidInputException("Invalid observed session");
+        foreach (name, value; entry.object)
+        {
+            if (name != "id" && name != "directory" && name != "active")
+                throw new InvalidInputException("Invalid observed session field");
+            if ((name == "id" || name == "directory") && value.type != JSONType.string)
+                throw new InvalidInputException("Invalid observed session field");
+            if (name == "active" && value.type != JSONType.true_ && value.type != JSONType.false_)
+                throw new InvalidInputException("Invalid observed session field");
+        }
+        if ("id" !in entry.object || "directory" !in entry.object || "active" !in entry.object)
+            throw new InvalidInputException("Observed sessions require id, directory, and active");
+
+        Session.validateId(entry["id"].str);
+        if (entry["directory"].str.canFind('\0'))
+            throw new InvalidInputException("Invalid observed directory");
+
+        ids ~= entry["id"].str.idup;
+        directories[entry["id"].str.idup] = entry["directory"].str.idup;
+        active[entry["id"].str.idup] = entry["active"].boolean;
+    }
+
+    daemon.api.bridge.observeConnection(data["connection"].str, ids, directories, active, data["closed"].boolean);
+    respond(output, JSONValue(["ok": JSONValue(true)]));
+}
+
+
+@endpoint @route!"/api/acp/admit"
+void admit(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Post]))
+        return;
+
+    JSONValue data = readBody(request);
+    onlyFields(data, ["connection", "session", "token", "directory"]);
+    foreach (required; ["connection", "session", "token"])
+    {
+        if (required !in data.object || data[required].type != JSONType.string)
+            throw new InvalidInputException("Expected string connection, session, and token");
+    }
+    try
+        UUID(data["connection"].str);
+    catch (Exception)
+        throw new InvalidInputException("Invalid connection ID");
+    if (data["token"].str.length != 64)
+        throw new InvalidInputException("Invalid MCP credential");
+    foreach (character; data["token"].str)
+    {
+        if (!(character >= '0' && character <= '9') && !(character >= 'a' && character <= 'f'))
+            throw new InvalidInputException("Invalid MCP credential");
+    }
+    if ("directory" in data.object &&
+        (data["directory"].type != JSONType.string || data["directory"].str.canFind('\0')))
+        throw new InvalidInputException("Invalid directory");
+
+    daemon.api.bridge.admitObserved(data["connection"].str, data["session"].str,
+        "directory" in data.object ? data["directory"].str : null);
+    if (!daemon.api.bridge.access.admitMcp(data["token"].str, data["session"].str))
+        throw new ConflictException("MCP credential is already bound to another session");
+
+    daemon.api.bridge.access.remember(data["session"].str);
+
+    respond(output, JSONValue(["session": data["session"]]));
 }

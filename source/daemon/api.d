@@ -13,7 +13,10 @@ import daemon.exception;
 import daemon.hooks;
 import daemon.http;
 import daemon.interop.api;
-import daemon.interop.bridge;
+import daemon.interop.devin.session;
+import daemon.interop.devin.bridge : Bridge;
+static import daemon.interop.devin.bridge;
+import daemon.interop.call;
 import daemon.interop.mcp;
 import daemon.policy;
 import daemon.policy.access;
@@ -77,6 +80,8 @@ alias apiModules = AliasSeq!(
     daemon.hooks,
     daemon.policy.access,
     daemon.interop.api,
+    daemon.interop.devin.bridge,
+    daemon.interop.devin.session,
     daemon.interop.mcp
 );
 
@@ -183,7 +188,6 @@ void authorize(Request request, Output output)
 @endpoint @priority(100)
 void refresh(Request request)
 {
-    bridge.sweepObserved();
     foreach (id; bridge.collect())
         profileStore.unlinkSession(id);
     foreach (execution; bridge.listCalls())

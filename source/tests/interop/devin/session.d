@@ -1,9 +1,10 @@
-module tests.interop.session;
+module tests.interop.devin.session;
 
 import daemon.agent;
 import daemon.config : Config;
 import daemon.interop;
-import daemon.interop.api : removeSessions;
+import daemon.interop.devin.bridge : Bridge;
+import daemon.interop.devin.session : removeSessions;
 import daemon.interop.session;
 import tests.common;
 import tests.http.common;
@@ -333,8 +334,7 @@ unittest
 
     installFake(fixture);
 
-    Call runningCall = fixture.bridge.newCall(CallKind.Start, fixture.root, "SWE-2");
-    fixture.bridge.registerExecution(runningCall);
+    Call runningCall = fixture.bridge.start("hang", fixture.root, "SWE-2");
 
     Call[] settled;
     foreach (i; 0 .. 130)
