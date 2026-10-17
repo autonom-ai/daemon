@@ -2,12 +2,17 @@ import contextlib
 import io
 import json
 import os
+from pathlib import Path
+import socket
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
+import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "daemon", "interop", "devin"))
 
@@ -152,13 +157,55 @@ class CoordinationTests(unittest.TestCase):
                  patch.object(hook, "call", side_effect=server.ToolError("unreachable")):
                 self.assertEqual(self.run_hook(data)["decision"], "block")
 
-    def test_permission_approval_waits_outside_the_request_worker(self):
-        responses = [{"permission": "permission-id"}, {"decision": ""}, {"decision": "approve"}]
-        with patch.dict(os.environ, {"AUTONOM_RUN_TOKEN": "private"}), \
-             patch.object(hook, "call", side_effect=responses), patch.object(hook.time, "sleep"):
-            result = hook.forward({"session_id": "managed"}, "PermissionRequest")
-            self.assertEqual(result["decision"], "approve")
-            self.assertEqual(server.SESSION_CONTEXT.get(), "")
+    def test_permission_hook_defers_to_acp_without_polling(self):
+        executable = Path(__file__).resolve().parents[2] / "bin" / "autonom-daemon"
+        with tempfile.TemporaryDirectory() as directory, socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+            listener.close()
+            config = Path(directory) / "config.yml"
+            config.write_text("dataDir: data\ndevinCommand: devin\nrouter:\n"
+                              "  type: openrouter\n  key: unused\n"
+                              "  url: https://openrouter.ai\n  name: OpenRouter\n")
+            environment = dict(os.environ, AUTONOM_CONFIG=str(config), AUTONOM_PORT=str(port))
+            with tempfile.TemporaryFile() as output:
+                daemon = subprocess.Popen([str(executable)], env=environment,
+                                          stdout=output, stderr=output)
+                try:
+                    deadline = time.monotonic() + 10
+                    while time.monotonic() < deadline:
+                        try:
+                            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1):
+                                break
+                        except OSError:
+                            if daemon.poll() is not None:
+                                self.fail("Production daemon exited before the hook test")
+                            time.sleep(0.01)
+                    else:
+                        self.fail("Production daemon did not become ready")
+
+                    token = "a" * 64
+                    capability = (Path(directory) / "data" / "client.token").read_text().strip()
+                    admission = urllib.request.Request(
+                        f"http://127.0.0.1:{port}/api/acp/admit",
+                        data=json.dumps({"connection": "00000000-0000-0000-0000-000000000001",
+                                         "session": "managed", "token": token}).encode(),
+                        headers={"content-type": "application/json", "x-autonom-client": capability})
+                    with urllib.request.urlopen(admission, timeout=2) as response:
+                        self.assertEqual(response.status, 200)
+                    with patch.dict(os.environ, {"AUTONOM_DATA_DIR": str(Path(directory) / "data"),
+                                                 "AUTONOM_PORT": str(port)}, clear=True):
+                        result = hook.forward({"hook_event_name": "PermissionRequest",
+                                               "session_id": "managed"}, "PermissionRequest")
+                    self.assertEqual(result, {})
+                    self.assertEqual(server.SESSION_CONTEXT.get(), "")
+                finally:
+                    daemon.terminate()
+                    try:
+                        daemon.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        daemon.kill()
+                        daemon.wait()
 
     def test_argument_validation_returns_mcp_errors(self):
         self.assertTrue(server.call_tool("get_profiles", [])["isError"])
