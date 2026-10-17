@@ -1,10 +1,11 @@
 module daemon.policy.access;
 
+import daemon.api : policy;
 import daemon.config;
 import daemon.exception;
-import daemon.policy.rule;
 import daemon.http : acceptMethod, onlyFields, readBody, respond, respondError;
-import daemon.api : policy;
+import daemon.policy.rule;
+
 import intuit.response.decision;
 import intuit.router : IRouter, decisions;
 import serverino;
@@ -13,8 +14,6 @@ import core.time : MonoTime, seconds;
 import std.algorithm.searching : canFind;
 import std.file : isDir;
 import std.json : JSONType, JSONValue;
-
-public:
 
 @endpoint @route!"/api/policy"
 void inspectPolicy(Request request, Output output)
@@ -75,8 +74,8 @@ private:
 
     bool screen(PolicyRule rule, string tool, JSONValue input)
     {
-        enum TIMEOUT = 8.seconds;
-        MonoTime deadline = MonoTime.currTime + TIMEOUT;
+        enum timeout = 8.seconds;
+        MonoTime deadline = MonoTime.currTime + timeout;
         JSONValue state = JSONValue.emptyObject;
         state["tool"] = JSONValue(tool);
         state["input"] = input;
@@ -144,11 +143,13 @@ public:
                 "questions": JSONValue.emptyArray
             ]);
             foreach (question; rule.questions)
+            {
                 entry["questions"].array ~= JSONValue([
                     "type": JSONValue("predicate"),
                     "name": JSONValue(question.name),
                     "instructions": JSONValue(question.instructions)
                 ]);
+            }
 
             ret.array ~= entry;
         }

@@ -16,7 +16,7 @@ import std.path : buildPath;
 import std.stdio : File;
 import std.uuid : UUID;
 
-enum STEER_LIMIT = 32;
+enum steerLimit = 32;
 
 enum CallKind : string
 {
@@ -73,76 +73,7 @@ private:
     string[] steering;
     package(daemon.interop) Duration _timeout = 120.seconds;
 
-package(daemon.interop):
-    bool collected;
-
-private:
-
-    State snapshot()
-    {
-        synchronized (mutex)
-            return _state;
-    }
-
-    JSONValue record(State state)
-    {
-        return JSONValue([
-            "id": JSONValue(id),
-            "kind": JSONValue(cast(string)kind),
-            "workspace": JSONValue(workspace),
-            "model": JSONValue(model),
-            "createdAt": JSONValue(createdAt),
-            "finishedAt": state.finishedAt.length ? JSONValue(state.finishedAt) : JSONValue(null),
-            "status": JSONValue(cast(string)state.status),
-            "sessionId": state.sessionId.length ? JSONValue(state.sessionId) : JSONValue(null),
-            "exitStatus": state.exitStatus,
-            "error": state.error.length ? JSONValue(state.error) : JSONValue(null),
-            "reply": state.reply.length ? JSONValue(state.reply) : JSONValue(null),
-            "profile": JSONValue(profileName),
-            "mode": JSONValue(mode),
-            "trusted": JSONValue(trusted)
-        ]);
-    }
-
-    void appendLog()
-    {
-        if (!_state.sessionId.length || kind == CallKind.Remove)
-            return;
-
-        File log = openFile(buildPath(logDirectory, _state.sessionId~".log"), O_RDWR | O_CREAT | O_APPEND);
-        scope(exit)
-            log.close();
-
-        if (exists(outputPath))
-            log.write(readText(outputPath, 1024 * 1024));
-        if (exists(errorPath))
-            log.write(readText(errorPath, 1024 * 1024));
-
-        log.flush();
-    }
-
-    package(daemon.interop) void finish(CallResult result)
-    {
-        if (result.error.length)
-        {
-            File diagnostic = openFile(errorPath, O_RDWR | O_CREAT | O_APPEND);
-            scope(exit) diagnostic.close();
-            diagnostic.write(result.error~"\n");
-        }
-        synchronized (mutex)
-        {
-            settled = MonoTime.currTime;
-            steerable = false;
-            steering = null;
-            _state.exitStatus = result.exitStatus;
-            _state.reply = result.reply;
-            _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
-            _state.error = result.error;
-            _state.status = result.cancelled || stopRequested ? CallStatus.Stopped :
-                result.error.length ? CallStatus.Failed : CallStatus.Succeeded;
-        }
-        appendLog();
-    }
+    package(daemon.interop) bool collected;
 
 public:
     const string id;
@@ -237,7 +168,7 @@ public:
         synchronized (mutex)
         {
             if (!steerable || stopRequested || _state.status != CallStatus.Running ||
-                steerDepth >= STEER_LIMIT)
+                steerDepth >= steerLimit)
                 return false;
 
             steerDepth++;
@@ -249,8 +180,10 @@ public:
     package(daemon.interop) void steerDone()
     {
         synchronized (mutex)
+        {
             if (steerDepth)
                 steerDepth--;
+        }
     }
 
     package(daemon.interop) string[] closeSteering()
@@ -339,4 +272,73 @@ public:
         return ret;
     }
 
+
+private:
+    State snapshot()
+    {
+        synchronized (mutex)
+            return _state;
+    }
+
+    JSONValue record(State state)
+    {
+        return JSONValue([
+            "id": JSONValue(id),
+            "kind": JSONValue(cast(string)kind),
+            "workspace": JSONValue(workspace),
+            "model": JSONValue(model),
+            "createdAt": JSONValue(createdAt),
+            "finishedAt": state.finishedAt.length ? JSONValue(state.finishedAt) : JSONValue(null),
+            "status": JSONValue(cast(string)state.status),
+            "sessionId": state.sessionId.length ? JSONValue(state.sessionId) : JSONValue(null),
+            "exitStatus": state.exitStatus,
+            "error": state.error.length ? JSONValue(state.error) : JSONValue(null),
+            "reply": state.reply.length ? JSONValue(state.reply) : JSONValue(null),
+            "profile": JSONValue(profileName),
+            "mode": JSONValue(mode),
+            "trusted": JSONValue(trusted)
+        ]);
+    }
+
+    void appendLog()
+    {
+        if (!_state.sessionId.length || kind == CallKind.Remove)
+            return;
+
+        File log = openFile(buildPath(logDirectory, _state.sessionId~".log"), O_RDWR | O_CREAT | O_APPEND);
+        scope(exit)
+            log.close();
+
+        if (exists(outputPath))
+            log.write(readText(outputPath, 1024 * 1024));
+        if (exists(errorPath))
+            log.write(readText(errorPath, 1024 * 1024));
+
+        log.flush();
+    }
+
+    package(daemon.interop) void finish(CallResult result)
+    {
+        if (result.error.length)
+        {
+            File diagnostic = openFile(errorPath, O_RDWR | O_CREAT | O_APPEND);
+            scope(exit)
+                diagnostic.close();
+            diagnostic.write(result.error~"\n");
+        }
+        synchronized (mutex)
+        {
+            settled = MonoTime.currTime;
+            steerable = false;
+            steering = null;
+            _state.exitStatus = result.exitStatus;
+            _state.reply = result.reply;
+            _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
+            _state.error = result.error;
+            _state.status = result.cancelled || stopRequested
+                ? CallStatus.Stopped
+                : result.error.length ? CallStatus.Failed : CallStatus.Succeeded;
+        }
+        appendLog();
+    }
 }

@@ -35,4 +35,3 @@ void stopCall(Request request, Output output)
     execution.requestStop();
     respond(output, execution.toJSON(), 202);
 }
-

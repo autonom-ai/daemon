@@ -1,8 +1,9 @@
 module daemon.http;
 
 import daemon.agent;
-import daemon.exception;
 import daemon.api;
+import daemon.exception;
+
 import serverino;
 
 import std.algorithm : canFind, endsWith, startsWith;
@@ -11,9 +12,7 @@ import std.conv : to;
 import std.json : JSONValue, JSONType, parseJSON;
 import std.string : indexOf, toUpper;
 
-package(daemon):
-
-void respond(Output output, JSONValue body, ushort status = 200)
+package(daemon) void respond(Output output, JSONValue body, ushort status = 200)
 {
     output.status = status;
     output.addHeader("content-type", "application/json");
@@ -21,12 +20,12 @@ void respond(Output output, JSONValue body, ushort status = 200)
     output ~= body.toString();
 }
 
-void respondError(Output output, ushort status, string message)
+package(daemon) void respondError(Output output, ushort status, string message)
 {
     respond(output, JSONValue(["error": JSONValue(message)]), status);
 }
 
-bool acceptMethod(Request request, Output output, Request.Method[] methods)
+package(daemon) bool acceptMethod(Request request, Output output, Request.Method[] methods)
 {
     if (methods.canFind(request.method))
         return true;
@@ -40,28 +39,28 @@ bool acceptMethod(Request request, Output output, Request.Method[] methods)
     return false;
 }
 
-string routeParameter(string PATTERN)(const Request request)
+package(daemon) string routeParameter(string pattern)(const Request request)
 {
-    enum START = PATTERN.indexOf('<');
-    enum END = PATTERN.indexOf('>');
-    static assert(START >= 0 && END > START && PATTERN[END + 1..$].indexOf('<') < 0);
-    enum PREFIX = PATTERN[0..START];
-    enum SUFFIX = PATTERN[END + 1..$];
-    if (!request.path.startsWith(PREFIX) || !request.path.endsWith(SUFFIX) ||
-        request.path.length <= PREFIX.length + SUFFIX.length)
+    enum startIndex = pattern.indexOf('<');
+    enum endIndex = pattern.indexOf('>');
+    static assert(startIndex >= 0 && endIndex > startIndex && pattern[endIndex + 1..$].indexOf('<') < 0);
+    enum pathPrefix = pattern[0..startIndex];
+    enum pathSuffix = pattern[endIndex + 1..$];
+    if (!request.path.startsWith(pathPrefix) || !request.path.endsWith(pathSuffix) ||
+        request.path.length <= pathPrefix.length + pathSuffix.length)
         return null;
 
-    string ret = request.path[PREFIX.length..$-SUFFIX.length];
+    string ret = request.path[pathPrefix.length..$-pathSuffix.length];
     return ret.canFind('/') ? null : ret;
 }
 
-bool matchesPath(string PATTERN)(const Request request)
-    => routeParameter!PATTERN(request).length != 0;
+package(daemon) bool matchesPath(string pattern)(const Request request)
+    => routeParameter!pattern(request).length != 0;
 
-JSONValue readBody(Request request, size_t limit = 64 * 1024)
+package(daemon) JSONValue readBody(Request request, size_t limit = 64 * 1024)
 {
-    enum MIME = "application/json";
-    if (request.body.contentType != MIME && !request.body.contentType.startsWith(MIME~";"))
+    enum jsonMime = "application/json";
+    if (request.body.contentType != jsonMime && !request.body.contentType.startsWith(jsonMime~";"))
         throw new InvalidInputException("Expected application/json");
     if (request.body.data.length > limit)
         throw new InvalidInputException("Request body is too large");
@@ -78,7 +77,7 @@ JSONValue readBody(Request request, size_t limit = 64 * 1024)
     return ret;
 }
 
-struct Launch
+package(daemon) struct Launch
 {
     string prompt;
     string directory;
@@ -88,7 +87,7 @@ struct Launch
     bool trusted;
 }
 
-Launch readLaunch(Request request)
+package(daemon) Launch readLaunch(Request request)
 {
     JSONValue data = readBody(request);
     if ("prompt" !in data.object || "directory" !in data.object)
@@ -129,18 +128,18 @@ Launch readLaunch(Request request)
     return ret;
 }
 
-string readField(string FIELD)(Request request)
+package(daemon) string readField(string field)(Request request)
 {
     JSONValue data = readBody(request);
-    if (data.object.length != 1 || FIELD !in data.object)
-        throw new InvalidInputException("Expected only the "~FIELD~" field");
-    if (data[FIELD].type != JSONType.string)
-        throw new InvalidInputException(FIELD~" must be a string");
+    if (data.object.length != 1 || field !in data.object)
+        throw new InvalidInputException("Expected only the "~field~" field");
+    if (data[field].type != JSONType.string)
+        throw new InvalidInputException(field~" must be a string");
 
-    return data[FIELD].str;
+    return data[field].str;
 }
 
-void onlyFields(JSONValue data, string[] fields)
+package(daemon) void onlyFields(JSONValue data, string[] fields)
 {
     foreach (name; data.object.keys)
     {
@@ -149,7 +148,7 @@ void onlyFields(JSONValue data, string[] fields)
     }
 }
 
-Profile caller(Request request)
+package(daemon) Profile caller(Request request)
 {
     string session = request.get.read("session");
     bool human = bridge.access.client(request.header.read("x-autonom-client"));
@@ -171,7 +170,7 @@ Profile caller(Request request)
     if (!session.length)
     {
         if (human)
-            return profileStore.get(HUMAN_NAME);
+            return profileStore.get(humanName);
 
         throw new InvalidInputException("A session is required");
     }

@@ -1,21 +1,17 @@
 module tests.http.sessions;
 
-import tests.http.common;
 import tests.common;
+import tests.http.common;
+
 import unit_threaded : Name, Serial, should;
 
-import core.sys.linux.sys.file : flock, LOCK_EX;
-import core.thread : Thread;
-import core.time : Duration, msecs, seconds;
-import std.algorithm : canFind;
-import std.array : join, replace, replicate;
-import std.conv : octal, to;
-import std.file : exists, getcwd, mkdirRecurse, readText, setAttributes, write;
-import std.json : JSONValue, parseJSON;
-import std.net.curl : CurlException, HTTP;
+import std.array : replicate;
+import std.conv : to;
+import std.file : exists, mkdirRecurse, readText, write;
+import std.json : JSONValue;
+import std.net.curl : HTTP;
 import std.path : buildPath;
 import std.process;
-import std.stdio : File, stdin;
 
 @Name("Refresh does not rebind a profile to an earlier daemon-launched session") @Serial
 unittest

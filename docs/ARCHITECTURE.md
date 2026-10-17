@@ -9,7 +9,8 @@ monitor threads; human permission waits never occupy the HTTP worker.
 
 `daemon.interop.provider.IProvider` is the session boundary used by profiles and
 scheduling. `daemon.interop.devin.bridge.Bridge` owns canonical Devin `Session`
-handles; `interop/devin/session.d` owns their HTTP routes and transcript queries.
+handles; `interop/devin/session/` owns their controls, HTTP routes, permissions,
+and transcript queries.
 Root `interop/` contains provider-neutral identity, calls, access, and protocols. Session discovery reads the CLI's
 SQLite database read-only; it does not grant control. A foreign session lock
 means loaded elsewhere, not active generation. Profiles retain assignments to
@@ -95,7 +96,7 @@ Coordination rooms and DM streams (`daemon.coord.stream.Stream`) enforce a stric
 
 ### Deterministic LRU call eviction
 
-Child execution tickets in `Bridge` (`daemon.interop.bridge`) are collected deterministically:
+Child execution tickets in `Bridge` (`daemon.interop.devin.bridge`) are collected deterministically:
 - Settled calls (`!call.running`) are sorted by their settlement timestamp (`call.settled` `MonoTime`).
 - When total tracked executions exceed `callCapacity` (default: 128) or when a call has been settled longer than `callSettleTimeout` (default: 300 seconds), oldest settled calls are evicted from memory first.
 - **Invariant**: Running calls (`call.running`) are NEVER evicted under any circumstances, even when capacity is exceeded.

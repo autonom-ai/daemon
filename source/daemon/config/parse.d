@@ -87,13 +87,13 @@ size_t readPositiveInteger(YamlAlgebraic value, string name)
         try
             integer = value.get!string.strip.to!long;
         catch (Exception)
-            throw new Exception(name ~ " must be a positive integer");
+            throw new Exception(name~" must be a positive integer");
     }
     else
-        throw new Exception(name ~ " must be a positive integer");
+        throw new Exception(name~" must be a positive integer");
 
     if (integer < 1)
-        throw new Exception(name ~ " must be a positive integer");
+        throw new Exception(name~" must be a positive integer");
 
     return cast(size_t)integer;
 }
@@ -104,35 +104,63 @@ size_t readByteSize(YamlAlgebraic value, string name)
     {
         long bytes = value.get!long;
         if (bytes < 1)
-            throw new Exception(name ~ " must be a positive byte size");
+            throw new Exception(name~" must be a positive byte size");
 
         return cast(size_t)bytes;
     }
     if (value.kind != YamlAlgebraic.Kind.string)
-        throw new Exception(name ~ " must be a byte size such as 4MB or 16MiB");
+        throw new Exception(name~" must be a byte size such as 4MB or 16MiB");
 
     string text = value.get!string.strip;
     if (!text.length)
-        throw new Exception(name ~ " must not be empty");
+        throw new Exception(name~" must not be empty");
 
     size_t scale = 1;
     string digits = text;
-    if (text.endsWith("GiB") || text.endsWith("gib")) { scale = 1024 * 1024 * 1024; digits = text[0..$-3].strip; }
-    else if (text.endsWith("GB") || text.endsWith("gb")) { scale = 1000 * 1000 * 1000; digits = text[0..$-2].strip; }
-    else if (text.endsWith("MiB") || text.endsWith("mib")) { scale = 1024 * 1024; digits = text[0..$-3].strip; }
-    else if (text.endsWith("MB") || text.endsWith("mb")) { scale = 1000 * 1000; digits = text[0..$-2].strip; }
-    else if (text.endsWith("KiB") || text.endsWith("kib")) { scale = 1024; digits = text[0..$-3].strip; }
-    else if (text.endsWith("KB") || text.endsWith("kb")) { scale = 1000; digits = text[0..$-2].strip; }
-    else if (text.endsWith("B") || text.endsWith("b")) { scale = 1; digits = text[0..$-1].strip; }
+    if (text.endsWith("GiB") || text.endsWith("gib"))
+    {
+        scale = 1024 * 1024 * 1024;
+        digits = text[0..$-3].strip;
+    }
+    else if (text.endsWith("GB") || text.endsWith("gb"))
+    {
+        scale = 1000 * 1000 * 1000;
+        digits = text[0..$-2].strip;
+    }
+    else if (text.endsWith("MiB") || text.endsWith("mib"))
+    {
+        scale = 1024 * 1024;
+        digits = text[0..$-3].strip;
+    }
+    else if (text.endsWith("MB") || text.endsWith("mb"))
+    {
+        scale = 1000 * 1000;
+        digits = text[0..$-2].strip;
+    }
+    else if (text.endsWith("KiB") || text.endsWith("kib"))
+    {
+        scale = 1024;
+        digits = text[0..$-3].strip;
+    }
+    else if (text.endsWith("KB") || text.endsWith("kb"))
+    {
+        scale = 1000;
+        digits = text[0..$-2].strip;
+    }
+    else if (text.endsWith("B") || text.endsWith("b"))
+    {
+        scale = 1;
+        digits = text[0..$-1].strip;
+    }
 
     long val;
     try
         val = digits.to!long;
     catch (Exception)
-        throw new Exception(name ~ " must be a byte size such as 4MiB or 16MB");
+        throw new Exception(name~" must be a byte size such as 4MiB or 16MB");
 
     if (val < 1)
-        throw new Exception(name ~ " must be a positive byte size");
+        throw new Exception(name~" must be a positive byte size");
 
     return cast(size_t)(val * scale);
 }

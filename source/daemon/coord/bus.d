@@ -1,9 +1,9 @@
 module daemon.coord.bus;
 
 import daemon.agent;
+import daemon.config;
 import daemon.coord.room;
 import daemon.coord.stream;
-import daemon.config;
 import daemon.exception;
 import daemon.storage;
 
@@ -13,12 +13,10 @@ import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath;
 import std.string : strip, toLower;
 
-public:
-
-enum MESSAGES_FILE = "messages.jsonl";
-enum DMS_FILE = "dms.jsonl";
-enum PINGS_FILE = "pings.jsonl";
-enum CURSORS_FILE = "cursors.json";
+enum messagesFile = "messages.jsonl";
+enum dmsFile = "dms.jsonl";
+enum pingsFile = "pings.jsonl";
+enum cursorsFile = "cursors.json";
 
 string canonicalRoomName(string name)
 {
@@ -44,7 +42,10 @@ private:
 
 public:
     static Bus get() => instance;
-    static void set(Bus b) { instance = b; }
+    static void set(Bus bus)
+    {
+        instance = bus;
+    }
 
     string roomsDir() const
         => buildPath(directory, "rooms");
@@ -66,8 +67,8 @@ public:
         if (Stream* found = name in streams)
             return *found;
 
-        size_t maxBytes = configuration is null ? MAX_LOG_BYTES : configuration.maxStreamBytes;
-        size_t maxEntries = configuration is null ? MAX_ENTRIES : configuration.maxStreamEntries;
+        size_t maxBytes = configuration is null ? defaultMaxLogBytes : configuration.maxStreamBytes;
+        size_t maxEntries = configuration is null ? defaultMaxEntries : configuration.maxStreamEntries;
         Stream ret = new Stream(name, path, maxBytes, maxEntries);
         streams[name] = ret;
         return ret;
@@ -75,7 +76,7 @@ public:
 
     size_t[string] loadCursors(string profileName)
     {
-        string path = buildPath(inboxDir(profileName), CURSORS_FILE);
+        string path = buildPath(inboxDir(profileName), cursorsFile);
         if (!exists(path))
             return null;
 
@@ -105,7 +106,7 @@ public:
         }
 
         mkdirRecurse(inboxDir(profileName));
-        atomicWrite(buildPath(inboxDir(profileName), CURSORS_FILE), data.toString());
+        atomicWrite(buildPath(inboxDir(profileName), cursorsFile), data.toString());
     }
 
     Entry append(Stream target, Entry entry)
@@ -198,12 +199,11 @@ public:
             }
         }
 
-        cursors[HUMAN_NAME] = loadCursors(HUMAN_NAME);
+        cursors[humanName] = loadCursors(humanName);
         foreach (Profile profile; store.list())
             cursors[profile.name] = loadCursors(profile.name);
     }
 
-public:
     const string directory;
 
     this(Config configuration, ProfileStore store)
@@ -219,13 +219,13 @@ public:
     }
 
     Stream roomMessages(Room room)
-        => stream(roomStream(room.name), buildPath(room.directory, MESSAGES_FILE));
+        => stream(roomStream(room.name), buildPath(room.directory, messagesFile));
 
     Stream directMessages(string profileName)
-        => stream(dmStream(profileName), buildPath(inboxDir(profileName), DMS_FILE));
+        => stream(dmStream(profileName), buildPath(inboxDir(profileName), dmsFile));
 
     Stream pings(string profileName)
-        => stream(pingStream(profileName), buildPath(inboxDir(profileName), PINGS_FILE));
+        => stream(pingStream(profileName), buildPath(inboxDir(profileName), pingsFile));
 
     bool hasCursor(string profileName, string streamName)
     {

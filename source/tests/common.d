@@ -3,21 +3,18 @@ module tests.common;
 import daemon.agent;
 import daemon.config;
 import daemon.interop.devin.bridge : Bridge;
-import daemon.interop.call;
 
-import std.algorithm.searching : startsWith;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
-import std.conv : to;
-import std.file : mkdirRecurse, rmdirRecurse, tempDir, write;
+import std.algorithm.searching : startsWith;
+import std.conv : octal, to;
+import std.file : getcwd, setAttributes, mkdirRecurse, rmdirRecurse, tempDir, write;
 import std.json : JSONValue, parseJSON;
 import std.net.curl : HTTP;
 import std.path : buildPath;
 import std.uuid;
 
-public:
-
-enum ROUTER = "router:\n  type: openrouter\n  key: test-key\n  url: https://openrouter.ai\n  name: OpenRouter\n";
+enum routerConfig = "router:\n  type: openrouter\n  key: test-key\n  url: https://openrouter.ai\n  name: OpenRouter\n";
 string requestToken;
 string[string] hookTokens;
 
@@ -59,8 +56,7 @@ JSONValue request(
             }
         }
         catch (Exception)
-        {
-        }
+        { }
     }
 
     if (data !is null)
@@ -81,7 +77,6 @@ JSONValue request(
 
 struct Fixture
 {
-public:
     string root;
     string path;
     Config config;
@@ -98,7 +93,7 @@ public:
 
         ret.path = buildPath(ret.root, "config.yml");
         write(ret.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: "~
-            JSONValue(command).toString()~"\n"~ROUTER);
+            JSONValue(command).toString()~"\n"~routerConfig);
         ret.config = new Config(ret.path);
         ret.bridge = new Bridge(ret.config);
         ret.store = new ProfileStore(ret.config, ret.bridge);
@@ -114,8 +109,6 @@ public:
 
 void installFake(Fixture fixture)
 {
-    import std.conv : octal;
-    import std.file : getcwd, setAttributes;
 
     write(fixture.config.devinCommand, "#!/bin/sh\n"~
         `export AUTONOM_FAKE_DIR="`~fixture.root~`"`~"\n"~
@@ -124,8 +117,7 @@ void installFake(Fixture fixture)
     setAttributes(fixture.config.devinCommand, octal!"700");
 }
 
-void waitUntil(bool delegate() condition, Duration timeout = 5.seconds)
-{
+void waitUntil(bool delegate() condition, Duration timeout = 5.seconds) {
     MonoTime deadline = MonoTime.currTime + timeout;
     while (!condition())
     {

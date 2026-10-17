@@ -1,6 +1,7 @@
 module daemon.policy.rule;
 
 import daemon.storage;
+
 import intuit.response.decision;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
@@ -12,16 +13,14 @@ import std.path : buildPath;
 import std.regex : Regex, matchFirst, regex;
 import std.string : strip;
 
-package(daemon.policy):
-
-enum PolicyAction : string
+package(daemon.policy) enum PolicyAction : string
 {
     Deny = "deny",
     Allow = "allow",
     Screen = "screen"
 }
 
-struct PolicyFile
+package(daemon.policy) struct PolicyFile
 {
     PolicyRule[] rules;
 
@@ -179,7 +178,7 @@ struct PolicyFile
     }
 }
 
-struct PolicyRule
+package(daemon.policy) struct PolicyRule
 {
 private:
     Regex!char[string] patterns;

@@ -61,20 +61,17 @@ unittest
     JSONValue result;
     int code;
     string error;
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return agent.poll(prompt, result, code, error);
     });
     result["stopReason"].str.should == "end_turn";
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return agent.poll(steered, result, code, error);
     });
     result["stopReason"].str.should == "end_turn";
 
     agent.notify("session/cancel", JSONValue(["sessionId": JSONValue(session)]));
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return agent.poll(hanging, result, code, error);
     });
     result["stopReason"].str.should == "cancelled";
@@ -88,7 +85,9 @@ unittest
             "text": JSONValue("exit-after-reply")
         ])])
     ]));
-    waitUntil(delegate bool() { return agent.disconnected; });
+    waitUntil(delegate bool() {
+        return agent.disconnected;
+    });
     agent.await(exiting, 1.seconds)["stopReason"].str.should == "end_turn";
     agent.close();
 }
@@ -120,7 +119,9 @@ unittest
         ])])
     ]);
     long pending = agent.send("session/prompt", params);
-    waitUntil(delegate bool() { return agent.permissions(session).array.length == 1; });
+    waitUntil(delegate bool() {
+        return agent.permissions(session).array.length == 1;
+    });
     agent.notify("session/cancel", JSONValue(["sessionId": JSONValue(session)]));
     agent.permissions(session).array.length.should == 0;
     agent.await(pending, 1.seconds)["stopReason"].str.should == "end_turn";
@@ -134,4 +135,3 @@ unittest
     agent.request("session/prompt", params, 1.seconds)["stopReason"].str.should == "end_turn";
     agent.permissions(session).array.length.should == 0;
 }
-

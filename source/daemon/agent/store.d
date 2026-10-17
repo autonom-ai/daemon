@@ -4,12 +4,8 @@ import daemon.agent.profile;
 import daemon.config;
 import daemon.exception;
 import daemon.interop.provider : IProvider;
-import daemon.interop.call;
-import daemon.interop.session;
-import daemon.http;
-import daemon.api;
+import daemon.interop.session : Session;
 import daemon.storage;
-import serverino;
 
 import std.algorithm : sort;
 import std.ascii;
@@ -20,62 +16,13 @@ import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath;
 import std.string : toLower;
 
-public:
-
-@endpoint @route!"/api/profiles"
-void profiles(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
-        return;
-
-    if (request.method == Request.Method.Get)
-    {
-        JSONValue[] ret;
-        foreach (profile; profileStore.list())
-            ret ~= profile.toJSON();
-
-        respond(output, JSONValue(ret));
-    }
-    else
-        respond(output, profileStore.create(readField!"name"(request)).toJSON(), 201);
-}
-
-@endpoint @route!(matchesPath!"/api/profiles/<name>/session")
-void profileSession(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
-        return;
-
-    Profile profile = profileStore.get(routeParameter!"/api/profiles/<name>/session"(request));
-    if (profile is null)
-        respondError(output, 404, "Profile not found");
-    else if (request.method == Request.Method.Post)
-    {
-        string session = readField!"id"(request);
-        if (!bridge.access.client(request.header.read("x-autonom-client")) &&
-            bridge.authenticate(request.header.read("x-autonom-run"), session) is null &&
-            bridge.access.mcpSession(request.header.read("x-autonom-mcp")) != session)
-            throw new ProfileConflictException("A session can register only its own managed identity");
-
-        respond(output, profileStore.register(profile.name, session).toJSON());
-    }
-    else if (profile.session !is null)
-        respond(output, profile.session.toJSON());
-    else
-        respondError(output, 404, "Profile has no session");
-}
-
-private:
-
-string canonicalName(string name)
+private string canonicalName(string name)
 {
     if (!validName(name))
         throw new InvalidInputException("Invalid profile name");
 
     return name.toLower.idup;
 }
-
-public:
 
 bool validName(string name)
 {
@@ -107,9 +54,194 @@ private:
     string[string] bindings;
 
 public:
-    static ProfileStore get() => instance;
-    static void set(ProfileStore s) { instance = s; }
+    const string directory;
 
+    static ProfileStore get() => instance;
+
+    static void set(ProfileStore store)
+    {
+        instance = store;
+    }
+
+    this(Config configuration, IProvider bridge)
+    {
+        this.bridge = bridge;
+        human = new Profile(humanName);
+        directory = buildPath(configuration.dataDir, "agents");
+        if ((exists(configuration.dataDir) && isSymlink(configuration.dataDir)) ||
+            (exists(directory) && isSymlink(directory)))
+            throw new Exception("Profile directory must not be a symlink");
+        mkdirRecurse(directory);
+        load();
+    }
+
+    Profile[] list()
+    {
+        string[] names = profiles.keys;
+        names.sort();
+        Profile[] ret = new Profile[names.length];
+        foreach (i, name; names)
+            ret[i] = profiles[name];
+
+        return ret;
+    }
+
+    Profile get(string name)
+    {
+        name = canonicalName(name);
+        if (name == humanName)
+            return human;
+
+        Profile* found = name in profiles;
+        return found is null ? null : *found;
+    }
+
+    bool assigned(string id) const
+        => (id in assignments) !is null;
+
+    Profile profileFor(string id)
+    {
+        string* owner = id in assignments;
+        if (owner is null)
+            return null;
+
+        Profile profile = get(*owner);
+        if (profile is null)
+            throw new Exception("The linked profile no longer exists");
+
+        return profile.session is null || profile.session.id == id ? profile : null;
+    }
+
+    Profile create(string name)
+    {
+        name = canonicalName(name);
+        if (name == humanName)
+            throw new ProfileConflictException("The human profile is reserved");
+
+        if (name in profiles)
+            throw new ProfileConflictException("Profile already exists");
+
+        string path = buildPath(directory, name);
+        if (exists(path))
+            throw new Exception("Profile directory already exists");
+
+        mkdir(path);
+        bool committed;
+        scope(failure)
+        {
+            if (!committed)
+                rmdir(path);
+        }
+
+        setAttributes(path, octal!"700");
+        Profile ret = new Profile(name);
+        string[string] nextBindings = bindings.dup;
+        nextBindings[name] = null;
+        scope(exit)
+        {
+            if (committed)
+            {
+                bindings = nextBindings;
+                profiles[name] = ret;
+            }
+        }
+
+        save(assignments, nextBindings, committed);
+        return ret;
+    }
+
+    Profile register(string name, string id)
+    {
+        name = canonicalName(name);
+        if (name == humanName)
+            throw new ProfileConflictException("The human profile is reserved");
+
+        Session.validateId(id);
+        if (bridge.isRemoved(id))
+            throw new ProfileConflictException("Session was removed");
+
+        if (string* owner = id in assignments)
+        {
+            if (*owner != name)
+                throw new ProfileConflictException("Session is already linked to another profile");
+        }
+
+        Profile ret = get(name);
+        if (ret !is null && ret.session !is null && ret.session.id != id && locked(ret))
+            throw new ProfileConflictException("Profile is in use by an active session");
+
+        bool created = ret is null;
+        string path = buildPath(directory, name);
+        bool committed;
+        if (created)
+        {
+            if (exists(path))
+                throw new Exception("Profile directory already exists");
+
+            mkdir(path);
+        }
+
+        scope(failure)
+        {
+            if (created && !committed)
+                rmdir(path);
+        }
+
+        if (created)
+        {
+            setAttributes(path, octal!"700");
+            ret = new Profile(name);
+        }
+
+        Session session = bridge.session(id);
+        string[string] nextAssignments = assignments.dup;
+        string[string] nextBindings = bindings.dup;
+        nextAssignments[session.id] = name;
+        nextBindings[name] = session.id;
+        scope(exit)
+        {
+            if (committed)
+            {
+                assignments = nextAssignments;
+                bindings = nextBindings;
+                profiles[name] = ret;
+                ret.bind(session);
+            }
+        }
+
+        save(nextAssignments, nextBindings, committed);
+        return ret;
+    }
+
+    void unlinkSession(string id)
+    {
+        Session.validateId(id);
+        if (id !in assignments)
+            return;
+
+        Profile profile = profileFor(id);
+        string[string] nextAssignments = assignments.dup;
+        string[string] nextBindings = bindings.dup;
+        nextAssignments.remove(id);
+        if (profile !is null)
+            nextBindings[profile.name] = null;
+
+        bool committed;
+        scope(exit)
+        {
+            if (committed)
+            {
+                assignments = nextAssignments;
+                bindings = nextBindings;
+                if (profile !is null)
+                    profile.bind(null);
+            }
+        }
+
+        save(nextAssignments, nextBindings, committed);
+    }
+
+private:
     string statePath() const
         => buildPath(directory, "state.json");
 
@@ -226,182 +358,5 @@ public:
             data["bindings"][name] = id.length ? JSONValue(id) : JSONValue(null);
 
         atomicWrite(statePath, data.toString(), committed);
-    }
-
-public:
-    const string directory;
-
-    this(Config configuration, IProvider bridge)
-    {
-        this.bridge = bridge;
-        human = new Profile(HUMAN_NAME);
-        directory = buildPath(configuration.dataDir, "agents");
-        if ((exists(configuration.dataDir) && isSymlink(configuration.dataDir)) ||
-            (exists(directory) && isSymlink(directory)))
-            throw new Exception("Profile directory must not be a symlink");
-        mkdirRecurse(directory);
-        load();
-    }
-
-    Profile[] list()
-    {
-        string[] names = profiles.keys;
-        names.sort();
-        Profile[] ret = new Profile[names.length];
-        foreach (i, name; names)
-            ret[i] = profiles[name];
-
-        return ret;
-    }
-
-    Profile get(string name)
-    {
-        name = canonicalName(name);
-        if (name == HUMAN_NAME)
-            return human;
-
-        Profile* found = name in profiles;
-        return found is null ? null : *found;
-    }
-
-    bool assigned(string id) const
-        => (id in assignments) !is null;
-
-    Profile profileFor(string id)
-    {
-        string* owner = id in assignments;
-        if (owner is null)
-            return null;
-
-        Profile profile = get(*owner);
-        if (profile is null)
-            throw new Exception("The linked profile no longer exists");
-
-        return profile.session is null || profile.session.id == id ? profile : null;
-    }
-
-    Profile create(string name)
-    {
-        name = canonicalName(name);
-        if (name == HUMAN_NAME)
-            throw new ProfileConflictException("The human profile is reserved");
-
-        if (name in profiles)
-            throw new ProfileConflictException("Profile already exists");
-
-        string path = buildPath(directory, name);
-        if (exists(path))
-            throw new Exception("Profile directory already exists");
-
-        mkdir(path);
-        bool committed;
-        scope(failure)
-            if (!committed)
-                rmdir(path);
-
-        setAttributes(path, octal!"700");
-        Profile ret = new Profile(name);
-        string[string] nextBindings = bindings.dup;
-        nextBindings[name] = null;
-        scope(exit)
-        {
-            if (committed)
-            {
-                bindings = nextBindings;
-                profiles[name] = ret;
-            }
-        }
-
-        save(assignments, nextBindings, committed);
-        return ret;
-    }
-
-    Profile register(string name, string id)
-    {
-        name = canonicalName(name);
-        if (name == HUMAN_NAME)
-            throw new ProfileConflictException("The human profile is reserved");
-
-        Session.validateId(id);
-        if (bridge.isRemoved(id))
-            throw new ProfileConflictException("Session was removed");
-
-        if (string* owner = id in assignments)
-        {
-            if (*owner != name)
-                throw new ProfileConflictException("Session is already linked to another profile");
-        }
-
-        Profile ret = get(name);
-        if (ret !is null && ret.session !is null && ret.session.id != id && locked(ret))
-            throw new ProfileConflictException("Profile is in use by an active session");
-
-        bool created = ret is null;
-        string path = buildPath(directory, name);
-        bool committed;
-        if (created)
-        {
-            if (exists(path))
-                throw new Exception("Profile directory already exists");
-
-            mkdir(path);
-        }
-
-        scope(failure)
-            if (created && !committed)
-                rmdir(path);
-
-        if (created)
-        {
-            setAttributes(path, octal!"700");
-            ret = new Profile(name);
-        }
-
-        Session session = bridge.session(id);
-        string[string] nextAssignments = assignments.dup;
-        string[string] nextBindings = bindings.dup;
-        nextAssignments[session.id] = name;
-        nextBindings[name] = session.id;
-        scope(exit)
-        {
-            if (committed)
-            {
-                assignments = nextAssignments;
-                bindings = nextBindings;
-                profiles[name] = ret;
-                ret.bind(session);
-            }
-        }
-
-        save(nextAssignments, nextBindings, committed);
-        return ret;
-    }
-
-    void unlinkSession(string id)
-    {
-        Session.validateId(id);
-        if (id !in assignments)
-            return;
-
-        Profile profile = profileFor(id);
-        string[string] nextAssignments = assignments.dup;
-        string[string] nextBindings = bindings.dup;
-        nextAssignments.remove(id);
-        if (profile !is null)
-            nextBindings[profile.name] = null;
-
-        bool committed;
-        scope(exit)
-        {
-            if (committed)
-            {
-                assignments = nextAssignments;
-                bindings = nextBindings;
-                if (profile !is null)
-                    profile.bind(null);
-            }
-        }
-
-        save(nextAssignments, nextBindings, committed);
     }
 }

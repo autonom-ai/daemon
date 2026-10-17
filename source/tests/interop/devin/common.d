@@ -16,4 +16,3 @@ Sqlite database(Fixture fixture)
         "100, 200, 0, '[]', 3, null)", fixture.root);
     return ret;
 }
-

@@ -1,18 +1,12 @@
 module tests.http.common;
 
 import tests.common;
-import unit_threaded : Name, Serial, should;
 
-import core.sys.linux.sys.file : flock, LOCK_EX;
-import core.thread : Thread;
 import core.sync.mutex : Mutex;
-import core.time : Duration, msecs, seconds;
-import std.algorithm : canFind;
-import std.array : join, replace, replicate;
-import std.conv : octal, to;
-import std.file : exists, getcwd, mkdirRecurse, readText, setAttributes, write;
-import std.json : JSONValue, parseJSON;
-import std.net.curl : CurlException, HTTP;
+import std.array : join;
+import std.file : exists, readText, write;
+import std.json : JSONValue;
+import std.net.curl : CurlException;
 import std.path : buildPath;
 import std.process;
 import std.stdio : File, stdin;
@@ -63,7 +57,8 @@ RunningDaemon startDaemon(Fixture fixture)
     hookTokens = null;
     RunningDaemon ret;
     ret.ownsPort = true;
-    scope(failure) ret.close();
+    scope(failure)
+        ret.close();
     string path = buildPath(fixture.root, "daemon.log");
     ret.log = File(path, "w");
     ret.process = spawnProcess(
@@ -74,8 +69,7 @@ RunningDaemon startDaemon(Fixture fixture)
         ["AUTONOM_CONFIG": fixture.path, "AUTONOM_PORT": "18080"],
         Config.retainStdin | Config.retainStdout | Config.retainStderr
     );
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         if (tryWait(ret.process).terminated)
             throw new Exception(readText(path));
 
@@ -134,8 +128,7 @@ JSONValue hookSession(
         "profile": JSONValue(profile.length ? profile : "")
     ]).toString());
     string tokenPath = buildPath(fixture.root, id~".token");
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return exists(tokenPath);
     });
     hookTokens[id] = readText(tokenPath);
@@ -160,11 +153,9 @@ JSONValue waitForCall(JSONValue accepted)
 {
     string path = "/api/executions/"~accepted["id"].str;
     JSONValue ret;
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         ret = request(path);
         return ret["status"].str != "running" && ret["status"].str != "stopping";
     });
     return ret;
 }
-

@@ -4,14 +4,13 @@ import daemon.interop.devin.db;
 import daemon.interop.metadata : SessionMetadata;
 import tests.common;
 import tests.interop.devin.common : database;
+
 import arsd.sqlite;
 import unit_threaded : Name, should;
 
 import std.file : symlink;
 import std.json : JSONValue;
 import std.path : buildPath;
-
-public:
 
 @Name("Session metadata reads current title, model, mode, workspace, and timestamps from SQLite")
 unittest

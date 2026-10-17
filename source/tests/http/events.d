@@ -1,21 +1,16 @@
 module tests.http.events;
 
-import tests.http.common;
 import tests.common;
+import tests.http.common;
+
 import unit_threaded : Name, Serial, should;
 
-import core.sys.linux.sys.file : flock, LOCK_EX;
 import core.thread : Thread;
-import core.time : Duration, msecs, seconds;
-import std.algorithm : canFind;
-import std.array : join, replace, replicate;
-import std.conv : octal, to;
-import std.file : exists, getcwd, mkdirRecurse, readText, setAttributes, write;
+import core.time : msecs;
+import std.conv : to;
 import std.json : JSONValue, parseJSON;
-import std.net.curl : CurlException, HTTP;
-import std.path : buildPath;
+import std.net.curl : HTTP;
 import std.process;
-import std.stdio : File, stdin;
 
 @Name("Daemon schedules wakes and reads events") @Serial
 unittest
@@ -98,4 +93,3 @@ unittest
     fired["events"].array[0]["text"].str.should == "scheduled wake, repeats every 1s";
     request("/api/events?session=session-1")["events"].array.length.should == 0;
 }
-

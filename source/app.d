@@ -1,20 +1,11 @@
 module app;
 
 import daemon.acp;
-import daemon.agent.profile;
-import daemon.agent.store;
 import daemon.api;
-import daemon.coord.api;
-import daemon.events.event;
-import daemon.events.schedule;
-import daemon.hooks;
-import daemon.interop.api;
-import daemon.interop.mcp;
-import daemon.policy.access;
 
+import serverino.daemon : Daemon;
 import serverino;
 
-import core.sys.posix.signal : kill, SIGTERM;
 import core.thread : Thread;
 import core.time : msecs;
 import std.algorithm : canFind;
@@ -34,15 +25,11 @@ int main(string[] args)
 {
     // Serverino dynamic worker processes inherit command line arguments via SERVERINO_ARGS
     if (environment.get("SERVERINO_ARGS") !is null)
-    {
         args = (cast(string)Base64.decode(environment.get("SERVERINO_ARGS"))).split("\0");
-    }
 
     // Dynamic Serverino worker processes jump straight to worker request handling
     if (ServerinoProcess.isDynamicComponent)
-    {
         return mainServerinoLoop!OnMainThread(args);
-    }
 
     // Master / daemon process argument parsing
     string configPath;
@@ -81,8 +68,8 @@ int main(string[] args)
     if (helpWanted)
     {
         defaultGetoptPrinter(
-            "Autonom state and session API daemon.\n\n" ~
-            "Usage: autonom [options]\n\n" ~
+            "Autonom state and session API daemon.\n\n"~
+            "Usage: autonom [options]\n\n"~
             "Options:",
             helpInfo.options
         );
@@ -90,23 +77,15 @@ int main(string[] args)
     }
 
     if (configPath.length)
-    {
         environment["AUTONOM_CONFIG"] = configPath;
-    }
     if (port != 0)
-    {
         environment["AUTONOM_PORT"] = port.to!string;
-    }
     if (devinCmd.length)
-    {
         environment["AUTONOM_DEVIN"] = devinCmd;
-    }
 
     // Detect invocation as autonom-acp for backward compatibility
     if (thisExePath.baseName.canFind("acp") || environment.get("AUTONOM_ACP") == "1")
-    {
         acpMode = true;
-    }
 
     if (acpMode)
     {
@@ -116,16 +95,15 @@ int main(string[] args)
         bool portInUse = false;
         try
         {
-            auto probe = new Socket(AddressFamily.INET, SocketType.STREAM);
-            scope(exit) probe.close();
+            Socket probe = new Socket(AddressFamily.INET, SocketType.STREAM);
+            scope(exit)
+                probe.close();
             probe.blocking = true;
             probe.connect(new InternetAddress("127.0.0.1", listenPort));
             portInUse = true;
         }
         catch (Exception)
-        {
             portInUse = false;
-        }
 
         bool startedDaemon = false;
         if (!portInUse)
@@ -138,16 +116,15 @@ int main(string[] args)
             {
                 try
                 {
-                    auto probe = new Socket(AddressFamily.INET, SocketType.STREAM);
-                    scope(exit) probe.close();
+                    Socket probe = new Socket(AddressFamily.INET, SocketType.STREAM);
+                    scope(exit)
+                        probe.close();
                     probe.blocking = true;
                     probe.connect(new InternetAddress("127.0.0.1", listenPort));
                     break;
                 }
                 catch (Exception)
-                {
                     Thread.sleep(20.msecs);
-                }
             }
         }
 
@@ -158,11 +135,9 @@ int main(string[] args)
         if (startedDaemon)
         {
             try
-            {
-                import serverino.daemon : Daemon;
                 Daemon.shutdown();
-            }
-            catch (Exception) {}
+            catch (Exception)
+            { }
         }
 
         return ret;

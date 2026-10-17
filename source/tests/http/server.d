@@ -1,21 +1,19 @@
 module tests.http.server;
 
-import tests.http.common;
 import tests.common;
+import tests.http.common;
+
 import unit_threaded : Name, Serial, should;
 
-import core.sys.linux.sys.file : flock, LOCK_EX;
-import core.thread : Thread;
-import core.time : Duration, msecs, seconds;
+import core.time : Duration, msecs;
 import std.algorithm : canFind;
-import std.array : join, replace, replicate;
-import std.conv : octal, to;
-import std.file : exists, getcwd, mkdirRecurse, readText, setAttributes, write;
+import std.array : replace, replicate;
+import std.conv : to;
+import std.file : getcwd, mkdirRecurse, readText, write;
 import std.json : JSONValue, parseJSON;
-import std.net.curl : CurlException, HTTP;
+import std.net.curl : HTTP;
 import std.path : buildPath;
 import std.process;
-import std.stdio : File, stdin;
 
 @Name("Daemon hosts shared state and stops through its HTTP API") @Serial
 unittest
@@ -224,14 +222,12 @@ unittest
     request("/api/sessions/session-0/resume", 409, launch.toString());
     request("/api/profiles/agent-0/session", 409, `{"id":"replacement"}`);
     request("/api/sessions/session-0/stop", 202, "{}");
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return request("/api/sessions/session-0")["status"].str == "offline";
     });
     launch["prompt"] = JSONValue("fail");
     request("/api/sessions/session-0/resume", 200, launch.toString());
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return request("/api/sessions/session-0")["status"].str == "failed";
     });
     request("/api/profiles/agent-0/session")["exitStatus"].integer.should == 0;
@@ -291,8 +287,7 @@ unittest
     request("/api/stop", 400, `{"unexpected":true}`);
     request("/api/health")["status"].str.should == "ok";
     request("/api/stop", 202, "{}")["status"].str.should == "stopping";
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return tryWait(daemon.process).terminated;
     });
     wait(daemon.process).should == 0;
@@ -304,13 +299,13 @@ unittest
     request("/api/profiles/agent-1/session")["id"].str.should == "session-1";
     request("/api/profiles/agent-1/session")["status"].str.should == "offline";
     request("/api/stop", 202, "{}");
-    waitUntil(delegate bool()
-    {
+    waitUntil(delegate bool() {
         return tryWait(daemon.process).terminated;
     });
     wait(daemon.process).should == 0;
     foreach (event, groups; hooks.object)
+    {
         parseJSON(invokeHook(groups[0]["hooks"][0]["command"].str,
             JSONValue(["hook_event_name": JSONValue(event)]))).should == parseJSON("{}");
+    }
 }
-

@@ -1,13 +1,12 @@
 module daemon.interop.devin.db;
 
 import daemon.interop.metadata : SessionMetadata;
+
 import arsd.sqlite;
 
 import std.conv : to;
 import std.file : exists, isFile, isSymlink;
 import std.json : JSONType, JSONValue, parseJSON;
-
-public:
 
 SessionMetadata readSessionMetadata(string database, string id)
 {
@@ -146,9 +145,7 @@ JSONValue readSessionMessages(string database, string id, size_t limit = 300)
     return ret;
 }
 
-private:
-
-bool available(string database)
+private bool available(string database)
 {
     if (!database.length || !exists(database))
         return false;
