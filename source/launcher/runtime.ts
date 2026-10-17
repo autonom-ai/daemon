@@ -62,6 +62,19 @@ const ICONS: Record<Mode, { viewBox: string; line: string; fill: string }> = {
     editor: iconSet(pencilLineMarkup, pencilFillMarkup),
 };
 
+const ACP_ICON_SELECTOR = "svg, img, span[style*='mask-image']";
+const ACP_ICON_STYLE: [string, string][] = [
+    ["background-color", "currentColor"],
+    ["mask-repeat", "no-repeat"],
+    ["-webkit-mask-repeat", "no-repeat"],
+    ["mask-position", "center"],
+    ["-webkit-mask-position", "center"],
+    ["mask-size", "contain"],
+    ["-webkit-mask-size", "contain"],
+    ["mask-image", ""],
+    ["-webkit-mask-image", ""],
+];
+
 export function prepareShell(css = uiCss): any
 {
     const target = globalThis as any;
@@ -81,6 +94,7 @@ export function prepareShell(css = uiCss): any
         agent: HTMLButtonElement;
         editor: HTMLButtonElement;
     }>();
+    const acpIcons = new Set<Element>();
     let requested: "autonom" | "devin-cloud" = "autonom";
     let lease: ReturnType<typeof setTimeout> | undefined;
     let frame: ReturnType<typeof setTimeout> | undefined;
@@ -208,8 +222,53 @@ export function prepareShell(css = uiCss): any
             }
         }
 
+        renderAcpIcons();
         observer.observe(document.body, { childList: true, subtree: true, attributes: true,
             attributeFilter: ["aria-pressed"] });
+    }
+
+    function acpRegistryIcon(element: Element): string | undefined
+    {
+        const key = Object.keys(element).find((name) => name.startsWith("__reactFiber$"));
+        let fiber = key ? (element as any)[key] : null;
+        for (let index = 0; fiber && index < 16; index++, fiber = fiber.return)
+        {
+            const props = fiber.memoizedProps;
+            if (typeof props?.providerId === "string" && typeof props?.icon === "string" && props.icon.trim())
+                return props.icon.trim();
+        }
+        return undefined;
+    }
+
+    function renderAcpIcons(): void
+    {
+        for (const element of acpIcons)
+        {
+            if (element.isConnected && acpRegistryIcon(element) !== undefined)
+                continue;
+
+            const style = (element as HTMLElement).style;
+            for (const [name] of ACP_ICON_STYLE)
+                style.removeProperty(name);
+            acpIcons.delete(element);
+        }
+
+        for (const element of document.querySelectorAll(ACP_ICON_SELECTOR))
+        {
+            const icon = acpRegistryIcon(element);
+            if (icon === undefined)
+                continue;
+
+            const style = (element as HTMLElement).style;
+            const mask = `url("${icon.replace(/["\\]/g, "\\$&")}")`;
+            if (style.getPropertyValue("mask-image") !== mask)
+            {
+                for (const [name, value] of ACP_ICON_STYLE)
+                    style.setProperty(name, name.includes("mask-image") ? mask : value);
+            }
+
+            acpIcons.add(element);
+        }
     }
 
     const shell = {
@@ -252,6 +311,14 @@ export function prepareShell(css = uiCss): any
                 entry.host.remove();
             }
 
+            for (const element of acpIcons)
+            {
+                const style = (element as HTMLElement).style;
+                for (const [name] of ACP_ICON_STYLE)
+                    style.removeProperty(name);
+            }
+
+            acpIcons.clear();
             style.remove();
             if (target.__autonomShell === shell)
                 delete target.__autonomShell;

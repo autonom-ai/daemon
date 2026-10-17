@@ -11,7 +11,7 @@ const ACP_AGENT = {
     version: "0.1.0",
     description: "Devin Local with daemon-owned Autonom sessions and scheduled wakes.",
     license: "AGPL-3.0-only",
-    icon: "https://cdn.jsdelivr.net/gh/cetio/autonom@daemon/assets/icons/autonom-fill.svg",
+    icon: "https://cdn.jsdelivr.net/gh/cetio/autonom@main/assets/icons/autonom-fill.svg",
 };
 
 const ENABLED_AGENT_KEYS = ["devin.acp.enabledAgents", "windsurf.acp.enabledAgents"];
