@@ -5,6 +5,7 @@ import daemon.interop.access : Access;
 import daemon.interop.acp;
 import daemon.interop.bridge : Call, CallResult;
 import daemon.interop.mcp : injectCoord;
+import daemon.interop.devin.process : cliEnvironment;
 import daemon.interop.process;
 import daemon.storage;
 
@@ -89,7 +90,7 @@ CallResult runAcp(
     bool compactFirst = false
 )
 {
-    string[string] child = childEnvironment();
+    string[string] child = cliEnvironment();
     child.remove("AUTONOM_CLIENT_TOKEN");
     child["AUTONOM_DATA_DIR"] = dataDir;
     if (runToken.length)

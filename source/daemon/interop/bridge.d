@@ -7,6 +7,7 @@ import daemon.interop.devin.db;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.acp : AcpClient, AcpException;
 import daemon.interop.access;
+import daemon.interop.devin.process : cliEnvironment;
 import daemon.interop.process;
 import daemon.interop.session;
 import daemon.storage;
@@ -1026,7 +1027,7 @@ public:
             File("/dev/null", "r"),
             output,
             errors,
-            childEnvironment(),
+            cliEnvironment(),
             options,
             directory
         );
@@ -1267,7 +1268,7 @@ private:
         Config options = Config.newEnv | Config.retainStdin | Config.retainStdout | Config.retainStderr;
         options.preExecFunction = &createProcessGroup;
         Pid process = spawnProcess([command, "rm", "--force", "--", call.sessionId],
-            input, output, errors, childEnvironment(), options);
+            input, output, errors, cliEnvironment(), options);
         bool reaped;
         scope(exit)
         {

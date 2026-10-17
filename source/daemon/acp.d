@@ -4,7 +4,7 @@ import daemon.config : Config;
 import daemon.interop.acp.client : AcpClient, AcpException;
 import daemon.interop.acp.frames : FRAME_LIMIT, REQUEST_LIMIT;
 import daemon.interop.devin.desktop : Desktop;
-import daemon.interop.process : childEnvironment;
+import daemon.interop.devin.process : cliEnvironment;
 
 import core.atomic : atomicLoad, atomicStore;
 import core.sync.mutex : Mutex;
@@ -115,7 +115,7 @@ int runAcpHost(string devinCommand = null, string configPath = null)
     {
     }
 
-    string[string] child = childEnvironment();
+    string[string] child = cliEnvironment();
     if (data.length)
         child["AUTONOM_DATA_DIR"] = data;
 
