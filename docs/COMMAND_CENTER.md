@@ -44,9 +44,9 @@ The sidebar React context is the only source of those services, so the agent win
 
 ### Pin for Desktop 1.126.0
 
-- Product commit: `fcf7ba39e6150055fad817f8716385b4d320d46d`
+- Product commit: `0b186d6e13a1a48a46430c51fe414dd0747d46f6`
 - Native host bundle: `out/vs/workbench/workbench.desktop.main.js`
-- SHA-256: `da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d`
+- SHA-256: `302af387606888341f563bbbac96db129c821602a9fa2bd7f37313899450a6e1`
 - Build: `1.126.0`, Devin Desktop / Windsurf `3.10.48`
 
 These references point into minified private implementation details, not a supported Desktop extension API. A version, commit, hash, API-shape, or React-boundary change must fail closed and be re-researched before extending the pin. Do not replace the pin with a loose DOM heuristic.

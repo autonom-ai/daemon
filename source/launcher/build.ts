@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 export const DESKTOP_VERSION = "1.126.0";
-export const DESKTOP_COMMIT = "fcf7ba39e6150055fad817f8716385b4d320d46d";
-export const WORKBENCH_HASH = "da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d";
+export const DESKTOP_COMMIT = "0b186d6e13a1a48a46430c51fe414dd0747d46f6";
+export const WORKBENCH_HASH = "302af387606888341f563bbbac96db129c821602a9fa2bd7f37313899450a6e1";
 export const DESKTOP_MAIN = "./out/main.js";
 
 const MAX_METADATA_BYTES = 1024 * 1024;

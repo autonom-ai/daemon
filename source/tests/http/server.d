@@ -99,7 +99,7 @@ unittest
         hooks[event][0]["hooks"].array.length.should == 1;
         JSONValue hook = hooks[event][0]["hooks"][0];
         hook["type"].str.should == "command";
-        hook["timeout"].integer.should == (event == "PermissionRequest" ? 250 : 20);
+        hook["timeout"].integer.should == 20;
         hook["command"].str.canFind("hook.py").should == true;
         hooks[event][0]["hooks"][0]["command"] = JSONValue(
             hook["command"].str.replace("{{AUTONOM_ROOT}}", getcwd())
