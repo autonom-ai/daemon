@@ -32,7 +32,7 @@ unittest
     request("/api/health")["pid"].integer.should == daemon.process.processID;
     request("/api/health", 405, "{}")["error"].str.should == "Method not allowed";
 
-    JSONValue hooks = parseJSON(readText("templates/hooks.v1.json"));
+    JSONValue hooks = parseJSON(readText("devin/hooks.v1.json"));
     hooks.object.length.should == 8;
     foreach (event, path; [
         "PreToolUse": "pre-tool-use",

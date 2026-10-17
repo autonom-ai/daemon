@@ -19,7 +19,7 @@ docs/*
 !/docs/DAEMON.md
 
 # Launcher build output and dependencies.
-source/launcher/node_modules/
+devin/node_modules/
 /dist/
 
 research/*

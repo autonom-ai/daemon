@@ -23,6 +23,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: source/launcher/package-lock.json
+          cache-dependency-path: devin/package-lock.json
       - name: Check launcher
-        run: npm --prefix source/launcher ci && npm --prefix source/launcher run check
+        run: npm --prefix devin ci && npm --prefix devin run check
