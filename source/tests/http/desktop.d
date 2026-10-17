@@ -9,8 +9,9 @@ import unit_threaded;
 
 import core.thread : Thread;
 import core.time : seconds;
-import std.file : write;
+import std.file : readText, write;
 import std.json : JSONType, JSONValue, parseJSON;
+import std.net.curl : HTTP;
 import std.path : buildPath;
 import std.process;
 
@@ -107,4 +108,27 @@ unittest
     decision["id"] = native["id"];
     request(path, 409, decision.toString());
     request(path).array.length.should == 0;
+
+    string capability = readText(buildPath(fixture.config.dataDir, "mcp", "desktop-session.token"));
+    daemon.close();
+    send(parseJSON(`{"jsonrpc":"2.0","id":"offline","method":"session/prompt","params":{"sessionId":"desktop-session","prompt":[{"type":"text","text":"offline"}]}}`));
+    waitUntil(delegate bool() { return !find(null, JSONValue("offline")).isNull; }, 1.seconds);
+
+    daemon = startDaemon(fixture);
+    waitUntil(delegate bool()
+    {
+        try
+        {
+            return request("/api/mcp/session", 200, null, "application/json", HTTP.Method.undefined,
+                null, null, false, capability)["id"].str == "desktop-session";
+        }
+        catch (Exception)
+            return false;
+    }, 15.seconds);
+    readText(buildPath(fixture.config.dataDir, "mcp", "desktop-session.token")).should == capability;
+
+    relay.stdin.close();
+    waitUntil(delegate bool() { return tryWait(relay.pid).terminated; });
+    request("/api/mcp/session", 403, null, "application/json", HTTP.Method.undefined,
+        null, null, false, capability);
 }

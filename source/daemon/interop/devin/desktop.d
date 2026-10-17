@@ -4,6 +4,7 @@ import daemon.interop.acp;
 import daemon.interop.mcp : MCP_SERVER_NAME, injectCoord;
 
 import core.atomic : atomicLoad, atomicStore;
+import core.sync.condition : Condition;
 import core.sync.mutex : Mutex;
 import core.thread : Thread;
 import core.time : msecs, seconds;
@@ -21,9 +22,10 @@ public:
 class Desktop
 {
 private:
-    struct LiveSession
+    struct Instance
     {
         string directory;
+        string capability;
         size_t prompts;
     }
 
@@ -34,7 +36,9 @@ private:
     string socketPath;
     Mutex mutex;
     Mutex httpMutex;
-    LiveSession[string] sessions;
+    Condition changed;
+    bool dirty = true;
+    Instance[string] sessions;
     Socket listener;
     Thread serving;
     Thread heartbeat;
@@ -62,17 +66,41 @@ private:
         synchronized (httpMutex)
         {
             JSONValue listed = JSONValue.emptyArray;
+            Instance[string] snapshot;
             synchronized (mutex)
+                snapshot = sessions.dup;
+
+            foreach (session, instance; snapshot)
             {
-                foreach (session, live; sessions)
-                    listed.array ~= JSONValue([
-                        "id": JSONValue(session), "directory": JSONValue(live.directory),
-                        "active": JSONValue(live.prompts != 0)
-                    ]);
+                // A surviving CLI retains this capability when the daemon restarts.
+                if (!closed)
+                {
+                    post("/api/acp/admit", JSONValue([
+                        "connection": JSONValue(id),
+                        "session": JSONValue(session),
+                        "token": JSONValue(instance.capability),
+                        "directory": JSONValue(instance.directory)
+                    ]));
+                }
+
+                listed.array ~= JSONValue([
+                    "id": JSONValue(session),
+                    "directory": JSONValue(instance.directory),
+                    "active": JSONValue(instance.prompts != 0)
+                ]);
             }
             post("/api/acp/observe", JSONValue([
                 "connection": JSONValue(id), "sessions": listed, "closed": JSONValue(closed)
             ]));
+        }
+    }
+
+    void queueObservation()
+    {
+        synchronized (mutex)
+        {
+            dirty = true;
+            changed.notify();
         }
     }
 
@@ -108,7 +136,7 @@ private:
                 if (session in sessions)
                     sessions[session].prompts++;
             }
-            observe();
+            queueObservation();
         }
     }
 
@@ -122,7 +150,7 @@ private:
                 if (session in sessions && sessions[session].prompts)
                     sessions[session].prompts--;
             }
-            observe();
+            queueObservation();
             return;
         }
         if ((sent.method != "session/new" && sent.method != "session/load") || "error" in frame.value.object)
@@ -131,9 +159,9 @@ private:
         JSONValue result = frame.value["result"];
         string session = "sessionId" in result.object ? result["sessionId"].str : params["sessionId"].str;
         string directory = params["cwd"].str;
+        string issued;
         if (token.length)
         {
-            string issued;
             foreach (server; params["mcpServers"].array)
             {
                 if (server["name"].str != MCP_SERVER_NAME)
@@ -151,8 +179,9 @@ private:
                 ]));
         }
         synchronized (mutex)
-            sessions[session.idup] = LiveSession(directory.idup, 0);
-        observe();
+            sessions[session.idup] = Instance(directory.idup, issued.idup, 0);
+
+        queueObservation();
     }
 
     static void send(Socket socket, JSONValue frame)
@@ -292,6 +321,7 @@ public:
         this.socketPath = socketPath;
         mutex = new Mutex();
         httpMutex = new Mutex();
+        changed = new Condition(mutex);
         agent.outgoing = &outgoing;
         agent.beforeReply = &beforeReply;
         if (!token.length)
@@ -313,15 +343,20 @@ public:
         heartbeat = new Thread({
             while (!atomicLoad(halted))
             {
+                synchronized (mutex)
+                {
+                    if (!dirty && !atomicLoad(halted))
+                        changed.wait(10.seconds);
+
+                    dirty = false;
+                }
+
+                if (atomicLoad(halted))
+                    return;
+
                 try
                     observe();
                 catch (Exception) {}
-                foreach (_; 0..100)
-                {
-                    if (atomicLoad(halted))
-                        return;
-                    Thread.sleep(100.msecs);
-                }
             }
         });
         heartbeat.start();
@@ -330,6 +365,9 @@ public:
     void close()
     {
         atomicStore(halted, true);
+        synchronized (mutex)
+            changed.notify();
+
         if (serving !is null)
             serving.join();
         if (heartbeat !is null)
