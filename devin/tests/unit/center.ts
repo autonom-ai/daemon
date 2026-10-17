@@ -1,5 +1,5 @@
-import { loadAction, loadCenter } from "../../config";
-import type { ActionCache } from "../../config";
+import { loadAction, loadCenter } from "../../launcher/config";
+import type { ActionCache } from "../../launcher/config";
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";

@@ -6,7 +6,7 @@ import {
     type PackageLookup,
     verifyDesktopBuild,
     verifyPackageFile,
-} from "../../build";
+} from "../../launcher/build";
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

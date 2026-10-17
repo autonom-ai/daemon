@@ -1,4 +1,4 @@
-import type { CenterContent } from "../center";
+import type { CenterContent } from "../launcher/center";
 
 export type Fixture = {
     services: any;

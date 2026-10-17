@@ -3,9 +3,13 @@
     "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "rootDir": ".",
-    "outDir": "../../dist",
+    "outDir": "../dist",
     "strict": true,
     "esModuleInterop": true,
     "noUncheckedIndexedAccess": true,
@@ -15,8 +19,13 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "skipLibCheck": true
   },
-  "include": ["*.ts", "tests/**/*.ts"]
+  "include": [
+    "launcher/**/*.ts",
+    "tests/**/*.ts"
+  ]
 }

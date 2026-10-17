@@ -7,7 +7,7 @@ import {
     resolveDesktopBinary,
     verifyDesktopBuild,
     workbenchUrl,
-} from "../../desktop";
+} from "../../launcher/desktop";
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";

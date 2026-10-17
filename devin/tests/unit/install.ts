@@ -1,5 +1,5 @@
-import { DESKTOP_COMMIT, DESKTOP_MAIN, DESKTOP_VERSION } from "../../build";
-import { resolveDesktopBinary } from "../../desktop";
+import { DESKTOP_COMMIT, DESKTOP_MAIN, DESKTOP_VERSION } from "../../launcher/build";
+import { resolveDesktopBinary } from "../../launcher/desktop";
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -13,7 +13,7 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 const repository = resolve(__dirname, "../../..");
-const installer = join(repository, "install.py");
+const installer = join(repository, "devin/install.py");
 const NEVRA = "devin-desktop-3.10.67-1.el8.x86_64";
 const DISTRO = "f".repeat(64);
 const ORIGINAL_CLI = "#!/bin/sh\nprintf 'original CLI\\n'\n";
@@ -122,8 +122,8 @@ test("installation replaces the CLI entrypoint, keeps app bundles pristine, and 
         assert.match(stub.toString(), /exec .*dist\/launcher.js.* "\$@"/);
         assert.equal(resolveDesktopBinary(join(root, "bin/devin-desktop")), join(root, "devin-desktop"));
         for (const file of ["dist/launcher.js", "dist/runtime.js", "assets/ui.yml",
-            "source/launcher/cdp.mjs", "source/daemon/interop/devin/hook.py", "source/mcp/server.py",
-            "templates/hooks.v1.json", "bin/autonom-daemon", "bin/autonom-acp"])
+            "devin/launcher/cdp.mjs", "source/daemon/interop/devin/hook.py", "source/mcp/server.py",
+            "devin/hooks.v1.json", "bin/autonom-daemon", "bin/autonom-acp"])
             assert.deepEqual(await readFile(join(root, "autonom", file)), await readFile(join(repository, file)));
         await assert.rejects(readFile(join(root, "autonom/source/mcp/orchestrate.py")), { code: "ENOENT" });
         const saved = await recordOf(root);

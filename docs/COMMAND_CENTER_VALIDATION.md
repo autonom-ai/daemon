@@ -1,6 +1,6 @@
 # Command Center validation methodology
 
-This document is the acceptance procedure for the `source/launcher/` Command Center adapter. It exists because an earlier iteration failed on exactly this point: it reported success from tests that manufactured the UI state they were meant to observe. Read `docs/COMMAND_CENTER.md` first for the architecture and safety contract; this document defines how to prove behavior against a real, logged-in Devin Desktop.
+This document is the acceptance procedure for the `devin/launcher/` Command Center adapter. It exists because an earlier iteration failed on exactly this point: it reported success from tests that manufactured the UI state they were meant to observe. Read `docs/COMMAND_CENTER.md` first for the architecture and safety contract; this document defines how to prove behavior against a real, logged-in Devin Desktop.
 
 ## The one rule
 
@@ -22,7 +22,7 @@ Corollaries:
 | Live launcher run | The built launcher attaches to the installed Desktop | Nothing beyond the tested build |
 | Adversarial/negative test | The system fails closed on hostile or malformed input | Happy-path correctness |
 
-A release needs all four. Unit coverage lives in `source/launcher/tests/unit/`: `content.ts` (overlay math, page CSP), `center.ts` (schema, confinement, size caps), `runtime.ts` (overlay immutability, descriptor rollback, provider mode), `desktop.ts` (pipe framing, binary resolution, build pin), `cdp.ts` (request correlation, session scoping, capture), `config.ts` (settings and daemon YAML), `bridge.ts` (authorization and actions), `control.ts` (socket protocol).
+A release needs all four. Unit coverage lives in `devin/tests/unit/`: `content.ts` (overlay math, page CSP), `center.ts` (schema, confinement, size caps), `runtime.ts` (overlay immutability, descriptor rollback, provider mode), `desktop.ts` (pipe framing, binary resolution, build pin), `cdp.ts` (request correlation, session scoping, capture), `config.ts` (settings and daemon YAML), `bridge.ts` (authorization and actions), `control.ts` (socket protocol).
 
 ## Live acceptance procedure
 
@@ -45,15 +45,15 @@ sha256sum /usr/share/devin-desktop/resources/app/out/vs/workbench/workbench.desk
 ### 2. Build and launch
 
 ```bash
-cd source/launcher
+cd devin
 npm ci
 npm run check
 npm test
-cd ../..
+cd ..
 node dist/launcher.js /abs/path/to/workspace
 ```
 
-For installed-startup validation, run `sudo python3 install.py --no-build`, quit Desktop once, then run `devin-desktop --debug` from a terminal. The installed CLI wrapper must behave exactly like `node dist/launcher.js --debug`, without changing the logged-in profile.
+For installed-startup validation, run `sudo python3 devin/install.py --no-build`, quit Desktop once, then run `devin-desktop --debug` from a terminal. The installed CLI wrapper must behave exactly like `node dist/launcher.js --debug`, without changing the logged-in profile.
 
 The launcher verifies the build pin before spawning Desktop, starts the page bridge and control socket, launches Desktop with `--remote-debugging-pipe`, and attaches eligible workbench or sessions windows. It prints the workspace and control socket. If Desktop opens in editor mode, open the agent window (Ctrl+') and the launcher attaches within five seconds.
 
@@ -62,10 +62,10 @@ Do not copy or replace the user-data directory to get a "clean" run — test the
 ### 3. Observe through the control socket
 
 ```bash
-node source/launcher/cdp.mjs status
-node source/launcher/cdp.mjs targets
-node source/launcher/cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
-node source/launcher/cdp.mjs screenshot workbench /tmp/autonom-autonom.png
+node devin/launcher/cdp.mjs status
+node devin/launcher/cdp.mjs targets
+node devin/launcher/cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
+node devin/launcher/cdp.mjs screenshot workbench /tmp/autonom-autonom.png
 ```
 
 Assert:
@@ -76,7 +76,7 @@ Assert:
 - No extra or unexpected sidebar rows exist.
 - Default pipe mode has no DevTools listener. Explicit `--debug[=port]` mode listens only on loopback and verifies the browser PID.
 - Never click or navigate the communication window. Use a separate test window and its exact target ID through the control socket; launch Desktop with `devin-desktop --debug` to expose the loopback endpoint.
-- `node source/launcher/tests/integration/desktop.mjs <id> verify` checks repeated HTML selection, three Cloud/Editor/Autonom cycles, imported Wiki navigation, and the JS reload action.
+- `node devin/tests/integration/desktop.mjs <id> verify` checks repeated HTML selection, three Cloud/Editor/Autonom cycles, imported Wiki navigation, and the JS reload action.
 
 Capture a screenshot for each state and keep it beside the assertion output.
 
@@ -93,7 +93,7 @@ Click the on-screen toggle (not a programmatic state set) and re-assert:
 Edit a page file, then:
 
 ```bash
-node source/launcher/cdp.mjs hot
+node devin/launcher/cdp.mjs hot
 ```
 
 Confirm the new content renders in the same window. This is the rapid-iteration path and must not require a Desktop restart.
@@ -123,7 +123,7 @@ There is no integrity-suppression path. The installer does not change any checks
 ### 8. Clean up
 
 ```bash
-node source/launcher/cdp.mjs detach
+node devin/launcher/cdp.mjs detach
 ```
 
 Verify native labels and navigation return, then stop the launcher. Desktop keeps running without the Command Center overlay.
@@ -133,8 +133,8 @@ Verify native labels and navigation return, then stop the launcher. Desktop keep
 While developing the runtime bundle or the pages:
 
 ```bash
-npm --prefix source/launcher run build
-node source/launcher/cdp.mjs hot
+npm --prefix devin run build
+node devin/launcher/cdp.mjs hot
 ```
 
 `hot` re-reads the definition and the rebuilt runtime and re-installs it in place. Use it for runtime/UI changes; the full launcher restart is still required to validate the launch path itself.

@@ -1,5 +1,5 @@
 import { config, CONTENT, fixture } from "../support";
-import { install } from "../../runtime";
+import { install } from "../../launcher/runtime";
 
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";

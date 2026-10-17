@@ -4,16 +4,16 @@
   `dub build --compiler=ldc2 --config=relay`.
 - Tests: `dub run --compiler=ldc2 --config=unit --build=unittest`.
   These launch the production daemon on loopback port 18080; run serially.
-- Launcher: Node 22+, `npm --prefix source/launcher ci`, then
-  `npm --prefix source/launcher run check` and
-  `npm --prefix source/launcher test`. Output is repository-root `dist/`.
+- Launcher: Node 22+, `npm --prefix devin ci`, then
+  `npm --prefix devin run check` and
+  `npm --prefix devin test`. Output is repository-root `dist/`.
 - Real CLI integration: `dub run --compiler=ldc2 --config=unit --build=unittest
   --d-version=devin`; isolates XDG state and requires no model credentials.
-- Installed Desktop build check: `npm --prefix source/launcher run test:integration`.
+- Installed Desktop build check: `npm --prefix devin run test:integration`.
   This reads the actual installation; it does not launch Desktop or validate UI.
 - MCP: `python3 source/mcp/tests.py` (standard library only).
-- Installer: `python3 install.py`; build as the normal user. For a protected
-  installation, build first, then `sudo python3 install.py --no-build`.
+- Installer: `python3 devin/install.py`; build as the normal user. For a protected
+  installation, build first, then `sudo python3 devin/install.py --no-build`.
   Installer tests use temporary installation trees, never profile copies.
 - There is no eval configuration. Use `--skip-registry=all` with DUB when
   dependencies are already cached and network access is unavailable.
@@ -28,8 +28,8 @@
   streams, and cursors. `daemon.events`: pending events, schedules, and wakes.
 - `daemon.policy` / `daemon.hooks`: policy screening and authenticated hooks.
 - `source/mcp/server.py`: stdio JSON-RPC proxy to the daemon.
-- `source/launcher`: Desktop startup, native runtime, page bridge, and settings.
-  `assets`: configured pages. `install.py`: transactional installation.
+- `devin/launcher`: Desktop startup, native runtime, page bridge, and settings.
+  `assets`: configured pages. `devin/install.py`: transactional installation.
 
 See [daemon architecture and cutover](docs/DAEMON.md) for current lifecycle,
 HTTP, permission, and deployment contracts.
@@ -55,8 +55,7 @@ HTTP, permission, and deployment contracts.
 
 # Style and refactor
 
-Use [the adopted style revision](research/style-rules-revision.md) and
-[the simplification plan](research/plan.md). Prefer direct domain ownership,
+Use [the adopted style revision](research/style-rules-revision.md). Prefer direct domain ownership,
 small intentional APIs, and language-native code. D and TypeScript use
 four-space Allman layout, meaningful camelCase names, PascalCase types, and
 `ret` for constructed results. Group project, dependency, then runtime imports.

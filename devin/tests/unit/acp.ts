@@ -1,4 +1,4 @@
-import { ACP_AGENT_ID, acpRegistryIcons, acpRegistryPath, acpSettingsPath, ensureAcpAgent } from "../../acp";
+import { ACP_AGENT_ID, acpRegistryIcons, acpRegistryPath, acpSettingsPath, ensureAcpAgent } from "../../launcher/acp";
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

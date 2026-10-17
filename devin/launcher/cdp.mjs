@@ -2,7 +2,7 @@
 import { createConnection } from "node:net";
 import { join } from "node:path";
 
-const USAGE = `Usage: node source/launcher/cdp.mjs <command> [arguments]
+const USAGE = `Usage: node devin/launcher/cdp.mjs <command> [arguments]
 
 Talks to a running Autonom launcher over its private control socket.
 

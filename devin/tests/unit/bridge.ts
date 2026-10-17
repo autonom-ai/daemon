@@ -1,8 +1,8 @@
-import type { Bridge } from "../../bridge";
-import { startBridge } from "../../bridge";
-import type { DaemonClient } from "../../client";
-import type { LauncherSettings } from "../../config";
-import { readDaemonConfig, readSettings, saveDaemon } from "../../config";
+import type { Bridge } from "../../launcher/bridge";
+import { startBridge } from "../../launcher/bridge";
+import type { DaemonClient } from "../../launcher/client";
+import type { LauncherSettings } from "../../launcher/config";
+import { readDaemonConfig, readSettings, saveDaemon } from "../../launcher/config";
 
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";

@@ -40,7 +40,7 @@ def require_node():
 
 def verify_build(node, verifier, app):
     if not verifier.is_file():
-        raise SystemExit("The Autonom build verifier is missing. Run npm --prefix source/launcher run build.")
+        raise SystemExit("The Autonom build verifier is missing. Run npm --prefix devin run build.")
     out = subprocess.run([node, str(verifier), str(app)], capture_output=True, text=True, timeout=60)
     if out.returncode != 0:
         raise SystemExit(out.stderr.strip() or "Desktop build verification failed; no installation files changed.")
@@ -194,14 +194,14 @@ def main():
     action.add_argument("--uninstall", action="store_true")
     action.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    repository = Path(__file__).resolve().parent
+    repository = Path(__file__).resolve().parent.parent
     if not (args.no_build or args.uninstall or args.check):
         if os.geteuid() == 0:
-            raise SystemExit("Build as your normal user, then run sudo python3 install.py --no-build.")
+            raise SystemExit("Build as your normal user, then run sudo python3 devin/install.py --no-build.")
         subprocess.run(["dub", "build", "--compiler=ldc2", "--config=daemon"], cwd=repository, check=True)
         subprocess.run(["dub", "build", "--compiler=ldc2", "--config=relay"], cwd=repository, check=True)
         for command in (["ci"], ["run", "check"], ["run", "build"]):
-            subprocess.run(["npm", "--prefix", str(repository / "source/launcher"), *command], check=True)
+            subprocess.run(["npm", "--prefix", str(repository / "devin"), *command], check=True)
     app = args.app.resolve(strict=True)
     desktop = app.parent.parent
     installation = Installation(desktop)
@@ -254,9 +254,9 @@ def main():
                 print("The Desktop build changed since installation; reinstall to re-track this build.")
         elif current == tracked["originalHash"]:
             print("The vendor Devin Desktop CLI is in place; the Autonom wrapper is not active.")
-            print("An official update likely reverted it; run python3 install.py to reinstall.")
+            print("An official update likely reverted it; run python3 devin/install.py to reinstall.")
         elif genuine:
-            print("An official Desktop update replaced the CLI; run python3 install.py to reinstall.")
+            print("An official Desktop update replaced the CLI; run python3 devin/install.py to reinstall.")
         else:
             print("The Devin Desktop CLI changed outside Autonom; refusing to touch it.")
     elif args.uninstall:
@@ -311,7 +311,8 @@ def main():
         files = [
             "dist/launcher.js",
             "dist/runtime.js",
-            "source/launcher/cdp.mjs",
+            "devin/hooks.v1.json",
+            "devin/launcher/cdp.mjs",
             "source/daemon/interop/devin/hook.py",
             "source/mcp/server.py",
             "bin/autonom-daemon",
@@ -353,7 +354,7 @@ def main():
             raise
         except PermissionError:
             installation.rollback()
-            raise SystemExit("Installation is read-only. After building as your normal user, run: sudo python3 install.py --no-build")
+            raise SystemExit("Installation is read-only. After building as your normal user, run: sudo python3 devin/install.py --no-build")
         except OSError as error:
             installation.rollback()
             raise SystemExit(f"Installation failed: {error}")
@@ -362,7 +363,7 @@ def main():
             raise
         print(f"Installed Autonom launcher in {payload}.")
         print("Quit Desktop once, then run devin-desktop. Arguments and terminal output are unchanged from node dist/launcher.js.")
-        print("Rollback: python3 install.py --uninstall (use the same --app path and permissions).")
+        print("Rollback: python3 devin/install.py --uninstall (use the same --app path and permissions).")
 
 
 if __name__ == "__main__":

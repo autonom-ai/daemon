@@ -3,8 +3,9 @@ import { readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const launcher = dirname(fileURLToPath(import.meta.url));
-const dist = join(resolve(launcher, "..", ".."), "dist");
+const devin = dirname(fileURLToPath(import.meta.url));
+const launcher = join(devin, "launcher");
+const dist = join(resolve(devin, ".."), "dist");
 
 const common = {
     bundle: true,
@@ -42,11 +43,11 @@ await Promise.all([
 ]);
 for (const suite of ["unit", "integration"])
 {
-    const tests = (await readdir(join(launcher, "tests", suite))).filter((name) => name.endsWith(".ts"));
+    const tests = (await readdir(join(devin, "tests", suite))).filter((name) => name.endsWith(".ts"));
     if (tests.length)
         await build({
             ...common,
-            entryPoints: tests.map((name) => join(launcher, "tests", suite, name)),
+            entryPoints: tests.map((name) => join(devin, "tests", suite, name)),
             outdir: join(dist, "tests", suite),
             platform: "node",
             format: "cjs",

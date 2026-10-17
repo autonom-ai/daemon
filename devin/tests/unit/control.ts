@@ -1,5 +1,5 @@
-import type { CdpClient } from "../../cdp";
-import { startControlSocket } from "../../control";
+import type { CdpClient } from "../../launcher/cdp";
+import { startControlSocket } from "../../launcher/control";
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";

@@ -1,4 +1,4 @@
-import { verifyDesktopBuild } from "../../build";
+import { verifyDesktopBuild } from "../../launcher/build";
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

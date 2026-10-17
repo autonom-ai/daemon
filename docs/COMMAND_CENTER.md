@@ -2,30 +2,30 @@
 
 ## Status and safety model
 
-The adapter is `source/launcher/`, a launcher that starts Devin Desktop with `--remote-debugging-pipe` and attaches the Command Center to the workbench renderer. It is pinned to Devin Desktop **1.126.0** and refuses to attach to any other build.
+The adapter is `devin/launcher/`, a launcher that starts Devin Desktop with `--remote-debugging-pipe` and attaches the Command Center to the workbench renderer. It is pinned to Devin Desktop **1.126.0** and refuses to attach to any other build.
 
 The debugging pipe is created by the launcher process and inherited as file descriptors 3 and 4 of the browser process, so the Chrome DevTools Protocol endpoint never listens on a loopback port. The default transport exposes no DevTools network endpoint. Every launcher argument is forwarded to Devin Desktop except `--debug`, which explicitly switches to a loopback WebSocket transport on port 9222 (`--debug=<port>` overrides it) for development. Debug mode verifies the browser PID matches the launched process; it is never persisted in settings or `argv.json`. The launcher strips inherited `ACP_*`, `ELECTRON_*`, `VSCODE_*`, and `WINDSURF_*` variables from the child environment so launching from a terminal inside Devin Desktop does not leak host state (such as `ELECTRON_RUN_AS_NODE` or the parent's IPC hook) into the new instance.
 
-`install.py` replaces only the `bin/devin-desktop` CLI shim with a small direct launcher wrapper, preserving the original shim byte-for-byte. It copies the launcher bundle and runtime assets beside the Desktop installation. The Electron binary, package entrypoint, main and workbench bundles, `product.json`, and profile data are untouched. The launcher starts the sibling Electron binary with its private pipe. The adapter wraps the native navigation manifest getter and surface controller in memory and restores every descriptor on dispose. There is no checksum rewriting or integrity-warning suppression.
+`devin/install.py` replaces only the `bin/devin-desktop` CLI shim with a small direct launcher wrapper, preserving the original shim byte-for-byte. It copies the launcher bundle and runtime assets beside the Desktop installation. The Electron binary, package entrypoint, main and workbench bundles, `product.json`, and profile data are untouched. The launcher starts the sibling Electron binary with its private pipe. The adapter wraps the native navigation manifest getter and surface controller in memory and restores every descriptor on dispose. There is no checksum rewriting or integrity-warning suppression.
 
 An already-running unmanaged Desktop must be restarted once: additional windows in that process cannot inherit a new debugging pipe. Once managed, further launches delegate their window requests to it.
 
-Before spawning Desktop, the launcher reconciles the local ACP connector registry: it removes any existing `devin-autonom` entry from `~/.windsurf/acp/registry.json` and appends a canonical entry pointing at the co-located `bin/autonom-acp`, passing `--config <daemon config>` (and `--devin <devinCommand>` when configured). It also sets `devin-autonom: true` under `devin.acp.enabledAgents` and `windsurf.acp.enabledAgents` in the Desktop user `settings.json`. A missing agent binary or unreadable file logs a warning and never blocks the launch; `install.py` performs no registry writes of its own.
+Before spawning Desktop, the launcher reconciles the local ACP connector registry: it removes any existing `devin-autonom` entry from `~/.windsurf/acp/registry.json` and appends a canonical entry pointing at the co-located `bin/autonom-acp`, passing `--config <daemon config>` (and `--devin <devinCommand>` when configured). It also sets `devin-autonom: true` under `devin.acp.enabledAgents` and `windsurf.acp.enabledAgents` in the Desktop user `settings.json`. A missing agent binary or unreadable file logs a warning and never blocks the launch; `devin/install.py` performs no registry writes of its own.
 
 ## Installation
 
 Build and test as your normal user, then install with the permissions required by the Desktop directory:
 
 ```bash
-npm --prefix source/launcher ci
-npm --prefix source/launcher run check
-npm --prefix source/launcher test
-sudo python3 install.py --no-build
+npm --prefix devin ci
+npm --prefix devin run check
+npm --prefix devin test
+sudo python3 devin/install.py --no-build
 ```
 
 Quit Desktop once, then run `devin-desktop` from a terminal. Your existing profile and login remain in use. The installed shim execs the launcher directly, preserving argv, cwd, stdout, stderr, and exit status; `devin-desktop --debug` therefore behaves the same as `node dist/launcher.js --debug`. The installer records the original shim for byte-for-byte rollback and copies the launcher, assets, daemon, and MCP scripts into `/usr/share/devin-desktop/autonom`. Build before installing or launching.
 
-`python3 install.py --check` verifies status. `sudo python3 install.py --uninstall` restores the CLI shim byte-for-byte; its backup and inert installed launcher payload remain for auditing. `--app <resources/app>` selects a non-default installation. External edits or unknown versions fail closed. The installer references this checkout, so keep it in place. Desktop upgrades replace the patch and require reinstallation after rechecking compatibility. Windows and macOS startup/packaging have not been validated.
+`python3 devin/install.py --check` verifies status. `sudo python3 devin/install.py --uninstall` restores the CLI shim byte-for-byte; its backup and inert installed launcher payload remain for auditing. `--app <resources/app>` selects a non-default installation. External edits or unknown versions fail closed. The installer references this checkout, so keep it in place. Desktop upgrades replace the patch and require reinstallation after rechecking compatibility. Windows and macOS startup/packaging have not been validated.
 
 ## Verified native boundaries
 
@@ -137,19 +137,19 @@ UI bridge actions are `getAction` (validated lazy HTML/JS source), `runScript` (
 The launcher serves `$XDG_RUNTIME_DIR/autonom/launcher.sock` with mode 0600. It is a private, same-user channel for inspection and never a network endpoint:
 
 ```bash
-node source/launcher/cdp.mjs status
-node source/launcher/cdp.mjs targets
-node source/launcher/cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
-node source/launcher/cdp.mjs screenshot workbench /tmp/autonom.png
-node source/launcher/cdp.mjs hot
-node source/launcher/cdp.mjs detach
+node devin/launcher/cdp.mjs status
+node devin/launcher/cdp.mjs targets
+node devin/launcher/cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
+node devin/launcher/cdp.mjs screenshot workbench /tmp/autonom.png
+node devin/launcher/cdp.mjs hot
+node devin/launcher/cdp.mjs detach
 ```
 
 `hot` re-reads `ui.yml`, asset versions, CSS, and the runtime bundle. A changed runtime is reinstalled; layout-only updates use the existing runtime. Asset edits also reload automatically. `detach` disposes the runtime and restores native Devin; `hot` resumes attachment after a detach. Control evaluations and screenshots release their temporary CDP sessions, and status reads the live renderer rather than cached state.
 
 ## Build and verification
 
-From `source/launcher/`:
+From `devin/`:
 
 ```bash
 npm ci
@@ -168,7 +168,7 @@ node dist/launcher.js /path/to/workspace --debug
 Launching an installed `devin-desktop --debug` is equivalent. Identify a separate test window's exact target id through `cdp.mjs targets`, then drive only it:
 
 ```bash
-node source/launcher/tests/integration/desktop.mjs <target-id> verify
+node devin/tests/integration/desktop.mjs <target-id> verify
 ```
 
 Never target the communication window. The integration tool clicks actual rendered controls using CDP input and records DOM/runtime assertions; it does not manufacture UI state.

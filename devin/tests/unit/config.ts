@@ -8,7 +8,7 @@ import {
     saveDaemon,
     saveSettings,
     validateSettings,
-} from "../../config";
+} from "../../launcher/config";
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
