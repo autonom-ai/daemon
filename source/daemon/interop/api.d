@@ -4,7 +4,6 @@ import daemon.agent : Profile, validName;
 import daemon.exception;
 import daemon.http;
 import daemon.interop.bridge;
-import daemon.interop.bridge;
 import daemon.interop.session;
 import daemon.runtime : bridge, profileStore;
 import daemon.storage;
