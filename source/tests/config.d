@@ -151,7 +151,8 @@ unittest
         "offlineStartAfter: soon\n",
         "offlineStartAfter: 0s\n",
         "offlineStartAfter: -5\n",
-        "offlineCompactAfter: []\n"
+        "offlineCompactAfter: []\n",
+        "compactionThresholds: 1,2,3\n"
     ])
     {
         write(fixture.path, "devinCommand: devin\n"~content~ROUTER);

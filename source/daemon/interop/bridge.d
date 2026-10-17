@@ -423,17 +423,16 @@ private:
                         result = removeProcess(call);
                 }
                 else if (connection.length)
+                {
                     result = runControl(call, controlSocket(connection), access.clientToken,
                         call.sessionId, prompt, call.model, normalizeMode(call.mode));
+                }
+                else if (call.stopped)
+                    result.cancelled = true;
                 else
                 {
-                    if (compactFirst)
-                        result = runAcp(call, command, call.workspace, call.sessionId, COMPACT_PROMPT,
-                            call.model, call.mode, [COMPACTION_THRESHOLDS_ENV: compactionThresholds],
-                            runToken, mcpPort, dataDir, access, false);
-                    if (!result.cancelled && !result.error.length && !call.stopped)
-                        result = runAcp(call, command, call.workspace, call.sessionId, prompt,
-                            call.model, call.mode, null, runToken, mcpPort, dataDir, access);
+                    result = runAcp(call, command, call.workspace, call.sessionId, prompt,
+                        call.model, call.mode, runToken, mcpPort, dataDir, access, compactFirst);
                 }
             }
             catch (Exception error)
@@ -456,7 +455,6 @@ public:
         logDir = buildPath(configuration.dataDir, "sessions");
         sessionLockDir = configuration.sessionLockDir;
         sessionDatabase = configuration.sessionDatabase;
-        compactionThresholds = configuration.compactionThresholds;
         dataDir = configuration.dataDir;
         mcpPort = environment.get("AUTONOM_PORT", "8080");
         executionTimeout = configuration.executionTimeout;
@@ -858,7 +856,6 @@ public:
 
     const string sessionLockDir;
     const string sessionDatabase;
-    const string compactionThresholds;
     const string dataDir;
     const string mcpPort;
 
@@ -1039,9 +1036,6 @@ private:
         ret.updateMetadata(data);
         return ret;
     }
-
-    enum COMPACT_PROMPT = "Reply with exactly: OK";
-    enum COMPACTION_THRESHOLDS_ENV = "DEVIN_COMPACTION_THRESHOLDS";
 
     Mutex controlMutex;
     bool[string] cancelling;

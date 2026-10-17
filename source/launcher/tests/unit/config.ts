@@ -67,7 +67,6 @@ test("the daemon configuration exposes known fields and a data directory", async
             compactOnResume: false,
             offlineStartAfter: "1h",
             offlineCompactAfter: "1h",
-            compactionThresholds: "1,2,3",
         });
         assert.equal(await readDataDir(path), join(homedir(), ".local/share/autonom"));
         assert.equal(await readRouterKey(path), "");
@@ -112,14 +111,14 @@ test("daemon settings are validated and written without dropping unrelated keys"
     {
         const path = join(root, "config.yml");
         await ensureDefaultConfig(path);
-        await saveDaemon(path, { compactOnResume: true, offlineStartAfter: "30m", compactionThresholds: "1,2,3" });
+        await saveDaemon(path, { compactOnResume: true, offlineStartAfter: "30m" });
         const config = await readDaemonConfig(path);
         assert.equal(config.compactOnResume, true);
         assert.equal(config.offlineStartAfter, "30m");
         assert.equal(config.devinCommand, "devin");
         await assert.rejects(saveDaemon(path, { unsupported: "x" }), /Unsupported daemon setting/);
         await assert.rejects(saveDaemon(path, { offlineStartAfter: "0m" }), /Durations must be positive/);
-        await assert.rejects(saveDaemon(path, { compactionThresholds: "3,2" }), /increasing positive token counts/);
+        await assert.rejects(saveDaemon(path, { compactionThresholds: "1,2,3" }), /Unsupported daemon setting/);
         await assert.rejects(saveDaemon(path, { compactOnResume: "yes" }), /must be a boolean/);
     }
     finally

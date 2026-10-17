@@ -458,13 +458,6 @@ export async function saveDaemon(configFile: string, values: unknown): Promise<v
         if (["offlineStartAfter", "offlineCompactAfter", "executionTimeout"].includes(field)
             && (typeof value !== "string" || !/^[1-9][0-9]{0,8}[smhd]?$/.test(value)))
             throw new Error("Durations must be positive values such as 30m, 1h, or integer seconds.");
-        if (field === "compactionThresholds")
-        {
-            const thresholds = typeof value === "string" ? value.split(",").map(Number) : [];
-            if (![2, 3].includes(thresholds.length) || thresholds.some((item, index) => !Number.isSafeInteger(item)
-                || item < 1 || item < (thresholds[index - 1] ?? 0)))
-                throw new Error("Compaction thresholds must be two or three increasing positive token counts.");
-        }
         document.set(field, value);
     }
     await writePrivateFile(configFile, document.toString());
@@ -506,7 +499,6 @@ executionTimeout: 30m
 compactOnResume: false
 offlineStartAfter: 1h
 offlineCompactAfter: 1h
-compactionThresholds: 1,2,3
 router:
   type: openrouter
   key: ""
@@ -522,6 +514,5 @@ const DAEMON_FIELDS = [
     "compactOnResume",
     "offlineStartAfter",
     "offlineCompactAfter",
-    "compactionThresholds",
     "executionTimeout",
 ];
