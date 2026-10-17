@@ -53,7 +53,8 @@ void profileSession(Request request, Output output)
     {
         string session = readField!"id"(request);
         if (!bridge.access.client(request.header.read("x-autonom-client")) &&
-            bridge.authenticate(request.header.read("x-autonom-run"), session) is null)
+            bridge.authenticate(request.header.read("x-autonom-run"), session) is null &&
+            bridge.access.mcpSession(request.header.read("x-autonom-mcp")) != session)
             throw new ProfileConflictException("A session can register only its own managed identity");
 
         respond(output, profileStore.register(profile.name, session).toJSON());
