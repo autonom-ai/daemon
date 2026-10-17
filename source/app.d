@@ -170,15 +170,8 @@ int main(string[] args)
         {
             try
             {
-                string pidStr = environment.get("SERVERINO_DAEMON_PID");
-                if (pidStr.length)
-                {
-                    int pid = pidStr.to!int;
-                    if (pid > 0)
-                    {
-                        kill(pid, SIGTERM);
-                    }
-                }
+                import serverino.daemon : Daemon;
+                Daemon.shutdown();
             }
             catch (Exception) {}
         }
