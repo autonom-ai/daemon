@@ -54,6 +54,8 @@ public:
 class AcpClient
 {
 private:
+    enum cancelMethod = "$/cancel_request";
+
     Pid process;
     File toAgent;
     File fromAgent;
@@ -73,6 +75,55 @@ private:
     bool closing;
     int _exitStatus = int.min;
     string failure;
+
+    static Frame remapCancellation(Frame frame, JSONValue id)
+    {
+        frame.value = JSONValue(frame.value.object.dup);
+        JSONValue params = JSONValue(frame.value["params"].object.dup);
+        params["requestId"] = id;
+        frame.value["params"] = params;
+        return frame;
+    }
+
+    void cancelPeer(long id)
+    {
+        if (peerOutput.isOpen)
+        {
+            writeFrame(peerOutput, peerMutex, Frame(JSONValue([
+                "jsonrpc": JSONValue("2.0"),
+                "method": JSONValue(cancelMethod),
+                "params": JSONValue(["requestId": JSONValue(id)])
+            ])));
+        }
+    }
+
+    void cancelPermissions(string session)
+    {
+        long[] pending;
+        synchronized (stateMutex)
+        {
+            foreach (id, request; incoming)
+            {
+                if (request.frame.method == "session/request_permission" &&
+                    request.frame.value["params"]["sessionId"].str == session)
+                {
+                    pending ~= id;
+                }
+            }
+        }
+
+        foreach (id; pending)
+        {
+            try
+                decide(session, id);
+            catch (AcpException error)
+            {
+                // A competing native or HTTP decision may already have settled it.
+                if (error.code != -32002)
+                    throw error;
+            }
+        }
+    }
 
     long allocate()
     {
@@ -175,6 +226,41 @@ private:
         {
             if (!frame.identified)
             {
+                if (frame.method == cancelMethod)
+                {
+                    long id;
+                    string session;
+                    synchronized (stateMutex)
+                    {
+                        foreach (identity, pending; incoming)
+                        {
+                            if (pending.frame.value["id"] != frame.value["params"]["requestId"])
+                                continue;
+
+                            id = identity;
+                            if (pending.frame.method == "session/request_permission")
+                                session = pending.frame.value["params"]["sessionId"].str;
+
+                            break;
+                        }
+                    }
+
+                    if (id && peerOutput.isOpen)
+                        writeFrame(peerOutput, peerMutex, remapCancellation(frame, JSONValue(id)));
+                    else if (id && session.length)
+                    {
+                        try
+                            decide(session, id);
+                        catch (AcpException error)
+                        {
+                            if (error.code != -32002)
+                                throw error;
+                        }
+                    }
+
+                    return;
+                }
+
                 if (notification !is null)
                     notification(frame.value);
                 if (peerOutput.isOpen)
@@ -288,7 +374,34 @@ private:
             if (frame.identified)
                 submit(frame, true);
             else
+            {
+                if (frame.method == cancelMethod)
+                {
+                    long id;
+                    synchronized (stateMutex)
+                    {
+                        foreach (identity, response; requests)
+                        {
+                            if (response.peer && response.originalId == frame.value["params"]["requestId"])
+                            {
+                                id = identity;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (id)
+                        writeFrame(toAgent, writeMutex, remapCancellation(frame, JSONValue(id)));
+
+                    return;
+                }
+
+                if (frame.method == "session/cancel")
+                    cancelPermissions(frame.value["params"]["sessionId"].str);
+
                 writeFrame(toAgent, writeMutex, frame);
+            }
+
             return;
         }
         JSONValue id = frame.value["id"];
@@ -382,9 +495,14 @@ public:
         ])), false);
 
     void notify(string method, JSONValue params = JSONValue.emptyObject)
-        => writeFrame(toAgent, writeMutex, Frame(JSONValue([
+    {
+        if (method == "session/cancel")
+            cancelPermissions(params["sessionId"].str);
+
+        writeFrame(toAgent, writeMutex, Frame(JSONValue([
             "jsonrpc": JSONValue("2.0"), "method": JSONValue(method), "params": params
         ])));
+    }
 
     JSONValue await(long id, Duration timeout = Duration.max)
     {
@@ -485,24 +603,25 @@ public:
         if (option.length)
             outcome["optionId"] = JSONValue(option);
         answer(pending.frame.value["id"], JSONValue(["outcome": outcome]));
+        cancelPeer(id);
     }
 
     void expire()
     {
-        Incoming[] expired;
+        Incoming[long] expired;
         synchronized (stateMutex)
         {
             foreach (id; incoming.keys)
             {
                 if (incoming[id].deadline <= MonoTime.currTime)
                 {
-                    expired ~= incoming[id];
+                    expired[id] = incoming[id];
                     incomingBytes -= incoming[id].bytes;
                     incoming.remove(id);
                 }
             }
         }
-        foreach (pending; expired)
+        foreach (id, pending; expired)
         {
             if (pending.frame.method == "session/request_permission")
                 answer(pending.frame.value["id"], JSONValue([
@@ -510,6 +629,8 @@ public:
                 ]));
             else
                 answerError(pending.frame.value["id"], -32000, "Client request timed out");
+
+            cancelPeer(id);
         }
     }
 
