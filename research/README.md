@@ -3,7 +3,9 @@
 The evidence files below describe the codebase at revision
 `08a8af4bb4321021c3f4ef4f167ea14d55c23dc1` on `interactive-acp` (2026-10-16).
 The plan and dispositions follow that research and the user's subsequent
-clarifications; they describe proposed changes, not an implemented refactor.
+clarifications; they describe the proposal at that baseline. Current behavior
+and remaining source/deployment gates are documented in [daemon architecture](../docs/DAEMON.md)
+and tracked under Linear ANM-36.
 
 - [Simplification plan](plan.md) — clarified requirements, architectural
   decisions, integration gates, sequencing, and acceptance criteria.

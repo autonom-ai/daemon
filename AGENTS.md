@@ -31,6 +31,9 @@
 - `source/launcher`: Desktop startup, native runtime, page bridge, and settings.
   `assets`: configured pages. `install.py`: transactional installation.
 
+See [daemon architecture and cutover](docs/DAEMON.md) for current lifecycle,
+HTTP, permission, and deployment contracts.
+
 # Invariants
 
 - Keep mutable registries and domain state on the single worker. Monitor
