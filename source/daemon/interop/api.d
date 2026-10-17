@@ -5,7 +5,7 @@ import daemon.exception;
 import daemon.http;
 import daemon.interop.bridge;
 import daemon.interop.session;
-import daemon.runtime : bridge, profileStore;
+import daemon.api : bridge, profileStore;
 import daemon.storage;
 import serverino;
 
@@ -337,6 +337,46 @@ void sessionPermissions(Request request, Output output)
     }
 }
 
+bool matchSessionPermissionWithReqId(const Request request)
+{
+    import std.string : split;
+    string[] parts = request.path.split("/");
+    return parts.length == 6 && parts[1] == "api" && parts[2] == "sessions" &&
+           parts[4] == "permissions" && parts[3].length > 0 && parts[5].length > 0;
+}
+
+@endpoint @route!matchSessionPermissionWithReqId
+void sessionPermissionById(Request request, Output output)
+{
+    import std.string : split;
+    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
+        return;
+    string[] parts = request.path.split("/");
+    string id = parts[3];
+    Session.validateId(id);
+    long requestId;
+    try
+        requestId = parts[5].to!long;
+    catch (Exception)
+        throw new InvalidInputException("Permission request id must be an integer");
+
+    if (request.method == Request.Method.Post)
+    {
+        JSONValue data = readBody(request);
+        if ("id" in data.object && data["id"].type == JSONType.integer && data["id"].integer != requestId)
+            throw new InvalidInputException("Request id mismatch between path and body");
+        onlyFields(data, ["id", "optionId"]);
+        if ("optionId" !in data.object || (!data["optionId"].isNull && data["optionId"].type != JSONType.string))
+            throw new InvalidInputException("Expected an offered optionId, or null to cancel");
+        bridge.decidePermission(id, requestId, data["optionId"].isNull ? null : data["optionId"].str);
+        respond(output, JSONValue.emptyObject);
+    }
+    else
+    {
+        respond(output, bridge.pendingPermissions(id, requestId));
+    }
+}
+
 @endpoint @route!(matchesPath!"/api/executions/<id>")
 void getCall(Request request, Output output)
 {
@@ -365,5 +405,145 @@ void stopCall(Request request, Output output)
 
     execution.requestStop();
     respond(output, execution.toJSON(), 202);
+}
+
+private void handleTranscript(string id, Request request, Output output)
+{
+    import daemon.interop.devin.db : readSessionMessages;
+    import std.path : buildPath;
+    try
+    {
+        Call execution = bridge.execution(id);
+        JSONValue executionJson = execution !is null ? execution.toJSON() : bridge.executionRecord(id);
+
+        string session;
+        if (execution !is null && execution.sessionId.length)
+            session = execution.sessionId;
+        else
+        {
+            string mapped = bridge.sessionForExecution(id);
+            session = mapped.length ? mapped : id;
+        }
+
+        string executionOut = buildPath(bridge.executionDir, id ~ ".out");
+        string executionErr = buildPath(bridge.executionDir, id ~ ".err");
+        bool isKnownExecution = execution !is null || !executionJson.isNull ||
+            exists(executionOut) || exists(executionErr);
+
+        bool isKnownSession = session.length && (
+            bridge.access.managed(session) ||
+            bridge.findSession(session) !is null ||
+            exists(bridge.logPath(session))
+        );
+
+        if (!isKnownExecution && !isKnownSession)
+        {
+            respondError(output, 404, "Session is not managed by Autonom");
+            return;
+        }
+
+        JSONValue ret = JSONValue.emptyObject;
+        ret["messages"] = JSONValue.emptyArray;
+        ret["execution"] = executionJson.isNull ? JSONValue(null) : executionJson;
+
+        if (session.length && isKnownSession)
+        {
+            Session found = bridge.findSession(session);
+            if (execution is null && found !is null && found.execution !is null)
+            {
+                execution = found.execution;
+                if (ret["execution"].isNull)
+                    ret["execution"] = execution.toJSON();
+            }
+
+            ret["session"] = found is null ? JSONValue(["id": JSONValue(session)]) : found.toJSON();
+            try
+                ret["messages"] = readSessionMessages(bridge.sessionDatabase, session);
+            catch (Exception)
+                ret["messages"] = JSONValue.emptyArray;
+
+            if (!ret["messages"].array.length && exists(bridge.logPath(session)))
+            {
+                try
+                {
+                    string sessionLog = readText(bridge.logPath(session), 1024 * 1024);
+                    if (sessionLog.length)
+                    {
+                        ret["messages"].array ~= JSONValue([
+                            "role": JSONValue("assistant"),
+                            "content": JSONValue(sessionLog)
+                        ]);
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+        else
+            ret["session"] = JSONValue(null);
+
+        if (!ret["messages"].array.length)
+        {
+            if (exists(executionOut))
+            {
+                try
+                {
+                    string outContent = readText(executionOut, 1024 * 1024);
+                    if (outContent.length)
+                    {
+                        ret["messages"].array ~= JSONValue([
+                            "role": JSONValue("assistant"),
+                            "content": JSONValue(outContent)
+                        ]);
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+            else if (execution !is null && !execution.running && exists(execution.outputPath))
+            {
+                try
+                {
+                    string outContent = readText(execution.outputPath, 1024 * 1024);
+                    if (outContent.length)
+                    {
+                        ret["messages"].array ~= JSONValue([
+                            "role": JSONValue("assistant"),
+                            "content": JSONValue(outContent)
+                        ]);
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        respond(output, ret);
+    }
+    catch (Exception error)
+    {
+        respondError(output, 500, error.msg);
+    }
+}
+
+@endpoint @route!(matchesPath!"/api/executions/<id>/transcript")
+void executionTranscript(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Get]))
+        return;
+
+    handleTranscript(routeParameter!"/api/executions/<id>/transcript"(request), request, output);
+}
+
+@endpoint @route!(matchesPath!"/api/sessions/<id>/transcript")
+void sessionTranscript(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Get]))
+        return;
+
+    handleTranscript(routeParameter!"/api/sessions/<id>/transcript"(request), request, output);
 }
 

@@ -1,19 +1,22 @@
 module tests.interop.session;
 
 import daemon.agent;
+import daemon.config : Config;
 import daemon.interop;
 import daemon.interop.api : removeSessions;
 import daemon.interop.session;
 import tests.common;
+import tests.http.common;
 import serverino : endpoint, route;
 import unit_threaded;
 
 import core.sys.linux.sys.file : flock, LOCK_EX;
+import core.time : Duration, MonoTime, minutes, msecs, seconds;
 import std.algorithm : canFind;
 import std.array : replicate;
 import std.conv : octal, to;
 import std.file;
-import std.json : JSONValue, parseJSON;
+import std.json : JSONType, JSONValue, parseJSON;
 import std.path : buildPath;
 import std.process : environment;
 import std.stdio : File;
@@ -271,3 +274,177 @@ unittest
     readText(restarted.logPath(id)).should == log;
     readText(record).should == original;
 }
+
+@Name("Call registry evicts oldest settled tickets strictly in LRU order when capacity exceeds 128")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    installFake(fixture);
+
+    Call[] calls;
+    foreach (i; 0 .. 135)
+    {
+        Call call = fixture.bridge.print("call " ~ i.to!string, fixture.root);
+        call.wait();
+        call.settled = MonoTime.currTime - (200 - i).seconds;
+        calls ~= call;
+    }
+
+    fixture.bridge.executionCount.should == 135;
+
+    fixture.bridge.collect();
+
+    fixture.bridge.executionCount.should == 128;
+
+    foreach (i; 0 .. 7)
+    {
+        fixture.bridge.execution(calls[i].id).shouldBeNull;
+    }
+
+    foreach (i; 7 .. 135)
+    {
+        fixture.bridge.execution(calls[i].id).shouldNotBeNull;
+    }
+}
+
+@Name("Bridge collect never evicts running calls even if capacity is exceeded")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    installFake(fixture);
+
+    Call runningCall = fixture.bridge.newCall(CallKind.Start, fixture.root, "SWE-2");
+    fixture.bridge.registerExecution(runningCall);
+
+    Call[] settled;
+    foreach (i; 0 .. 130)
+    {
+        Call c = fixture.bridge.print("settled " ~ i.to!string, fixture.root);
+        c.wait();
+        c.settled = MonoTime.currTime - (150 - i).seconds;
+        settled ~= c;
+    }
+
+    fixture.bridge.collect();
+
+    fixture.bridge.execution(runningCall.id).shouldNotBeNull;
+    fixture.bridge.execution(runningCall.id).running.should == true;
+}
+
+@Name("Settled calls expire after callSettleTimeout regardless of capacity")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    installFake(fixture);
+
+    Call call = fixture.bridge.print("quick call", fixture.root);
+    call.wait();
+
+    fixture.bridge.executionCount.should == 1;
+
+    call.settled = MonoTime.currTime - 301.seconds;
+
+    fixture.bridge.collect();
+
+    fixture.bridge.execution(call.id).shouldBeNull;
+}
+
+@Name("Transcript lookup resolves historical execution ID and falls back to disk logs after memory eviction")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    installFake(fixture);
+
+    Call call = fixture.bridge.print("durable transcript turn text", fixture.root);
+    call.wait();
+    string executionId = call.id;
+    string sessionId = call.sessionId;
+
+    call.settled = MonoTime.currTime - 301.seconds;
+    fixture.bridge.collect();
+
+    fixture.bridge.execution(executionId).shouldBeNull;
+
+    string mappedSession = fixture.bridge.sessionForExecution(executionId);
+    mappedSession.should == sessionId;
+
+    JSONValue record = fixture.bridge.executionRecord(executionId);
+    (record.type != JSONType.null_).should == true;
+    record["id"].str.should == executionId;
+    record["status"].str.should == "succeeded";
+
+    string outPath = buildPath(fixture.bridge.executionDir, executionId ~ ".out");
+    exists(outPath).should == true;
+    readText(outPath).canFind("durable transcript turn text").should == true;
+}
+
+@Name("Retention configuration parses knobs with backward-compatible defaults and custom values")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    fixture.config.maxStreamBytes.should == 4 * 1024 * 1024;
+    fixture.config.maxStreamEntries.should == 1000;
+    fixture.config.callCapacity.should == 128;
+    fixture.config.callSettleTimeout.should == 300.seconds;
+    fixture.config.maxConcurrentCalls.should == 8;
+    fixture.config.pruneExecutionArtifacts.should == false;
+    fixture.config.allowDestructivePruning.should == false;
+
+    string customConfig = buildPath(fixture.root, "custom_retention.yml");
+    write(customConfig, "devinCommand: devin\n" ~
+        "maxStreamBytes: 16MiB\n" ~
+        "maxStreamEntries: 2000\n" ~
+        "callCapacity: 64\n" ~
+        "callSettleTimeout: 10m\n" ~
+        "maxConcurrentCalls: 4\n" ~
+        "pruneExecutionArtifacts: true\n" ~
+        "allowDestructivePruning: true\n" ~
+        ROUTER);
+
+    Config custom = new Config(customConfig);
+    custom.maxStreamBytes.should == 16 * 1024 * 1024;
+    custom.maxStreamEntries.should == 2000;
+    custom.callCapacity.should == 64;
+    custom.callSettleTimeout.should == 10.minutes;
+    custom.maxConcurrentCalls.should == 4;
+    custom.pruneExecutionArtifacts.should == true;
+    custom.allowDestructivePruning.should == true;
+}
+
+@Name("Transcript endpoint resolves managed session even after call ticket is evicted") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    JSONValue res = hookSession(fixture, "managed-hist-session");
+
+    string callId = res["id"].str;
+    callId.length.should == 36;
+
+    JSONValue transcript = request("/api/executions/" ~ callId ~ "/transcript");
+    (transcript["session"].type != JSONType.null_).should == true;
+    transcript["session"]["id"].str.should == "managed-hist-session";
+    (transcript["messages"].type == JSONType.array).should == true;
+}
+

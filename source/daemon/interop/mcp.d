@@ -2,7 +2,7 @@ module daemon.interop.mcp;
 
 import daemon.exception;
 import daemon.http;
-import daemon.runtime;
+import daemon.api;
 import serverino;
 
 import std.algorithm.searching : canFind;

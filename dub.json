@@ -4,7 +4,7 @@
 			"excludedSourceFiles": [
 				"source/tests/**"
 			],
-			"mainSourceFile": "source/daemon/app.d",
+			"mainSourceFile": "source/app.d",
 			"name": "daemon",
 			"sourcePaths": [
 				"source/daemon"
@@ -17,8 +17,7 @@
 				"unit-threaded": "2.2.6"
 			},
 			"excludedSourceFiles": [
-				"source/daemon/app.d",
-				"source/acp.d"
+				"source/app.d"
 			],
 			"mainSourceFile": "bin/ut.d",
 			"name": "unit",
@@ -36,10 +35,9 @@
 		},
 		{
 			"excludedSourceFiles": [
-				"source/daemon/app.d",
 				"source/tests/**"
 			],
-			"mainSourceFile": "source/acp.d",
+			"mainSourceFile": "source/app.d",
 			"name": "relay",
 			"sourcePaths": [
 				"source/daemon"

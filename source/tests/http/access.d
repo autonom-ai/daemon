@@ -105,7 +105,7 @@ unittest
         "managed-one",
         false
     );
-    request("/api/client/state")["profiles"].array[0]["managed"].boolean.should == true;
+    request("/api/profiles/alpha")["session"]["id"].str.should == "managed-one";
     finishHookSession(first);
     request(
         "/api/profiles",
