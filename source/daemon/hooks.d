@@ -94,31 +94,6 @@ string hookDirectory(JSONValue data, string session)
         return null;
 }
 
-bool blockedByEvents(string tool, string session, Output output)
-{
-    if (!session.length || tool == MCP_PREFIX~"read_events")
-        return false;
-
-    Profile profile;
-    try
-    {
-        if (events is null)
-            throw new Exception("Coordination is unavailable");
-        profile = profileStore.profileFor(session);
-    }
-    catch (Exception)
-    {
-        respond(output, block("Profile access could not be verified"));
-        return true;
-    }
-
-    if (profile is null || !events.unread(profile).length)
-        return false;
-
-    respond(output, block("You have unread events - read them first: call read_events"));
-    return true;
-}
-
 bool blockedByPolicy(string directory, string tool, JSONValue input, Output output)
 {
     if (!directory.length)
@@ -220,9 +195,6 @@ void preToolUse(Request request, Output output)
     }
 
     string session = hookSession(data);
-    if (blockedByEvents(tool, session, output))
-        return;
-
     string directory = hookDirectory(data, session);
     if (blockedByPolicy(directory, tool, hookInput(data), output))
         return;

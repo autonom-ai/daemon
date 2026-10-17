@@ -17,7 +17,7 @@ import std.path : buildPath;
 import std.process;
 import std.stdio : File, stdin;
 
-@Name("Daemon coordinates rooms, messages, and the event gate") @Serial
+@Name("Daemon coordinates rooms and messages while unread events remain advisory") @Serial
 unittest
 {
     Fixture fixture = Fixture.create();
@@ -91,9 +91,10 @@ unittest
         .should == "session-2";
 
     request("/api/messages?session=session-1", 201, `{"to":"wren","text":"ping","ping":["wren"]}`);
-    request("/api/hooks/pre-tool-use", 200, gate.toString())["decision"].str.should == "block";
-    request("/api/hooks/pre-tool-use", 200, gate.toString())["reason"].str
-        .should == "You have unread events - read them first: call read_events";
+    request("/api/hooks/pre-tool-use", 200, gate.toString())["hookSpecificOutput"]["updatedInput"]["session_id"].str
+        .should == "session-2";
+    gate["tool_name"] = JSONValue("exec");
+    request("/api/hooks/pre-tool-use", 200, gate.toString()).object.length.should == 0;
     JSONValue context = JSONValue([
         "hook_event_name": JSONValue("UserPromptSubmit"),
         "session_id": JSONValue("session-2"),
@@ -110,7 +111,8 @@ unittest
     request("/api/hooks/post-tool-use", 200, context.toString()).object.length.should == 0;
     gate["tool_name"] = JSONValue("mcp__autonom-coord__read_messages");
     gate["tool_input"] = JSONValue(["source": JSONValue("pings")]);
-    request("/api/hooks/pre-tool-use", 200, gate.toString())["decision"].str.should == "block";
+    request("/api/hooks/pre-tool-use", 200, gate.toString())["hookSpecificOutput"]["updatedInput"]["session_id"].str
+        .should == "session-2";
     gate["tool_name"] = JSONValue("mcp__autonom-coord__read_events");
     gate["tool_input"] = JSONValue.emptyObject;
     request("/api/hooks/pre-tool-use", 200, gate.toString())["hookSpecificOutput"]["updatedInput"]["session_id"].str
