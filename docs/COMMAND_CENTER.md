@@ -10,6 +10,8 @@ The debugging pipe is created by the launcher process and inherited as file desc
 
 An already-running unmanaged Desktop must be restarted once: additional windows in that process cannot inherit a new debugging pipe. Once managed, further launches delegate their window requests to it.
 
+Before spawning Desktop, the launcher reconciles the local ACP connector registry: it removes any existing `devin-autonom` entry from `~/.windsurf/acp/registry.json` and appends a canonical entry pointing at the co-located `bin/autonom-acp`, passing `--config <daemon config>` (and `--devin <devinCommand>` when configured). It also sets `devin-autonom: true` under `devin.acp.enabledAgents` and `windsurf.acp.enabledAgents` in the Desktop user `settings.json`. A missing agent binary or unreadable file logs a warning and never blocks the launch; `install.py` performs no registry writes of its own.
+
 ## Installation
 
 Build and test as your normal user, then install with the permissions required by the Desktop directory:

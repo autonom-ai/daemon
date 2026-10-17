@@ -1,9 +1,10 @@
+import { ensureAcpAgent } from "./acp";
 import { captureServices, CdpClient } from "./cdp";
 import type { CdpSession } from "./cdp";
 import { startBridge } from "./bridge";
 import { DaemonClient } from "./client";
 import type { ActionCache, LauncherSettings } from "./config";
-import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, loadAction, loadCenter, readSettings } from "./config";
+import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, loadAction, loadCenter, readDaemonConfig, readSettings } from "./config";
 import { visibleItems } from "./center";
 import { defaultSocketPath, isLauncherRunning, startControlSocket } from "./control";
 import { appRootFor, launchDesktop, openInDesktop, resolveDesktopBinary, verifyDesktopBuild, workbenchUrl } from "./desktop";
@@ -53,6 +54,18 @@ async function main(): Promise<void>
     };
     const appRoot = appRootFor(binary);
     await verifyDesktopBuild(appRoot);
+    try
+    {
+        const daemonConfig = await readDaemonConfig(settings.configFile);
+        const acpArguments = ["--config", settings.configFile];
+        if (typeof daemonConfig.devinCommand === "string" && daemonConfig.devinCommand)
+            acpArguments.push("--devin", daemonConfig.devinCommand);
+        await ensureAcpAgent({ command: join(repository, "bin", "autonom-acp"), args: acpArguments });
+    }
+    catch (error)
+    {
+        log(`ACP registration skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
     let contentPath = settings.commandCenterConfig;
     let content = await loadCenter(contentPath);
     const actionCache: ActionCache = new Map();
