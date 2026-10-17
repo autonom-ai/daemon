@@ -21,12 +21,9 @@ clarifications; they describe proposed changes, not an implemented refactor.
   sessions, execution lifecycle, managed ACP, and relay-observed ACP paths.
 - [Permission investigation](permissions.md) — the HTTP hook-to-human approval
   exchange and the state it holds.
-- [Reference style study](reference-style.md) — observed code examples from
-  this repository, `intuit`, `selenium`, Insurgent Client, and Devin Better
-  ACP.
-- [Adopted style revision](style-rules-revision.md) — user-approved replacement
-  for the removed older rules, with D access/attribute edge cases and evidence
-  from `intuit`, `selenium`, Webull SDK, Akashi, Insurgent API/client, and Apps.
+- [Autonom code style](style-rules-revision.md) — corrected D conventions
+  derived from the current `intuit`, `selenium`, `akashi`, and `multidasm`
+  source trees, plus the project's TypeScript and Python guidance.
 - [Verification snapshot](verification.md) — commands/results at the audited
   revision and the limits of what they establish.
 

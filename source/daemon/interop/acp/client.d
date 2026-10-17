@@ -1,15 +1,17 @@
 module daemon.interop.acp.client;
 
+import daemon.interop.acp.frames;
 import daemon.interop.process;
 
 import core.stdc.errno : errno, EINTR;
-import core.sys.posix.unistd : close, read, write;
+import core.sys.posix.poll : pollFd = poll, pollfd, POLLIN, POLLOUT;
+import core.sys.posix.unistd : read, write;
 import core.sync.condition : Condition;
 import core.sync.mutex : Mutex;
 import core.thread : Thread;
 import core.time : Duration, MonoTime, msecs, seconds;
-import std.exception : ErrnoException;
-import std.json : JSONType, JSONValue, parseJSON;
+import std.conv : to;
+import std.json : JSONType, JSONValue;
 import std.process : Config, Pid, ProcessPipes, Redirect, pipeProcess, tryWait;
 import std.stdio : File;
 
@@ -26,14 +28,29 @@ class AcpException : Exception
     }
 }
 
-final class AcpResponse
+private:
+
+class Response
 {
+    Frame sent;
+    JSONValue originalId;
+    bool peer;
     bool done;
     JSONValue result;
     int errorCode;
-    string errorMessage;
+    string error;
 }
 
+struct Incoming
+{
+    Frame frame;
+    MonoTime deadline;
+    size_t bytes;
+}
+
+public:
+
+/// One child stream, its RPC correlation, and pending backend requests.
 class AcpClient
 {
 private:
@@ -41,223 +58,290 @@ private:
     File toAgent;
     File fromAgent;
     File errorsPipe;
+    File peerOutput;
     Thread reader;
     Thread errors;
     Mutex writeMutex;
+    Mutex peerMutex;
     Mutex stateMutex;
     Condition updated;
-    AcpResponse[long] requests;
-    long nextId;
+    Response[long] requests;
+    Incoming[long] incoming;
+    long nextId = 1;
+    size_t incomingBytes;
     bool terminated;
+    bool closing;
     int _exitStatus = int.min;
     string failure;
 
-    void sendLine(string line)
+    long allocate()
     {
-        ubyte[] bytes = cast(ubyte[])(line~"\n");
-        synchronized (writeMutex)
-        {
-            if (terminated)
-                throw new AcpException(-32000, "Agent process is closed");
+        if (nextId == long.max)
+            throw new AcpException(-32000, "ACP request identity space exhausted");
+        return nextId++;
+    }
 
-            writeFully(toAgent.fileno, bytes);
+    void writeFrame(File file, Mutex mutex, Frame frame)
+    {
+        string line = frame.encode();
+        MonoTime deadline = MonoTime.currTime + 30.seconds;
+        synchronized (mutex)
+        {
+            size_t offset;
+            while (offset < line.length)
+            {
+                synchronized (stateMutex)
+                {
+                    if (closing)
+                        throw new AcpException(-32000, "ACP connection is closed");
+                }
+                if (MonoTime.currTime >= deadline)
+                    throw new AcpException(-32000, "ACP write timed out");
+                pollfd watch = pollfd(file.fileno, POLLOUT);
+                int ready = pollFd(&watch, 1, 100);
+                if (ready < 0 && errno == EINTR || ready == 0)
+                    continue;
+                if (ready < 0)
+                    throw new AcpException(-32000, "ACP write failed");
+                // A small write after POLLOUT cannot fill an empty pipe indefinitely.
+                size_t count = line.length - offset > 4096 ? 4096 : line.length - offset;
+                auto sent = write(file.fileno, line.ptr + offset, count);
+                if (sent < 0 && errno == EINTR)
+                    continue;
+                if (sent <= 0)
+                    throw new AcpException(-32000, "ACP stream closed during write");
+                offset += sent;
+            }
         }
     }
 
     void answer(JSONValue id, JSONValue result)
-    {
-        try
-        {
-            sendLine(JSONValue([
-                "jsonrpc": JSONValue("2.0"),
-                "id": id,
-                "result": result
-            ]).toString());
-        }
-        catch (Exception)
-        {
-        }
-    }
+        => writeFrame(toAgent, writeMutex, Frame(JSONValue([
+            "jsonrpc": JSONValue("2.0"), "id": id, "result": result
+        ])));
 
     void answerError(JSONValue id, int code, string message)
+        => writeFrame(toAgent, writeMutex, Frame(JSONValue([
+            "jsonrpc": JSONValue("2.0"), "id": id,
+            "error": JSONValue(["code": JSONValue(code), "message": JSONValue(message)])
+        ])));
+
+    void failed(string message)
     {
-        try
+        synchronized (stateMutex)
         {
-            sendLine(JSONValue([
-                "jsonrpc": JSONValue("2.0"),
-                "id": id,
-                "error": JSONValue([
-                    "code": JSONValue(code),
-                    "message": JSONValue(message)
-                ])
-            ]).toString());
-        }
-        catch (Exception)
-        {
+            terminated = true;
+            failure = message.idup;
+            incoming = null;
+            incomingBytes = 0;
+            foreach (response; requests)
+            {
+                response.done = true;
+                response.errorCode = -32000;
+                response.error = failure;
+            }
+            updated.notifyAll();
         }
     }
 
     void readLoop()
     {
-        string frame;
-        ubyte[8192] buffer;
-        for (;;)
+        try
         {
-            immutable count = read(fromAgent.fileno, buffer.ptr, buffer.length);
-            if (count < 0 && errno == EINTR)
-                continue;
-            if (count <= 0)
-                break;
-
-            foreach (byte value; buffer[0..count])
+            FrameReader frames;
+            ubyte[8192] buffer;
+            for (;;)
             {
-                if (value == '\n')
-                {
-                    dispatch(frame);
-                    frame = null;
-                }
-                else
-                    frame ~= cast(char)value;
+                auto count = read(fromAgent.fileno, buffer.ptr, buffer.length);
+                if (count < 0 && errno == EINTR)
+                    continue;
+                if (count <= 0)
+                    break;
+                frames.feed(buffer[0..count], &dispatch);
             }
+            frames.finish();
+            failed("Agent disconnected");
         }
-        if (frame.length)
-            dispatch(frame);
+        catch (Exception error)
+            failed(error.msg);
+    }
 
+    void dispatch(Frame frame)
+    {
+        if (frame.request)
+        {
+            if (!frame.identified)
+            {
+                if (notification !is null)
+                    notification(frame.value);
+                if (peerOutput.isOpen)
+                    writeFrame(peerOutput, peerMutex, frame);
+                return;
+            }
+            if (frame.method == "session/request_permission" || peerOutput.isOpen)
+            {
+                long id;
+                size_t bytes = frame.encode().length;
+                synchronized (stateMutex)
+                {
+                    if (incoming.length >= 64 || bytes > FRAME_LIMIT - incomingBytes)
+                        throw new AcpException(-32000, "Too many outstanding backend requests");
+                    id = allocate();
+                    incoming[id] = Incoming(frame, MonoTime.currTime + permissionTimeout, bytes);
+                    incomingBytes += bytes;
+                }
+                if (peerOutput.isOpen)
+                {
+                    frame.value["id"] = JSONValue(id);
+                    writeFrame(peerOutput, peerMutex, frame);
+                }
+                return;
+            }
+            try
+            {
+                if (agentRequest is null)
+                    throw new AcpException(-32601, "Method not found");
+                answer(frame.value["id"], agentRequest(frame.value));
+            }
+            catch (AcpException error)
+                answerError(frame.value["id"], error.code, error.msg);
+            catch (Exception error)
+                answerError(frame.value["id"], -32603, error.msg);
+            return;
+        }
+
+        JSONValue id = frame.value["id"];
+        if (id.type != JSONType.integer && id.type != JSONType.uinteger)
+            return;
+        long identity = id.type == JSONType.integer ? id.integer : cast(long)id.uinteger;
+        Response response;
         synchronized (stateMutex)
         {
-            terminated = true;
-            failure = "Agent disconnected";
-            foreach (response; requests)
+            Response* found = identity in requests;
+            if (found is null || found.done)
+                return;
+            response = *found;
+        }
+        // Required admission runs on this path before a successful reply is delivered.
+        if (beforeReply !is null)
+            beforeReply(frame, response.sent);
+        if (response.peer)
+        {
+            synchronized (stateMutex)
+                requests.remove(identity);
+            frame.value["id"] = response.originalId;
+            writeFrame(peerOutput, peerMutex, frame);
+            return;
+        }
+        synchronized (stateMutex)
+        {
+            response.done = true;
+            if ("error" in frame.value.object)
             {
-                if (response.done)
-                    continue;
-
-                response.done = true;
-                response.errorCode = -32000;
-                response.errorMessage = failure;
+                JSONValue error = frame.value["error"];
+                response.errorCode = cast(int)error["code"].integer;
+                response.error = error["message"].str;
             }
-
+            else
+                response.result = frame.value["result"];
             updated.notifyAll();
         }
     }
 
-    void dispatch(string frame)
+    long submit(Frame frame, bool peer)
     {
-        while (frame.length && (frame[$-1] == '\r'))
-            frame = frame[0..$-1];
-
-        if (!frame.length)
-            return;
-
-        JSONValue message;
-        try
-            message = parseJSON(frame);
-        catch (Exception)
-            return;
-
-        if (message.type != JSONType.object)
-            return;
-
-        if ("method" in message.object)
-        {
-            if ("id" in message.object)
-            {
-                JSONValue result;
-                int code;
-                string error;
-                try
-                {
-                    if (agentRequest is null)
-                        throw new AcpException(-32601, "Method not found");
-
-                    result = agentRequest(message);
-                }
-                catch (AcpException exception)
-                {
-                    code = exception.code;
-                    error = exception.msg;
-                }
-                catch (Exception exception)
-                {
-                    code = -32603;
-                    error = exception.msg;
-                }
-
-                if (error.length)
-                    answerError(message["id"], code, error);
-                else
-                    answer(message["id"], result);
-            }
-            else if (notification !is null)
-            {
-                try
-                    notification(message);
-                catch (Exception)
-                {
-                }
-            }
-
-            return;
-        }
-
-        if ("id" !in message.object)
-            return;
-
+        Response response = new Response();
         long id;
-        JSONValue identity = message["id"];
-        if (identity.type == JSONType.integer)
-            id = identity.integer;
-        else if (identity.type == JSONType.uinteger)
-            id = cast(long)identity.uinteger;
-        else
-            return;
-
         synchronized (stateMutex)
         {
-            AcpResponse* found = id in requests;
+            if (terminated || closing)
+                throw new AcpException(-32000, "ACP connection is closed");
+            if (requests.length >= REQUEST_LIMIT)
+                throw new AcpException(-32000, "Too many outstanding ACP requests");
+            id = allocate();
+            response.peer = peer;
+            response.originalId = frame.value["id"];
+            frame.value["id"] = JSONValue(id);
+            requests[id] = response;
+        }
+        try
+        {
+            if (outgoing !is null)
+                outgoing(frame);
+            response.sent = frame;
+            writeFrame(toAgent, writeMutex, frame);
+        }
+        catch (Exception error)
+        {
+            synchronized (stateMutex)
+                requests.remove(id);
+            throw error;
+        }
+        return id;
+    }
+
+    void receivePeer(Frame frame)
+    {
+        if (frame.request)
+        {
+            if (frame.identified)
+                submit(frame, true);
+            else
+                writeFrame(toAgent, writeMutex, frame);
+            return;
+        }
+        JSONValue id = frame.value["id"];
+        if (id.type != JSONType.integer)
+            return;
+        Incoming pending;
+        synchronized (stateMutex)
+        {
+            Incoming* found = id.integer in incoming;
             if (found is null)
                 return;
-
-            found.done = true;
-            if ("error" in message.object && !message["error"].isNull &&
-                message["error"].type == JSONType.object)
+            pending = *found;
+            if (pending.deadline <= MonoTime.currTime)
+                return;
+            if (pending.frame.method == "session/request_permission" && "result" in frame.value.object)
             {
-                JSONValue error = message["error"];
-                found.errorCode = "code" in error.object && error["code"].type == JSONType.integer ?
-                    cast(int)error["code"].integer : -32603;
-                found.errorMessage = "message" in error.object && error["message"].type == JSONType.string ?
-                    error["message"].str : "Agent request failed";
+                JSONValue result = frame.value["result"];
+                JSONValue outcome = result["outcome"];
+                string kind = outcome["outcome"].str;
+                if (kind != "selected" && kind != "cancelled")
+                    throw new AcpException(-32602, "Invalid native permission outcome");
+                if (kind == "selected")
+                {
+                    bool offered;
+                    foreach (option; pending.frame.value["params"]["options"].array)
+                        offered = offered || option["optionId"].str == outcome["optionId"].str;
+                    if (!offered)
+                        throw new AcpException(-32602, "Native permission option was not offered");
+                }
             }
-            else
-                found.result = "result" in message.object ? message["result"] : JSONValue(null);
-
-            updated.notifyAll();
+            incomingBytes -= pending.bytes;
+            incoming.remove(id.integer);
         }
+        frame.value["id"] = pending.frame.value["id"];
+        writeFrame(toAgent, writeMutex, frame);
     }
 
 public:
+    Duration permissionTimeout = 240.seconds;
     void delegate(JSONValue message) notification;
     JSONValue delegate(JSONValue request) agentRequest;
+    void delegate(ref Frame frame) outgoing;
+    void delegate(ref Frame frame, Frame request) beforeReply;
 
-    this(
-        string[] command,
-        string[string] environment,
-        string cwd = null,
-        File errorLog = File.init
-    )
+    this(string[] command, string[string] environment, string cwd = null, File errorLog = File.init)
     {
         writeMutex = new Mutex();
+        peerMutex = new Mutex();
         stateMutex = new Mutex();
         updated = new Condition(stateMutex);
         Config options = Config.newEnv;
         options.preExecFunction = &createProcessGroup;
-        ProcessPipes pipes = pipeProcess(
-            command,
-            Redirect.stdin | Redirect.stdout | Redirect.stderr,
-            environment,
-            options,
-            cwd
-        );
+        ProcessPipes pipes = pipeProcess(command, Redirect.stdin | Redirect.stdout | Redirect.stderr,
+            environment, options, cwd);
         process = pipes.pid;
         toAgent = pipes.stdin;
         fromAgent = pipes.stdout;
@@ -273,7 +357,7 @@ public:
             size_t written;
             for (;;)
             {
-                immutable count = read(errorsFd, buffer.ptr, buffer.length);
+                auto count = read(errorsFd, buffer.ptr, buffer.length);
                 if (count <= 0)
                     break;
                 if (target.isOpen && written < 1024 * 1024)
@@ -292,82 +376,41 @@ public:
     }
 
     long send(string method, JSONValue params = JSONValue.emptyObject)
-    {
-        AcpResponse response;
-        long id;
-        synchronized (stateMutex)
-        {
-            if (terminated)
-                throw new AcpException(-32000, "Agent process is closed");
-
-            id = nextId++;
-            response = new AcpResponse();
-            requests[id] = response;
-        }
-
-        try
-        {
-            sendLine(JSONValue([
-                "jsonrpc": JSONValue("2.0"),
-                "id": JSONValue(id),
-                "method": JSONValue(method),
-                "params": params
-            ]).toString());
-        }
-        catch (Exception error)
-        {
-            synchronized (stateMutex)
-            {
-                requests.remove(id);
-                response.done = true;
-            }
-
-            throw error;
-        }
-
-        return id;
-    }
+        => submit(Frame(JSONValue([
+            "jsonrpc": JSONValue("2.0"), "id": JSONValue(null),
+            "method": JSONValue(method), "params": params
+        ])), false);
 
     void notify(string method, JSONValue params = JSONValue.emptyObject)
-    {
-        sendLine(JSONValue([
-            "jsonrpc": JSONValue("2.0"),
-            "method": JSONValue(method),
-            "params": params
-        ]).toString());
-    }
+        => writeFrame(toAgent, writeMutex, Frame(JSONValue([
+            "jsonrpc": JSONValue("2.0"), "method": JSONValue(method), "params": params
+        ])));
 
     JSONValue await(long id, Duration timeout = Duration.max)
     {
         MonoTime deadline = timeout == Duration.max ? MonoTime.max : MonoTime.currTime + timeout;
-        AcpResponse response;
-        synchronized (stateMutex)
-            response = requests[id];
-
-        if (response is null)
-            throw new AcpException(-32000, "Unknown agent request");
-
         for (;;)
         {
+            expire();
             synchronized (stateMutex)
             {
+                Response* response = id in requests;
+                if (response is null)
+                    throw new AcpException(-32000, "Unknown ACP request");
                 if (response.done)
                 {
+                    Response result = *response;
                     requests.remove(id);
-                    if (response.errorMessage.length)
-                        throw new AcpException(response.errorCode, response.errorMessage);
-
-                    return response.result;
+                    if (result.error.length)
+                        throw new AcpException(result.errorCode, result.error);
+                    return result.result;
                 }
-
-                Duration remaining = deadline - MonoTime.currTime;
-                if (remaining <= Duration.zero)
+                if (MonoTime.currTime >= deadline)
                 {
                     requests.remove(id);
-                    throw new AcpException(-32000, "Agent request timed out");
+                    throw new AcpException(-32000, "ACP request timed out");
                 }
-
-                updated.wait(remaining > 100.msecs ? 100.msecs : remaining);
+                updated.wait(100.msecs);
             }
         }
     }
@@ -377,18 +420,132 @@ public:
 
     bool poll(long id, out JSONValue result, out int code, out string message)
     {
+        expire();
         synchronized (stateMutex)
         {
-            AcpResponse* found = id in requests;
+            Response* found = id in requests;
             if (found is null || !found.done)
                 return false;
-
             result = found.result;
             code = found.errorCode;
-            message = found.errorMessage;
+            message = found.error;
             requests.remove(id);
             return true;
         }
+    }
+
+    JSONValue permissions(string session, long requestId = 0)
+    {
+        expire();
+        JSONValue ret = JSONValue.emptyArray;
+        synchronized (stateMutex)
+        {
+            foreach (id, pending; incoming)
+            {
+                if (pending.frame.method != "session/request_permission" || (requestId && id != requestId))
+                    continue;
+                JSONValue params = pending.frame.value["params"];
+                if (params["sessionId"].str != session)
+                    continue;
+                JSONValue entry = JSONValue([
+                    "id": JSONValue(id), "session": JSONValue(session),
+                    "options": params["options"]
+                ]);
+                if (requestId)
+                    entry["context"] = params;
+                ret.array ~= entry;
+            }
+        }
+        return ret;
+    }
+
+    void decide(string session, long id, string option = null)
+    {
+        Incoming pending;
+        synchronized (stateMutex)
+        {
+            Incoming* found = id in incoming;
+            if (found is null || found.deadline <= MonoTime.currTime ||
+                found.frame.method != "session/request_permission" ||
+                found.frame.value["params"]["sessionId"].str != session)
+                throw new AcpException(-32002, "Permission request is no longer pending");
+            pending = *found;
+            if (option.length)
+            {
+                bool offered;
+                foreach (entry; pending.frame.value["params"]["options"].array)
+                    offered = offered || entry["optionId"].str == option;
+                if (!offered)
+                    throw new AcpException(-32602, "Permission option was not offered");
+            }
+            incomingBytes -= pending.bytes;
+            incoming.remove(id);
+        }
+        JSONValue outcome = JSONValue(["outcome": JSONValue(option.length ? "selected" : "cancelled")]);
+        if (option.length)
+            outcome["optionId"] = JSONValue(option);
+        answer(pending.frame.value["id"], JSONValue(["outcome": outcome]));
+    }
+
+    void expire()
+    {
+        Incoming[] expired;
+        synchronized (stateMutex)
+        {
+            foreach (id; incoming.keys)
+            {
+                if (incoming[id].deadline <= MonoTime.currTime)
+                {
+                    expired ~= incoming[id];
+                    incomingBytes -= incoming[id].bytes;
+                    incoming.remove(id);
+                }
+            }
+        }
+        foreach (pending; expired)
+        {
+            if (pending.frame.method == "session/request_permission")
+                answer(pending.frame.value["id"], JSONValue([
+                    "outcome": JSONValue(["outcome": JSONValue("cancelled")])
+                ]));
+            else
+                answerError(pending.frame.value["id"], -32000, "Client request timed out");
+        }
+    }
+
+    int relay(File input, File output)
+    {
+        peerOutput = output;
+        bool invalid;
+        try
+        {
+            FrameReader frames;
+            ubyte[8192] buffer;
+            while (!disconnected)
+            {
+                expire();
+                pollfd watch = pollfd(input.fileno, POLLIN);
+                int ready = pollFd(&watch, 1, 100);
+                if (ready < 0 && errno == EINTR || ready == 0)
+                    continue;
+                if (ready < 0)
+                    break;
+                auto count = read(input.fileno, buffer.ptr, buffer.length);
+                if (count <= 0)
+                    break;
+                frames.feed(buffer[0..count], &receivePeer);
+            }
+            frames.finish();
+        }
+        catch (Exception error)
+        {
+            invalid = true;
+            failed(error.msg);
+        }
+        synchronized (stateMutex)
+            invalid = invalid || (failure.length && failure != "Agent disconnected");
+        close();
+        return invalid ? 1 : _exitStatus;
     }
 
     bool disconnected()
@@ -406,26 +563,24 @@ public:
             return;
         try
             toAgent.close();
-        catch (Exception)
-        {
-        }
-
-        typeof(tryWait(Pid.init)) result = tryWait(process);
+        catch (Exception) {}
+        auto result = tryWait(process);
         if (!result.terminated)
         {
             MonoTime deadline = MonoTime.currTime + grace;
             while (!(result = tryWait(process)).terminated && MonoTime.currTime < deadline)
                 Thread.sleep(10.msecs);
-
             if (!result.terminated)
             {
-                terminate(process, grace);
-                result = tryWait(process);
+                _exitStatus = terminate(process, grace);
+                result.terminated = true;
+                result.status = _exitStatus;
             }
         }
-
         _exitStatus = result.terminated ? result.status : -1;
         process = null;
+        synchronized (stateMutex)
+            closing = true;
         if (reader !is null)
         {
             reader.join();
@@ -436,38 +591,8 @@ public:
             errors.join();
             errors = null;
         }
-
-        try
-            fromAgent.close();
-        catch (Exception)
-        {
-        }
-        try
-            errorsPipe.close();
-        catch (Exception)
-        {
-        }
-    }
-}
-
-private:
-
-void writeFully(int fd, ubyte[] bytes)
-{
-    size_t offset;
-    while (offset < bytes.length)
-    {
-        immutable count = write(fd, bytes.ptr + offset, bytes.length - offset);
-        if (count < 0)
-        {
-            if (errno == EINTR)
-                continue;
-
-            throw new ErrnoException("Could not write relay frame");
-        }
-        if (count == 0)
-            throw new Exception("Could not write relay frame");
-
-        offset += count;
+        fromAgent.close();
+        errorsPipe.close();
+        failed("ACP connection closed");
     }
 }

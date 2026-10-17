@@ -3,15 +3,15 @@ module daemon.interop.devin.acp;
 import daemon.exception;
 import daemon.interop.access : Access;
 import daemon.interop.acp;
-import daemon.interop.execution;
+import daemon.interop.bridge : Call, CallResult;
 import daemon.interop.mcp : injectCoord;
 import daemon.interop.process;
 import daemon.storage;
 
 import core.stdc.errno : errno, EAGAIN, EINTR, EWOULDBLOCK;
-import core.sys.posix.fcntl : O_CREAT, O_EXCL, O_RDWR;
+import core.sys.posix.fcntl : O_APPEND, O_CREAT, O_RDWR;
 import core.thread : Thread;
-import core.time : MonoTime, msecs, seconds;
+import core.time : Duration, MonoTime, msecs, seconds;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.socket : AddressFamily, Socket, SocketOption, SocketOptionLevel, SocketOSException,
     SocketType, UnixAddress;
@@ -21,6 +21,19 @@ import std.uuid : randomUUID;
 public:
 
 enum REPLY_LIMIT = 1024 * 1024;
+
+JSONValue sessionParams(string directory, string sessionId = null)
+{
+    JSONValue ret = JSONValue([
+        "cwd": JSONValue(directory),
+        "mcpServers": JSONValue.emptyArray,
+        "_meta": JSONValue(["autonom/connector": JSONValue("autonom")])
+    ]);
+    if (sessionId.length)
+        ret["sessionId"] = JSONValue(sessionId);
+
+    return ret;
+}
 
 JSONValue promptParams(string sessionId, string prompt)
     => JSONValue([
@@ -60,7 +73,8 @@ string normalizeMode(string mode)
     }
 }
 
-ExecutionTask acpTask(
+CallResult runAcp(
+    Call execution,
     string command,
     string directory,
     string sessionId,
@@ -71,251 +85,219 @@ ExecutionTask acpTask(
     string runToken,
     string port,
     string dataDir,
-    Access access
+    Access access,
+    bool steerable = true
 )
 {
-    return (Execution execution) {
-        string[string] child = childEnvironment();
-        child.remove("AUTONOM_CLIENT_TOKEN");
-        child["AUTONOM_DATA_DIR"] = dataDir;
-        if (runToken.length)
-            child["AUTONOM_RUN_TOKEN"] = runToken;
-        foreach (name, value; environment)
-            child[name] = value;
+    string[string] child = childEnvironment();
+    child.remove("AUTONOM_CLIENT_TOKEN");
+    child["AUTONOM_DATA_DIR"] = dataDir;
+    if (runToken.length)
+        child["AUTONOM_RUN_TOKEN"] = runToken;
+    foreach (name, value; environment)
+        child[name] = value;
 
-        File output = openFile(execution.outputPath, O_RDWR | O_CREAT | O_EXCL);
-        File errors = openFile(execution.errorPath, O_RDWR | O_CREAT | O_EXCL);
-        scope(exit)
+    File output = openFile(execution.outputPath, O_RDWR | O_CREAT | O_APPEND);
+    File errors = openFile(execution.errorPath, O_RDWR | O_CREAT | O_APPEND);
+    scope(exit)
+    {
+        output.close();
+        errors.close();
+    }
+
+    AcpClient agent = new AcpClient([command, "acp"], child, directory, errors);
+    execution.connection = agent;
+    scope(exit)
+        agent.close();
+
+    string reply;
+    size_t written;
+    bool live;
+    string bound;
+    agent.notification = (JSONValue message) {
+        if (!live || "params" !in message.object)
+            return;
+
+        JSONValue params = message["params"];
+        if ("sessionId" !in params.object || params["sessionId"].type != JSONType.string ||
+            params["sessionId"].str != bound || "update" !in params.object)
+            return;
+
+        JSONValue update = params["update"];
+        if (update.type != JSONType.object ||
+            "sessionUpdate" !in update.object || update["sessionUpdate"].str != "agent_message_chunk" ||
+            "content" !in update.object || update["content"].type != JSONType.object ||
+            "text" !in update["content"].object || update["content"]["text"].type != JSONType.string)
+            return;
+
+        string text = update["content"]["text"].str;
+        if (reply.length + text.length > REPLY_LIMIT)
+            text = text[0..REPLY_LIMIT - reply.length];
+        if (!text.length)
+            return;
+
+        reply ~= text;
+        if (written < REPLY_LIMIT)
         {
-            output.close();
-            errors.close();
+            output.rawWrite(cast(ubyte[])text);
+            written += text.length;
         }
+    };
 
-        AcpClient agent = new AcpClient([command, "acp"], child, directory, errors);
-        scope(exit)
-            agent.close();
-
-        string reply;
-        size_t written;
-        bool live;
-        string bound;
-        agent.notification = (JSONValue message) {
-            if (!live || "params" !in message.object)
-                return;
-
-            JSONValue params = message["params"];
-            if ("sessionId" !in params.object || params["sessionId"].type != JSONType.string ||
-                params["sessionId"].str != bound || "update" !in params.object)
-                return;
-
-            JSONValue update = params["update"];
-            if (update.type != JSONType.object ||
-                "sessionUpdate" !in update.object || update["sessionUpdate"].str != "agent_message_chunk" ||
-                "content" !in update.object || update["content"].type != JSONType.object ||
-                "text" !in update["content"].object || update["content"]["text"].type != JSONType.string)
-                return;
-
-            string text = update["content"]["text"].str;
-            if (reply.length + text.length > REPLY_LIMIT)
-                text = text[0..REPLY_LIMIT - reply.length];
-            if (!text.length)
-                return;
-
-            reply ~= text;
-            if (written < REPLY_LIMIT)
-            {
-                output.rawWrite(cast(ubyte[])text);
-                written += text.length;
-            }
-        };
-        agent.agentRequest = (JSONValue message) {
-            if (message["method"].str == "session/request_permission")
-            {
-                JSONValue options = message["params"]["options"];
-                string selected;
-                if (options.type == JSONType.array)
-                {
-                    foreach (option; options.array)
-                    {
-                        if (option.type == JSONType.object && "kind" in option.object &&
-                            option["kind"].str == "reject_once" && "optionId" in option.object)
-                            selected = option["optionId"].str;
-                    }
-                }
-
-                if (selected.length)
-                    return JSONValue(["outcome": JSONValue([
-                        "outcome": JSONValue("selected"),
-                        "optionId": JSONValue(selected)
-                    ])]);
-
-                return JSONValue(["outcome": JSONValue(["outcome": JSONValue("cancelled")])]);
-            }
-
-            throw new AcpException(-32601, "Method not found");
-        };
-
-        agent.request("initialize", JSONValue([
-            "protocolVersion": JSONValue(1),
-            "clientCapabilities": JSONValue([
-                "fs": JSONValue([
-                    "readTextFile": JSONValue(false),
-                    "writeTextFile": JSONValue(false)
-                ]),
-                "terminal": JSONValue(false)
+    agent.request("initialize", JSONValue([
+        "protocolVersion": JSONValue(1),
+        "clientCapabilities": JSONValue([
+            "fs": JSONValue([
+                "readTextFile": JSONValue(false),
+                "writeTextFile": JSONValue(false)
             ]),
-            "clientInfo": JSONValue(["name": JSONValue("autonom"), "version": JSONValue("1")])
-        ]), 30.seconds);
+            "terminal": JSONValue(false)
+        ]),
+        "clientInfo": JSONValue(["name": JSONValue("autonom"), "version": JSONValue("1")])
+    ]), 30.seconds);
 
-        string mcpToken = access.mint();
-        JSONValue created;
-        if (sessionId.length)
+    string mcpToken = access.mint();
+    JSONValue created;
+    if (sessionId.length)
+    {
+        created = agent.request("session/load", injectCoord(sessionParams(directory, sessionId), port, mcpToken), 60.seconds);
+        if ("sessionId" in created.object && created["sessionId"].str != sessionId)
+            throw new Exception("Agent loaded a different session");
+    }
+    else
+    {
+        created = agent.request("session/new", injectCoord(sessionParams(directory), port, mcpToken), 60.seconds);
+        if ("sessionId" !in created.object || created["sessionId"].type != JSONType.string)
+            throw new Exception("Agent did not return a session");
+
+        execution.identify(created["sessionId"].str);
+    }
+
+    bound = execution.sessionId;
+    access.admitMcp(mcpToken, bound);
+    applyOptions(agent, created, bound, model, mode);
+
+    live = true;
+    long[] pending = [agent.send("session/prompt", promptParams(bound, prompt))];
+    execution.markSteerable(steerable);
+
+    bool[long] steered;
+    MonoTime deadline = execution.expiresAt;
+    bool cancelled;
+    bool failed;
+    string failure;
+    MonoTime cancelDeadline;
+    for (;;)
+    {
+        string[] queued = pending.length ? execution.takeSteering() : execution.closeSteering();
+        foreach (promptText; queued)
         {
-            created = agent.request("session/load", injectCoord(JSONValue([
-                "sessionId": JSONValue(sessionId),
-                "cwd": JSONValue(directory),
-                "mcpServers": JSONValue.emptyArray
-            ]), port, mcpToken), 60.seconds);
-            if ("sessionId" in created.object && created["sessionId"].str != sessionId)
-                throw new Exception("Agent loaded a different session");
+            try
+            {
+                long sent = agent.send("session/prompt", promptParams(bound, promptText));
+                pending ~= sent;
+                steered[sent] = true;
+            }
+            catch (Exception)
+            {
+                execution.steerDone();
+                break;
+            }
         }
-        else
+        if (!pending.length)
+            break;
+
+        foreach (i, id; pending)
         {
-            created = agent.request("session/new", injectCoord(JSONValue([
-                "cwd": JSONValue(directory),
-                "mcpServers": JSONValue.emptyArray
-            ]), port, mcpToken), 60.seconds);
-            if ("sessionId" !in created.object || created["sessionId"].type != JSONType.string)
-                throw new Exception("Agent did not return a session");
+            JSONValue result;
+            int code;
+            string error;
+            if (!agent.poll(id, result, code, error))
+                continue;
 
-            execution.identify(created["sessionId"].str);
-        }
-
-        bound = execution.sessionId;
-        access.admitMcp(mcpToken, bound);
-        applyOptions(agent, created, bound, model, mode);
-
-        live = true;
-        long[] pending = [agent.send("session/prompt", promptParams(bound, prompt))];
-        execution.markSteerable();
-
-        bool[long] steered;
-        MonoTime deadline = MonoTime.currTime + execution.timeout;
-        bool cancelled;
-        bool failed;
-        string failure;
-        MonoTime cancelDeadline;
-        for (;;)
-        {
-            string[] queued = pending.length ? execution.takeSteering() : execution.closeSteering();
-            foreach (promptText; queued)
+            pending = pending[0..i]~pending[i + 1..$];
+            if (id in steered)
             {
-                try
-                {
-                    long sent = agent.send("session/prompt", promptParams(bound, promptText));
-                    pending ~= sent;
-                    steered[sent] = true;
-                }
-                catch (Exception)
-                {
-                    execution.steerDone();
-                    break;
-                }
+                steered.remove(id);
+                execution.steerDone();
             }
-            if (!pending.length)
-                break;
-
-            foreach (i, id; pending)
-            {
-                JSONValue result;
-                int code;
-                string error;
-                if (!agent.poll(id, result, code, error))
-                    continue;
-
-                pending = pending[0..i]~pending[i + 1..$];
-                if (id in steered)
-                {
-                    steered.remove(id);
-                    execution.steerDone();
-                }
-                if (error.length)
-                {
-                    if (!failed)
-                        failure = error;
-                    failed = true;
-                    break;
-                }
-
-                string reason = "stopReason" in result.object && result["stopReason"].type == JSONType.string ?
-                    result["stopReason"].str : null;
-                if (reason == "cancelled")
-                    cancelled = true;
-                else if (reason != "end_turn")
-                {
-                    failed = true;
-                    if (!failure.length)
-                        failure = "Agent stopped: "~(reason.length ? reason : "unknown");
-                }
-
-                break;
-            }
-
-            if (execution.stopped && !cancelled && cancelDeadline == MonoTime.init)
-            {
-                try
-                    agent.notify("session/cancel", JSONValue(["sessionId": JSONValue(bound)]));
-                catch (Exception)
-                {
-                }
-
-                cancelDeadline = MonoTime.currTime + 10.seconds;
-            }
-
-            if (cancelDeadline != MonoTime.init && MonoTime.currTime >= cancelDeadline)
-                break;
-            if (MonoTime.currTime >= deadline && !failed)
-            {
-                failed = true;
-                failure = "Agent turn timed out";
-                try
-                    agent.notify("session/cancel", JSONValue(["sessionId": JSONValue(bound)]));
-                catch (Exception)
-                {
-                }
-
-                Thread.sleep(500.msecs);
-                break;
-            }
-            if (agent.disconnected)
+            if (error.length)
             {
                 if (!failed)
-                {
-                    failed = true;
-                    failure = "Agent disconnected";
-                }
-
+                    failure = error;
+                failed = true;
                 break;
             }
 
-            Thread.sleep(10.msecs);
+            string reason = "stopReason" in result.object && result["stopReason"].type == JSONType.string ?
+                result["stopReason"].str : null;
+            if (reason == "cancelled")
+                cancelled = true;
+            else if (reason != "end_turn")
+            {
+                failed = true;
+                if (!failure.length)
+                    failure = "Agent stopped: "~(reason.length ? reason : "unknown");
+            }
+
+            break;
         }
 
-        execution.markSteerable(false);
-        agent.close();
-        TaskResult ret;
-        ret.reply = reply;
-        ret.exitStatus = JSONValue(agent.exitStatus);
-        if (cancelled || execution.stopped)
-            ret.cancelled = true;
-        if (failed && !ret.cancelled)
-            ret.error = failure.length ? failure : "Agent turn failed";
+        if (execution.stopped && !cancelled && cancelDeadline == MonoTime.init)
+        {
+            try
+                agent.notify("session/cancel", JSONValue(["sessionId": JSONValue(bound)]));
+            catch (Exception)
+            {
+            }
 
-        return ret;
-    };
+            cancelDeadline = MonoTime.currTime + 10.seconds;
+        }
+
+        if (cancelDeadline != MonoTime.init && MonoTime.currTime >= cancelDeadline)
+            break;
+        if (MonoTime.currTime >= deadline && !failed)
+        {
+            failed = true;
+            failure = "Agent turn timed out";
+            try
+                agent.notify("session/cancel", JSONValue(["sessionId": JSONValue(bound)]));
+            catch (Exception)
+            {
+            }
+
+            Thread.sleep(500.msecs);
+            break;
+        }
+        if (agent.disconnected)
+        {
+            if (!failed)
+            {
+                failed = true;
+                failure = "Agent disconnected";
+            }
+
+            break;
+        }
+
+        Thread.sleep(10.msecs);
+    }
+
+    execution.markSteerable(false);
+    agent.close();
+    CallResult ret;
+    ret.reply = reply;
+    ret.exitStatus = JSONValue(agent.exitStatus);
+    if (cancelled || execution.stopped)
+        ret.cancelled = true;
+    if (failed && !ret.cancelled)
+        ret.error = failure.length ? failure : "Agent turn failed";
+
+    return ret;
 }
 
-ExecutionTask controlTask(
+CallResult runControl(
+    Call execution,
     string socketPath,
     string token,
     string sessionId,
@@ -324,27 +306,25 @@ ExecutionTask controlTask(
     string mode
 )
 {
-    return (Execution execution) {
-        if (mode.length)
-            controlRequest(socketPath, token, "session/set_config_option",
-                optionParams(sessionId, "mode", mode), execution);
-        if (model.length)
-            controlRequest(socketPath, token, "session/set_config_option",
-                optionParams(sessionId, "model", model), execution);
+    if (mode.length)
+        controlRequest(socketPath, token, "session/set_config_option",
+            optionParams(sessionId, "mode", mode), execution);
+    if (model.length)
+        controlRequest(socketPath, token, "session/set_config_option",
+            optionParams(sessionId, "model", model), execution);
 
-        JSONValue result = controlRequest(socketPath, token, "session/prompt",
-            promptParams(sessionId, prompt), execution);
+    JSONValue result = controlRequest(socketPath, token, "session/prompt",
+        promptParams(sessionId, prompt), execution);
 
-        string reason = "stopReason" in result.object && result["stopReason"].type == JSONType.string ?
-            result["stopReason"].str : null;
-        TaskResult ret;
-        if (reason == "cancelled")
-            ret.cancelled = true;
-        else if (reason != "end_turn")
-            ret.error = "Agent stopped: "~(reason.length ? reason : "unknown");
+    string reason = "stopReason" in result.object && result["stopReason"].type == JSONType.string ?
+        result["stopReason"].str : null;
+    CallResult ret;
+    if (reason == "cancelled")
+        ret.cancelled = true;
+    else if (reason != "end_turn")
+        ret.error = "Agent stopped: "~(reason.length ? reason : "unknown");
 
-        return ret;
-    };
+    return ret;
 }
 
 JSONValue controlRequest(
@@ -352,19 +332,22 @@ JSONValue controlRequest(
     string token,
     string method,
     JSONValue params,
-    Execution execution = null
+    Call execution = null,
+    Duration limit = Duration.zero
 )
 {
     Socket connection = new Socket(AddressFamily.UNIX, SocketType.STREAM);
     scope(exit)
         connection.close();
+    connection.setOption(SocketOptionLevel.SOCKET, SocketOption.SNDTIMEO,
+        limit > Duration.zero ? limit : 2.seconds);
 
     try
         connection.connect(new UnixAddress(socketPath));
     catch (SocketOSException error)
         throw new BackendException("Could not reach the owning relay: "~error.msg);
 
-    string id = ACP_INJECT_PREFIX~randomUUID().toString();
+    string id = randomUUID().toString();
     JSONValue request = JSONValue([
         "token": JSONValue(token),
         "id": JSONValue(id),
@@ -375,6 +358,8 @@ JSONValue controlRequest(
 
     MonoTime deadline = execution is null ? MonoTime.currTime + 60.seconds :
         MonoTime.currTime + execution.timeout;
+    if (limit > Duration.zero)
+        deadline = MonoTime.currTime + limit;
     bool cancelling;
     connection.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, 100.msecs);
     string reply;
@@ -433,7 +418,9 @@ JSONValue controlRequest(
                             cast(int)error["code"].integer : -32603;
                         string message = "message" in error.object && error["message"].type == JSONType.string ?
                             error["message"].str : "Agent request failed";
-                        if (code == -32015)
+                        if (code == -32602)
+                            throw new InvalidInputException(message);
+                        if (code == -32015 || code == -32002)
                             throw new ConflictException(message);
                         throw new BackendException(message);
                     }
@@ -442,7 +429,11 @@ JSONValue controlRequest(
                 }
             }
             else
+            {
+                if (reply.length >= FRAME_LIMIT)
+                    throw new BackendException("ACP control reply exceeds the frame limit");
                 reply ~= cast(char)value;
+            }
         }
 
         if (MonoTime.currTime >= deadline)

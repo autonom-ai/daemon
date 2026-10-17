@@ -96,8 +96,7 @@ void authorize(Request request, Output output)
     bool coordination = request.path == "/api/profiles" || request.path.startsWith("/api/profiles/") ||
         request.path == "/api/rooms" || request.path.startsWith("/api/rooms/") ||
         request.path == "/api/messages" || request.path == "/api/events" ||
-        request.path == "/api/schedules" || request.path.startsWith("/api/schedules/") ||
-        request.path.startsWith("/api/permissions/");
+        request.path == "/api/schedules" || request.path.startsWith("/api/schedules/");
     bool granted = bridge.authenticate(request.header.read("x-autonom-run"), session) !is null;
     if (!granted)
     {
@@ -114,7 +113,7 @@ void refresh(Request request)
     bridge.sweepObserved();
     foreach (id; bridge.collect())
         profileStore.unlinkSession(id);
-    foreach (execution; bridge.listExecutions())
+    foreach (execution; bridge.listCalls())
     {
         if (!execution.profileName.length || !execution.sessionId.length || !bridge.access.managed(execution.sessionId))
             continue;

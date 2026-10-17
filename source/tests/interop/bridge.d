@@ -1,4 +1,4 @@
-module tests.bridge;
+module tests.interop.bridge;
 
 import daemon.interop;
 import tests.common;
@@ -10,10 +10,6 @@ import std.conv : octal;
 import std.file;
 import std.path : buildPath;
 import std.string : splitLines, strip;
-
-private:
-
-public:
 
 @Name("Bridge owns one canonical handle per session independently of profiles")
 unittest
@@ -30,17 +26,6 @@ unittest
     (fixture.store.register("marlow", "session-1").session is session).should == true;
 }
 
-@Name("Bridge lists CLI session IDs from stdout only")
-unittest
-{
-    Fixture fixture = Fixture.create();
-    scope(exit)
-        fixture.close();
-
-    installFake(fixture);
-    fixture.bridge.list(fixture.root).should == ["session-1", "session-2"];
-}
-
 @Name("Bridge prints with a supplied model and literal prompt")
 unittest
 {
@@ -49,9 +34,9 @@ unittest
         fixture.close();
 
     installFake(fixture);
-    Execution execution = fixture.bridge.print("hello $(world)", fixture.root, "SWE-2");
+    Call execution = fixture.bridge.print("hello $(world)", fixture.root, "SWE-2");
     execution.wait();
-    execution.status.should == ExecutionStatus.Succeeded;
+    execution.status.should == CallStatus.Succeeded;
     (execution.sessionId.length != 0).should == true;
     execution.toJSON()["reply"].str.canFind("hello $(world)").should == true;
     fixture.bridge.print("", fixture.root).shouldThrow!Exception();
@@ -65,9 +50,9 @@ unittest
         fixture.close();
 
     installFake(fixture);
-    Execution failed = fixture.bridge.print("fail", fixture.root);
+    Call failed = fixture.bridge.print("fail", fixture.root);
     failed.wait();
-    failed.status.should == ExecutionStatus.Failed;
+    failed.status.should == CallStatus.Failed;
     failed.toJSON()["error"].str.canFind("prompt failed").should == true;
     fixture.bridge.run(["slow"], fixture.root, 100.msecs).shouldThrow!Exception();
 }
@@ -91,7 +76,7 @@ unittest
     session.remove();
     readText(buildPath(fixture.root, "removed.txt")).splitLines.should == ["rm", "--force", "--", "session-1"];
     exists(log).should == false;
-    Execution missing = fixture.bridge.remove("missing");
+    Call missing = fixture.bridge.remove("missing");
     missing.wait();
-    missing.status.should == ExecutionStatus.Failed;
+    missing.status.should == CallStatus.Failed;
 }

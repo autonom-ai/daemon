@@ -17,5 +17,12 @@ jobs:
         run: dub build --compiler=ldc2 --config=daemon
       - name: Run unit tests
         run: dub run --compiler=ldc2 --config=unit --build=unittest
-      - name: Build eval runner
-        run: dub build --compiler=ldc2 --config=eval
+      - name: Run MCP tests
+        run: python3 source/mcp/tests.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source/launcher/package-lock.json
+      - name: Check launcher
+        run: npm --prefix source/launcher ci && npm --prefix source/launcher run check

@@ -1,184 +1,15 @@
 module daemon.interop.session;
 
 import daemon.exception;
-import daemon.http;
-import daemon.interop.execution;
+import daemon.interop.bridge;
+import daemon.interop.bridge;
 import daemon.interop.metadata : SessionMetadata;
-import daemon.runtime;
-import daemon.storage;
-import serverino;
 
 import std.ascii;
-import std.file;
-import std.json : JSONType, JSONValue;
+import std.json : JSONValue;
 import std.typecons : Nullable;
 
-private:
-
-Session lookupSession(string PATTERN)(Request request, Output output)
-{
-    Session ret = bridge.findSession(routeParameter!PATTERN(request));
-    if (ret is null)
-        respondError(output, 404, "Session not found");
-
-    return ret;
-}
-
 public:
-
-@priority(10) @endpoint @route!"/api/sessions/remove"
-void removeSessions(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Post]))
-        return;
-
-    JSONValue data = readBody(request);
-    if (data.object.length != 1 || "ids" !in data.object)
-        throw new InvalidInputException("Expected only the ids field");
-    if (data["ids"].type != JSONType.array)
-        throw new InvalidInputException("Session IDs must be an array");
-
-    bool[string] seen;
-    foreach (id; data["ids"].array)
-    {
-        if (id.type != JSONType.string)
-            throw new InvalidInputException("Session IDs must be strings");
-        if (id.str in seen)
-            throw new InvalidInputException("Session IDs must be unique");
-
-        Session.validateId(id.str);
-        seen[id.str.idup] = true;
-    }
-
-    JSONValue ret = JSONValue.emptyObject;
-    ret["ids"] = data["ids"];
-    ret["executions"] = JSONValue.emptyArray;
-    ret["failed"] = JSONValue.emptyArray;
-    bool pending;
-    foreach (id; data["ids"].array)
-    {
-        try
-        {
-            Execution execution = bridge.remove(id.str);
-            ret["executions"].array ~= JSONValue(["id": JSONValue(execution.id), "sessionId": id]);
-            pending = pending || execution.running;
-        }
-        catch (Exception)
-            ret["failed"].array ~= id;
-    }
-
-    respond(output, ret, pending ? 202 : ret["failed"].array.length ? 503 : 200);
-}
-
-@endpoint @route!(matchesPath!"/api/sessions/<id>")
-void getSession(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Delete]))
-        return;
-
-    if (request.method == Request.Method.Delete)
-        respond(output, bridge.remove(routeParameter!"/api/sessions/<id>"(request)).toJSON(), 202);
-    else
-    {
-        Session session = lookupSession!"/api/sessions/<id>"(request, output);
-        if (session !is null)
-            respond(output, session.toJSON());
-    }
-}
-
-@endpoint @route!(matchesPath!"/api/sessions/<id>/resume")
-void resumeSession(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Post]))
-        return;
-
-    Launch launch = readLaunch(request);
-    string id = routeParameter!"/api/sessions/<id>/resume"(request);
-    if (!bridge.access.managed(id) && !bridge.observedSession(id))
-        throw new ConflictException("Only sessions started or observed by Autonom may be resumed by Autonom");
-
-    Session session = bridge.session(id);
-    if (bridge.observedSession(id))
-    {
-        if (bridge.observedActive(id))
-            throw new ConflictException("Session is already active");
-    }
-    else if (session.isRunning() || bridge.online(id))
-        throw new ConflictException("Session is already active");
-
-    session.resume(
-        launch.prompt,
-        launch.directory,
-        launch.model,
-        launch.mode
-    );
-    respond(output, session.toJSON());
-}
-
-@endpoint @route!(matchesPath!"/api/sessions/<id>/steer")
-void steerSession(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Post]))
-        return;
-
-    JSONValue data = readBody(request);
-    if (data.object.length != 1 || "prompt" !in data.object || data["prompt"].type != JSONType.string)
-        throw new InvalidInputException("Expected only the prompt field");
-
-    string id = routeParameter!"/api/sessions/<id>/steer"(request);
-    if (!bridge.access.managed(id) && !bridge.observedSession(id))
-        throw new ConflictException("Only sessions started or observed by Autonom may be steered");
-
-    Session session = lookupSession!"/api/sessions/<id>/steer"(request, output);
-    if (session is null)
-        return;
-
-    respond(output, session.steer(data["prompt"].str).toJSON(), 202);
-}
-
-@endpoint @route!(matchesPath!"/api/sessions/<id>/stop")
-void stopSession(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Post]))
-        return;
-
-    if (readBody(request).object.length != 0)
-        throw new InvalidInputException("Expected an empty JSON object");
-    Session session = lookupSession!"/api/sessions/<id>/stop"(request, output);
-    if (session is null)
-        return;
-
-    session.requestStop();
-    respond(output, session.toJSON(), 202);
-}
-
-@endpoint @route!(matchesPath!"/api/sessions/<id>/log")
-void sessionLog(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get]))
-        return;
-
-    Session session = lookupSession!"/api/sessions/<id>/log"(request, output);
-    if (session is null)
-        return;
-
-    if (!exists(session.logPath))
-        respondError(output, 404, "Session log not found");
-    else
-        respond(output, JSONValue(["log": JSONValue(readText(session.logPath, 1024 * 1024))]));
-}
-
-@endpoint @route!(matchesPath!"/api/sessions/<id>/manage")
-void manageSession(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Post]))
-        return;
-
-    string id = routeParameter!"/api/sessions/<id>/manage"(request);
-    Session.validateId(id);
-    bridge.access.remember(id, false);
-    respond(output, JSONValue(["id": JSONValue(id), "managed": JSONValue(true)]));
-}
 
 enum SessionStatus : string
 {
@@ -190,13 +21,20 @@ enum SessionStatus : string
     Failed = "failed"
 }
 
-abstract class Session
+class Session
 {
 private:
-    Execution _execution;
+    Call _execution;
+    Bridge bridge;
+    SessionMetadata _metadata;
 
 package(daemon.interop):
-    void bindExecution(Execution execution)
+    void updateMetadata(SessionMetadata data)
+    {
+        _metadata = data;
+    }
+
+    void bindCall(Call execution)
     {
         _execution = execution;
     }
@@ -216,18 +54,15 @@ public:
         }
     }
 
-    this(string id)
+    this(string id, Bridge bridge)
     {
         validateId(id);
         this.id = id.idup;
+        this.bridge = bridge;
     }
 
-    Execution execution()
+    Call execution()
         => _execution;
-
-    abstract SessionStatus status();
-
-    abstract SessionMetadata metadata();
 
     string model()
         => metadata.model;
@@ -244,25 +79,12 @@ public:
     bool isRunning()
         => _execution !is null && _execution.running;
 
-    abstract void resume(
-        string prompt,
-        string directory,
-        string model = null,
-        string mode = null
-    );
-
-    abstract Execution steer(string prompt);
-
-    abstract void requestStop();
-
     void stop()
     {
         requestStop();
         if (_execution !is null)
             _execution.wait();
     }
-
-    abstract void remove();
 
     Nullable!int exitStatus()
     {
@@ -272,10 +94,10 @@ public:
         return Nullable!int(cast(int)_execution.exitStatus.integer);
     }
 
-    abstract string logPath();
-
-    JSONValue toJSON()
+    JSONValue toJSON(bool refresh = true)
     {
+        if (refresh)
+            _metadata = bridge.sessionMetadata(id);
         SessionMetadata data = metadata;
         if (!data.id.length && _execution !is null)
         {
@@ -291,4 +113,70 @@ public:
         ret["executionId"] = _execution is null ? JSONValue(null) : JSONValue(_execution.id);
         return ret;
     }
+
+    SessionMetadata metadata()
+        => _metadata;
+
+    SessionStatus status()
+    {
+        if (execution !is null && execution.status == CallStatus.Stopping)
+            return SessionStatus.Stopping;
+
+        if (isRunning())
+            return bridge.online(id) ? SessionStatus.Online : SessionStatus.Starting;
+        if (bridge.observedActive(id))
+            return SessionStatus.Online;
+        if (bridge.online(id))
+            return SessionStatus.Loaded;
+
+        if (execution !is null && (execution.status == CallStatus.Failed ||
+            execution.status == CallStatus.Interrupted))
+            return SessionStatus.Failed;
+
+        return SessionStatus.Offline;
+    }
+
+    void resume(
+        string prompt,
+        string directory,
+        string model = null,
+        string mode = null
+    )
+    {
+        if (bridge.observedSession(id))
+        {
+            if (bridge.observedActive(id))
+                throw new ConflictException("Session is already active");
+
+            bridge.resumeObserved(id, prompt, directory, model, mode);
+            return;
+        }
+
+        if (isRunning() || bridge.online(id))
+            throw new ConflictException("Session is already active");
+
+        bridge.resume(id, prompt, directory, model, false, mode);
+    }
+
+    Call steer(string prompt)
+        => bridge.steer(id, prompt);
+
+    void requestStop()
+    {
+        if (isRunning())
+            execution.requestStop();
+        else if (bridge.observedActive(id))
+            bridge.cancelObserved(id);
+        else if (bridge.online(id))
+            throw new ConflictException("Cannot stop a session owned by another process");
+    }
+
+    void remove()
+    {
+        bridge.remove(id).wait();
+        bridge.collect();
+    }
+
+    string logPath()
+        => bridge.logPath(id);
 }

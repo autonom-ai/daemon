@@ -2,7 +2,7 @@ module tests.common;
 
 import daemon.agent;
 import daemon.config;
-import daemon.interop.devin;
+import daemon.interop.bridge;
 
 import std.algorithm.searching : startsWith;
 import core.thread : Thread;
@@ -84,7 +84,7 @@ public:
     string root;
     string path;
     Config config;
-    Devin bridge;
+    Bridge bridge;
     ProfileStore store;
 
     static Fixture create(string command = "./devin")
@@ -99,7 +99,7 @@ public:
         write(ret.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: "~
             JSONValue(command).toString()~"\n"~ROUTER);
         ret.config = new Config(ret.path);
-        ret.bridge = new Devin(ret.config);
+        ret.bridge = new Bridge(ret.config);
         ret.store = new ProfileStore(ret.config, ret.bridge);
         return ret;
     }

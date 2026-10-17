@@ -19,9 +19,9 @@ and offers no implementation plan.
 
 The file inventories in [daemon-map.md](daemon-map.md) and
 [repo-map.md](repo-map.md) cover every tracked file at the audited revision.
-The focused investigations are [sessions-acp.md](sessions-acp.md),
-[permissions.md](permissions.md), and
-[reference-style.md](reference-style.md).
+The focused investigations are [sessions-acp.md](sessions-acp.md) and
+[permissions.md](permissions.md). The earlier style study has been superseded
+by the corrected [Autonom code style](style-rules-revision.md).
 
 ## Lens from the request
 
@@ -241,10 +241,9 @@ an open document, but that path was absent on disk and not tracked at this
 revision. No file at that path was overwritten. The review and module maps
 are being written as new, explicitly allowed `research/` documents.
 
-Concrete style evidence, including `intuit`, `selenium`, `Insurgent`, Apps,
-and where they differ, is collected in
-[reference-style.md](reference-style.md); this review does not turn old
-global-memory rules into project conventions.
+The style findings in this historical review were superseded by the current
+code-style guide, which uses `intuit`, `selenium`, `akashi`, and `multidasm` as
+the authoritative references.
 
 ## Questions the evidence leaves open
 

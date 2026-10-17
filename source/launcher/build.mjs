@@ -40,13 +40,16 @@ await Promise.all([
         loader: { ".svg": "text", ".css": "text" },
     }),
 ]);
-const tests = (await readdir(join(launcher, "tests", "unit"))).filter((name) => name.endsWith(".ts"));
-if (tests.length)
-    await build({
-        ...common,
-        entryPoints: tests.map((name) => join(launcher, "tests", "unit", name)),
-        outdir: join(dist, "tests", "unit"),
-        platform: "node",
-        format: "cjs",
-        loader: { ".svg": "text", ".css": "text" },
-    });
+for (const suite of ["unit", "integration"])
+{
+    const tests = (await readdir(join(launcher, "tests", suite))).filter((name) => name.endsWith(".ts"));
+    if (tests.length)
+        await build({
+            ...common,
+            entryPoints: tests.map((name) => join(launcher, "tests", suite, name)),
+            outdir: join(dist, "tests", suite),
+            platform: "node",
+            format: "cjs",
+            loader: { ".svg": "text", ".css": "text" },
+        });
+}

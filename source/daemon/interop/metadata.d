@@ -12,6 +12,7 @@ struct SessionMetadata
     string title;
     string mode;
     string backend;
+    string acp;
     long createdAt;
     long lastActivityAt;
     bool hidden;
@@ -26,6 +27,7 @@ struct SessionMetadata
             "title": JSONValue(title),
             "mode": JSONValue(mode),
             "backend": JSONValue(backend),
+            "acp": acp.length ? JSONValue(acp) : JSONValue(null),
             "createdAt": JSONValue(createdAt),
             "lastActivityAt": JSONValue(lastActivityAt),
             "hidden": JSONValue(hidden),

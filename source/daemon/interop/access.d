@@ -1,6 +1,6 @@
 module daemon.interop.access;
 
-import daemon.interop.execution;
+import daemon.interop.bridge;
 import daemon.interop.session;
 import daemon.storage;
 
@@ -85,24 +85,24 @@ public:
     string[] ids()
         => sessions.keys;
 
-    string begin(Execution execution)
+    string begin(Call execution)
     {
         string ret = secret();
         grants[ret] = execution;
         return ret;
     }
 
-    Execution authenticate(string token, string session, bool bind = false)
+    Call authenticate(string token, string session, bool bind = false)
     {
         if (!token.length || !session.length)
             return null;
 
-        Execution* found = token in grants;
-        if (found is null || !(*found).running || (*found).kind == ExecutionKind.Remove)
+        Call* found = token in grants;
+        if (found is null || !(*found).running || (*found).kind == CallKind.Remove)
             return null;
 
-        Execution ret = *found;
-        bool started = ret.kind == ExecutionKind.Start || ret.kind == ExecutionKind.Print;
+        Call ret = *found;
+        bool started = ret.kind == CallKind.Start || ret.kind == CallKind.Print;
         if (!started && !managed(session))
             return null;
         if (!ret.sessionId.length)
@@ -203,7 +203,7 @@ private:
     string managedPath;
     string mcpDir;
     bool[string] sessions;
-    Execution[string] grants;
+    Call[string] grants;
     string[string] mcpGrants;
     Mutex mcpMutex;
 

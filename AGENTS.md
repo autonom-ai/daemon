@@ -1,104 +1,78 @@
-# Verification
+# Development
 
-- Default target is the daemon: `dub build --compiler=ldc2`.
+- D: `dub build --compiler=ldc2 --config=daemon` and
+  `dub build --compiler=ldc2 --config=relay`.
 - Tests: `dub run --compiler=ldc2 --config=unit --build=unittest`.
-- Eval runner: `dub build --compiler=ldc2 --config=eval`.
-- Unit tests and evals launch the production daemon on loopback port 18080; do not run them concurrently.
-- Live evals: `dub run --compiler=ldc2 --config=eval`; runs policy and sessions by default. Export `OPENROUTER_API_KEY`.
-- Select a suite with `-- --policy` or `-- --sessions`; session-only evals do not require the OpenRouter key.
-- Session evals default to `swe-2-medium`; override with `AUTONOM_EVAL_MODEL` or `AUTONOM_EVAL_CLI`.
-- Evals own a temporary workspace, remove only newly created sessions on success or failure, and verify cleanup.
-- The eval-only CLI wrapper disables workspace trust checks for that empty temporary workspace, not user workspaces.
-- Launcher: `npm --prefix source/launcher ci && npm --prefix source/launcher run check && npm --prefix source/launcher test`; output is repository-root `dist/`. Run `node dist/launcher.js` after building; every argument except `--debug[=port]` is forwarded to Devin Desktop. There is no Python runner; Node 22+ is required.
+  These launch the production daemon on loopback port 18080; run serially.
+- Launcher: Node 22+, `npm --prefix source/launcher ci`, then
+  `npm --prefix source/launcher run check` and
+  `npm --prefix source/launcher test`. Output is repository-root `dist/`.
+- Real CLI integration: `dub run --compiler=ldc2 --config=unit --build=unittest
+  --d-version=devin`; isolates XDG state and requires no model credentials.
+- Installed Desktop build check: `npm --prefix source/launcher run test:integration`.
+  This reads the actual installation; it does not launch Desktop or validate UI.
+- MCP: `python3 source/mcp/tests.py` (standard library only).
+- Installer: `python3 install.py`; build as the normal user. For a protected
+  installation, build first, then `sudo python3 install.py --no-build`.
+  Installer tests use temporary installation trees, never profile copies.
+- There is no eval configuration. Use `--skip-registry=all` with DUB when
+  dependencies are already cached and network access is unavailable.
 
-# Runtime
+# Ownership
 
-- `daemon.app` is the executable entrypoint; `daemon.server` assembles the worker-owned runtime and Serverino lifecycle.
-- `daemon.agent` owns profiles and durable profile-to-session assignments. `daemon.interop` owns canonical backend session handles, process executions, and CLI integration.
-- One persistent Serverino worker owns mutable registries and profile state. Execution monitor threads own only their child process and execution record; do not add Serverino workers or worker recycling.
-- `daemon.events` owns pending events, schedules, session wakes, and the clock thread: `events.event` holds the pending-event store, `events.schedule` the schedule store and its endpoints, and `events.scheduler` the wake logic and background thread.
-- Execution records are version 2 with a `finishedAt` timestamp; version 1 records still load. `compact` uses the CLI compaction-threshold environment override, not `/compact`; an execution may declare a `dependency` that must finish before it spawns. Session metadata and conversation history come from the CLI database; executions track daemon-owned process lifecycle.
-- The daemon owns one scheduler thread. It only watches due clock times in the coordination files and pokes `POST /api/schedules/refresh` over loopback; the single worker fires due events and launches wakes during its per-request refresh, so all state stays worker-owned.
-- `interop.devin.db` reads model, working directory, title, mode, timestamps, and the main conversation chain from the CLI SQLite database (`arsd-official:sqlite`, opened read-only at `sessions.db` beside `sessionLockDir`). Execution launch values are used only while a new session has no database row. Last activity is not a running-state signal; a foreign held session lock means `loaded`, not `online`.
-- `AUTONOM_CONFIG` selects the required YAML configuration and `AUTONOM_PORT` overrides the default loopback port 8080.
-- `templates/config.yml` is the starting configuration. `devinCommand` and `router` are required; `dataDir` defaults to the config directory and `sessionLockDir` to the Devin XDG data path. `compactOnResume` (boolean) forces compaction before every resume, and `offlineStartAfter`/`offlineCompactAfter` accept durations such as `30m` or `1h` or integer seconds.
-- `daemon.config` supports `router.type: openrouter` with required `key`, `url`, and `name`; `referer` and `title` are optional. Missing or unsupported router settings fail startup; environment variables and `.env` files are not consulted for router keys.
-- Devin Desktop exports `ACP_BACKEND=windsurf`; unset it for direct CLI checks. The bridge scrubs host prefixes itself.
-- Sessions own their IDs: Serverino request strings can reference reused buffers and cannot be retained as cache keys.
-- `POST /api/sessions` and `POST /api/print` return HTTP 202 with an execution ID. `GET /api/executions/<id>` exposes `running|stopping|succeeded|failed|stopped|interrupted`, exit status, error, session ID, and a print reply on success.
-- `POST /api/executions/<id>/stop` requests cancellation without waiting for the CLI process.
-- `POST /api/sessions/<id>/resume` continues a session with a prompt and returns its execution ID; the execution exposes a failed status if the backend rejects the session.
-- `DELETE /api/sessions/<id>` returns one removal-execution record. `POST /api/sessions/remove` validates the whole batch and returns `{"ids":[...],"executions":[{"id":"...","sessionId":"..."}],"failed":[...]}`. Removal executes asynchronously; poll each execution and trust only `status: succeeded`.
-- `templates/hooks.v1.json`, installed at `.devin/hooks.v1.json`, forwards all eight Devin hook events through `source/daemon/interop/devin/hook.py`; replace `{{AUTONOM_ROOT}}` when installing manually. The Python hook applies a 2 GB memory limit in its launch command. Policy is on `PreToolUse`; `PermissionRequest` queues human approvals and waits in the hook process, never the Serverino worker.
-- `templates/mcp_config.json`, installed at `.devin/mcp_config.json`, stays empty: the `autonom-coord` MCP server (`source/mcp/server.py`, a stdlib-only Python stdio JSON-RPC proxy to the daemon's HTTP API) is injected dynamically. Daemon executions add it to `session/new`/`session/load` params in `acpTask`; the `autonom-acp` relay rewrites those request frames for Desktop sessions. Injection carries a daemon-issued `AUTONOM_MCP_TOKEN` whose session binding is established by `POST /api/acp/admit` (relay) or by the execution itself, and `server.py` resolves its session via `GET /api/mcp/session` instead of trusting a `session_id` argument.
-- `source/mcp/server.py --ensure` starts `bin/autonom-daemon` detached on `AUTONOM_PORT` and waits for health. Concurrent MCP servers single-flight under `$XDG_CACHE_HOME/autonom`; daemon output goes to `daemon-<port>.log`. A failed managed PreToolUse or PermissionRequest hook returns an explicit block, not a generic nonblocking error.
-- Hook forwarding uses loopback and `AUTONOM_PORT` (default 8080), disables proxies, and authenticates with `x-autonom-run` (daemon-issued execution capability) or `x-autonom-mcp` (session capability read from `AUTONOM_DATA_DIR/mcp/<session>.token`, written on admission and removed on revocation or daemon restart). Managed tools and hooks bind their capability to one session; unmanaged sessions expose no Autonom MCP tools, and their ordinary tools are not screened by Autonom.
-- The relay's observer records sessions in the daemon via `POST /api/acp/observe` heartbeats (authoritative per connection), admits injected capabilities synchronously, and exposes a token-authenticated Unix control socket for `session/prompt`, `session/cancel`, and `session/set_config_option` injection. It scrubs `ACP_*` and inherited `AUTONOM_*` capabilities from the `devin acp` child and sets `AUTONOM_DATA_DIR` so hook processes can read session tokens.
-- Start, print, resume, and removal commands run as bounded, persisted executions outside the Serverino request worker; hooks can be served while those processes run.
-- Backend session listing remains synchronous and is limited to two seconds; model-screening policy checks remain synchronous and are limited to eight seconds.
+- `daemon.app` / `daemon.server`: entrypoint and one persistent Serverino
+  worker. `daemon.runtime` assembles the worker-owned domain objects.
+- `daemon.interop`: CLI processes, canonical sessions, ACP, and capabilities.
+  The read-only CLI database supplies session metadata and conversation history.
+- `daemon.agent`: profiles and durable assignments. `daemon.coord`: rooms,
+  streams, and cursors. `daemon.events`: pending events, schedules, and wakes.
+- `daemon.policy` / `daemon.hooks`: policy screening and authenticated hooks.
+- `source/mcp/server.py`: stdio JSON-RPC proxy to the daemon.
+- `source/launcher`: Desktop startup, native runtime, page bridge, and settings.
+  `assets`: configured pages. `install.py`: transactional installation.
 
-# Profiles
+# Invariants
 
-- Profiles live under `dataDir/agents`. `state.json` is the authoritative versioned snapshot of permanent session-to-profile assignments and current profile bindings.
-- Legacy `sessions.json` and per-profile `session.json` files are imported once when no snapshot exists; they are retained and never rewritten. Each subsequent change atomically replaces the single snapshot.
-- Store state is held in memory and flushed atomically on change; there are no lock files because the single worker owns every mutation.
-- A profile is locked while its bound session is running or online; rebinding it to another session requires that session to be stopped.
-- Sessions keep their profile permanently, and removing a session clears the profile binding; lookups work by name or by session.
-- `human` is reserved: no session may register it, and it administers every room.
+- Keep mutable registries and domain state on the single worker. Monitor
+  threads own only their child and live call state. The scheduler thread
+  pokes loopback refresh; it does not mutate stores.
+- Own session IDs and retained request strings; Serverino buffers are reused.
+- Keep child work and human waits outside the HTTP worker. Bound processes,
+  output, requests, and deadlines; cancel and reap owned children safely.
+- Discovery does not grant control. Scope capabilities to their session/run;
+  never expose operator credentials to pages, children, or logs. Scrub inherited
+  host ACP/Desktop variables. Keep credential-bearing configuration private.
+- Open the CLI database read-only. A held foreign lock means loaded elsewhere,
+  not active generation or permission to control that process.
+- Preserve configuration, data, sessions, and file logs. Reconcile uncertain
+  interrupted wakes without blindly replaying prompts.
+- Enforce policy on `PreToolUse`, including automatic/bypassed calls.
+  Human permission requests use native Desktop and HTTP, without a custom UI.
 
-# Coordination
+# Style and refactor
 
-- Coordination state lives under `dataDir/coord`: `rooms/<name>/{messages.jsonl,profiles.json}` and `inboxes/<profile>/{dms.jsonl,pings.jsonl,cursors.json,events.json,schedules.json}` plus `wakes.json`. Workspaces keep only `.devin/policy.yml` and `.devin/hooks.v1.json`.
-- `daemon.coord` owns the bus: append-only jsonl streams with the most recent 1000 entries held in memory, per-profile read cursors, and rooms with an owner, admins, and an optional involved list.
-- Cursors index the in-memory window and are clamped to it on load, so a restart re-delivers at most one window per stream. Trimming shifts cursors with the window.
-- Rooms are global and report themselves as unknown to profiles that cannot see them and to non-administrators; only the original owner changes admins.
-- Coordination endpoints take the caller's `session` as a query parameter and require a registered session: `GET/POST /api/rooms`, `GET/DELETE /api/rooms/<name>`, `GET/POST /api/rooms/<name>/messages`, `GET/POST /api/rooms/<name>/membership`, `POST /api/rooms/<name>/admins`, `DELETE /api/rooms/<name>/admins?profile=`, and `GET/POST /api/messages` (`source=dms|pings`).
-- Reading a stream advances the cursor past the entries returned, and a first read starts with the newest `limit` entries. Own posts are never unread; message text is capped at 4000 characters.
-- `PreToolUse` screens every tool call through the workspace policy, then blocks every tool while the session's profile has unread events, except `mcp__autonom-coord__read_events`; it injects `session_id` into `mcp__autonom-coord__*` input, adopts a freshly started session to its profile when its first hook arrives from the wake workspace, and fails closed when profile access cannot be verified. Unmanaged sessions are blocked from the Autonom MCP prefix.
-- `UserPromptSubmit` and `PostToolUse` inject an `additionalContext` reminder naming up to five unread events when the session's profile has any; unregistered sessions and sessions with no unread events get `{}`.
+Use [the adopted style revision](research/style-rules-revision.md) and
+[the simplification plan](research/plan.md). Prefer direct domain ownership,
+small intentional APIs, and language-native code. D and TypeScript use
+four-space Allman layout, meaningful camelCase names, PascalCase types, and
+`ret` for constructed results. Group project, dependency, then runtime imports.
+Use intentional access sections and field-like accessors; choose `auto`, `ref`,
+`@property`, and lifetime attributes for their semantics. Python follows Python
+conventions. Tests follow Selenium's domain layout and `@Name`/`unittest`,
+`@ShouldFailWith`, and scope cleanup conventions. Prefer real components;
+model simulation and narrow installer filesystem fixtures are permitted.
+Keep tests against installed peers in explicit integration suites. Avoid unrelated formatting and speculative abstractions.
 
-# Events
+# Desktop safety
 
-- Pending events live in `inboxes/<profile>/events.json` with at most 1000 entries, keyed by the stream entry ID so a ping and a matching room schedule surface one event. Pings always surface a `ping` event; scheduled activity surfaces `room`, `dm`, or `clock` events.
-- `GET /api/events?session=` returns every pending event and clears them. Reading pings, dms, or a room clears the matching events, and events carry a nullable `schedule` field naming the schedule that matched.
-- Schedules live in `inboxes/<profile>/schedules.json` and are created per profile: `GET/POST /api/schedules?session=` and `DELETE /api/schedules/<id>?session=`. Ping and dm schedules match every event or one `from` profile; room schedules also name a visible room; clock schedules take `at` (one-shot ISO-8601 timestamp) or `every` (seconds, repeats until cancelled, up to 30 days).
-- `POST /api/schedules/refresh` fires due clock schedules and reconciles wakes; the scheduler thread pokes it, and every request also runs the same refresh before its handler.
-- When an event fires for an offline profile: a scheduled event resumes the session (compacting first when offline longer than `offlineCompactAfter`, or always with `compactOnResume`); an unscheduled ping starts a fresh session in the pinging profile's workspace with the target's last model when offline longer than `offlineStartAfter`, else resumes. A ping whose fresh start has no pinging workspace drops the event.
-- Wakes are recorded in `wakes.json` until their execution finishes: a successful start registers the new session to the profile, a failed wake re-surfaces its events, and a profile with an in-flight wake is never woken twice. Sessions that cannot be resumed only surface events.
+Read [the Desktop contract](docs/COMMAND_CENTER.md) and
+[the validation procedure](docs/COMMAND_CENTER_VALIDATION.md) before changes
+to native integration. Respect the pinned build and integrity checks. Only
+patch the installed CLI shim and copy the launcher payload; never rewrite
+vendor bundles, checksums, CSP, or profile data, weaken sandboxing, or hide
+integrity warnings. Runtime patches must restore exact descriptors.
 
-# Policy
-
-- Policy is enforced by the `PreToolUse` hook, which fires for every tool call regardless of permission mode: denials return `{"decision":"block","reason":"..."}` and everything else returns `{}`, so policy can auto-reject but never auto-approve. Screening cannot live on `PermissionRequest` because auto-approved and bypassed calls never reach it.
-- The hook policy directory comes from the authenticated execution workspace, then the CLI database. Untrusted hook payload fields cannot select another workspace's policy.
-- `POST /api/policy/check` accepts string `directory` and `tool`, with optional object `input`.
-- Workspace policy is `<directory>/.devin/policy.yml`, containing a required `rules` list; files reload on each check.
-- `templates/policy.yml` is the starting workspace policy, installed at `.devin/policy.yml`; it screens with `inception/mercury-decide:free`.
-- Rules use `action: allow|deny|screen`; `match` maps `tool` or input field names to regular expressions.
-- First matching rule wins; no match denies. Invalid policies or unavailable decisions return HTTP 503 with `denied: true`.
-- Screen rules require predicate `questions` and a `models` list tried in order; `reason` defaults to null and `threshold` to 0.5.
-- Screening receives the tool input unchanged; denial occurs when any answer probability meets the rule threshold.
-- Config owns one shared Intuit `IRouter`; policy checks clear its context on every success and failure.
-- Keep credential-bearing config files private. The live policy eval takes `OPENROUTER_API_KEY` only to write its protected temporary config; production reads the configured router key.
-
-# Launcher
-
-- `source/launcher/` launches Devin Desktop with `--remote-debugging-pipe` and attaches the Autonom Command Center. It replaces the former VS Code extension: no extension host or VSIX. Build/check/test from `source/launcher/`, then run `node dist/launcher.js <args>`; every argument except `--debug` is forwarded to Desktop unchanged, so `devin-desktop --debug` works through the installed CLI wrapper too. Default transport is the private pipe. `--debug[=port]` switches to a loopback port (default 9222), verifies the spawned browser PID, and never persists the debugging flag.
-- `launcher.ts` owns startup, window attachment, serialized refresh, reload, and shutdown in one imperative flow. `desktop.ts` resolves the Electron binary and owns the fd 3/4 pipe transport; `cdp.ts` owns requests, sessions, and the pinned service capture. `runtime.ts` overlays native navigation and custom pages; `center.ts` is the browser-safe content model. `config.ts` owns bounded file access, definition validation, and YAML settings; `bridge.ts` dispatches page actions; `client.ts` owns daemon access; `control.ts` serves the private inspection socket.
-- `install.sh` replaces Devin Desktop's `bin/devin-desktop` CLI shim with a direct `exec node <installed>/autonom/dist/launcher.js "$@"` wrapper and preserves the original shim byte-for-byte. It leaves the Electron binary and package entrypoint untouched and copies the launcher runtime/assets/daemon/MCP files under `/usr/share/devin-desktop/autonom`.
-- Build/install as the normal user with `bash install.sh`, or build first and run `sudo bash install.sh --no-build` for a root-owned installation. `--check` verifies status; `--uninstall` restores the CLI shim byte-for-byte. `--app <resources/app>` selects the installation. Tests exercise install, re-install, rollback, external-edit refusal, and build-pin refusal against temporary installation copies, never profile copies.
-- `desktop.verifyDesktopBuild` fails closed unless the installation is Desktop 1.126.0, commit `fcf7ba39e6150055fad817f8716385b4d320d46d`, with the pristine `out/vs/workbench/workbench.desktop.main.js` SHA-256 `da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d`. Spawned children run with a scrubbed environment: inherited `ACP_*`, `ELECTRON_*`, `VSCODE_*`, and `WINDSURF_*` variables are removed so launching from a terminal inside Devin Desktop does not leak host state into the new instance.
-- `assets/ui.yml` defines nested ordered sections/items with `actions.left_click` pointing to relative `.html` or `.js` assets. `devin_cloud` lists imported native IDs (Wiki is YAML-selected, never hardcoded), optionally positioned in sections without actions. `active_item` selects the default HTML action only in Autonom Agent mode. `assets/ui.css` is dynamically loaded; HTML/JS is validated up front and lazy-loaded/cached per file version. Asset edits trigger debounced atomic reload; invalid edits keep the working snapshot.
-- The runtime is installed with `AutonomRuntime.install(services, config).update(config)` and lives at `globalThis.__autonomCenter`; it leases itself for 30 seconds and disposes unless the launcher heartbeat renews it, so a crashed launcher cannot leave native behavior patched. Installation wraps the native manifest getter and surface controller in memory and restores every captured descriptor on dispose.
-- Pages reach the daemon through the launcher bridge: a token-authenticated loopback HTTP endpoint that the runtime proxies `acquireVsCodeApi()` messages to. The launcher holds the daemon client capability and performs every file write, so no capability is serialized into a page or a log.
-- `control.ts` serves the private unix socket `$XDG_RUNTIME_DIR/autonom/launcher.sock` (mode 0600) for `status`, `targets`, `eval`, `screenshot`, `hot`, and `detach`; `source/launcher/cdp.mjs` is its client. `hot` re-reads the definition and the rebuilt runtime and re-attaches without restarting Desktop; `detach` restores native Devin and stops managing.
-- Launcher settings live in `~/.config/autonom/launcher.yml` (`port`, `configFile`, `commandCenterConfig`); `port` and `configFile` are overridden by `AUTONOM_PORT` and `AUTONOM_CONFIG`. The daemon keeps its own YAML; the launcher only reads and patches the fields it owns.
-- Desktop must be showing the agent window for the runtime to attach, because the sidebar React context is the only source of the native navigation services. When it is hidden the launcher logs the hint and retries every five seconds; the workbench mode is persisted per workspace, so a window that was last in agent mode attaches immediately.
-- Devin Desktop 1.126 does not execute `--extensionTestsPath` reliably. Validate the installed CLI wrapper and launcher through the normal logged-in profile and control socket. Do not synthesize the UI, rewrite vendor bundles or checksums, weaken Electron sandbox flags, or hide integrity warnings to obtain a green run.
-
-# Devin Desktop Command Center Runtime
-
-- `docs/COMMAND_CENTER.md` records the live-reversed 1.126 native-navigation, design-token, provider-toggle, and safety contract. Recheck before upgrading Desktop.
-- `docs/COMMAND_CENTER_VALIDATION.md` is the acceptance procedure. The one rule: a test may only observe, never synthesize the product surface it validates. Unit tests never close a live gate; record raw output and screenshots.
-- The adapter is pinned to Desktop 1.126.0, commit `fcf7ba39e6150055fad817f8716385b4d320d46d`, and `workbench.desktop.main.js` SHA-256 `da45742ddd56f8d83e38c4c4a57802ffe4b6cc98645a787588eda346d455f22d`; it fails closed on changes. The legacy `cet.autonom` 0.4.0 extension edits vendor files and must not be installed when validating.
-- The only installation patch is the `bin/devin-desktop` CLI shim plus the copied launcher payload and install record. The package entrypoint, Electron binary, original main bundle, workbench bundle, product.json, CSP, and profile data stay untouched. Runtime wrappers restore their descriptors on dispose. The runtime never hides native sidebar containers or rewrites agent-picker labels. Its icon switch visually replaces Agent/Editor while preserving native handlers and exact rollback; only the selected custom HTML page replaces the native page mount.
-- Live-test only a separate window, never the communication window. Launch Desktop through `devin-desktop --debug` and drive the test window's exact target id through the control socket. `node source/launcher/tests/integration/desktop.mjs <id> verify` clicks real controls and asserts repeated HTML actions, native Wiki, three mode cycles, and JS reload. No synthetic test UI or copied/cleaned profile. The consolidated icon switch forwards native Agent/Editor handlers using fresh buttons after remounts, restoring visibility during clicks; the active mode uses the filled icon variant (`autonom-fill`, `cloud-fill`, `pencil-fill`) and inactive modes the line variant. Its controls must stay `-webkit-app-region: no-drag` because the surrounding titlebar is a native drag region that swallows real pointer events.
+Live tests use a separate window, never the communication window. Tests may
+observe and operate real controls; they may not synthesize the product surface
+they claim to validate. Unit tests do not close live acceptance gates. Record
+raw output and screenshots, and report unverified gates explicitly.
