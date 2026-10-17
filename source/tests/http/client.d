@@ -37,17 +37,16 @@ unittest
     request("/api/rooms", 201, `{"name":"team"}`);
     request("/api/rooms/team/messages", 201, `{"text":"human check-in","ping":["alpha"]}`)["from"].str
         .should == "human";
-    request("/api/client/messages?source=room&target=team").array.length.should == 1;
+    request("/api/rooms/team/messages")["messages"].array.length.should == 1;
     request("/api/rooms/team/messages?session=managed-one")["messages"].array.length.should == 1;
     request("/api/messages", 201, `{"to":"alpha","text":"direct from human"}`);
     request("/api/messages?session=managed-one", 201, `{"to":"human","text":"direct from alpha","ping":["human"]}`);
-    JSONValue direct = request("/api/client/messages?source=dm&target=alpha");
-    direct.array.length.should == 2;
-    direct[0]["from"].str.should == "human";
-    direct[1]["from"].str.should == "alpha";
-    request("/api/client/messages?source=pings").array.length.should == 1;
-    request("/api/client/state")["humanEvents"].integer.should == 0;
-    request("/api/client/events?profile=alpha").array.length.should == 1;
+    JSONValue direct = request("/api/messages?source=dms");
+    direct["messages"].array.length.should == 1;
+    direct["messages"][0]["from"].str.should == "alpha";
+    request("/api/messages?source=pings")["messages"].array.length.should == 1;
+    request("/api/events")["events"].array.length.should == 0;
+    request("/api/events?profile=alpha")["events"].array.length.should == 1;
     request("/api/messages?session=managed-one&source=dms")["messages"].array.length.should == 1;
 }
 
@@ -67,17 +66,16 @@ unittest
     scope(exit)
         daemon.close();
 
-    JSONValue state = request("/api/client/state");
-    state["profiles"][0]["session"]["title"].str.should == "First title";
+    JSONValue profile = request("/api/profiles/alpha");
+    profile["session"]["title"].str.should == "First title";
     connection.query("update sessions set title = 'Updated title', working_directory = '/elsewhere'");
-    state = request("/api/client/state?directory="~fixture.root);
-    state["sessions"].array.length.should == 0;
-    state["profiles"][0]["session"]["title"].str.should == "Updated title";
-    state = request("/api/client/state?directory=/elsewhere");
-    state["profiles"][0]["session"]["title"].should == state["sessions"][0]["title"];
+    JSONValue sessions = request("/api/sessions?directory="~fixture.root);
+    sessions.array.length.should == 0;
+    request("/api/profiles/alpha")["session"]["title"].str.should == "Updated title";
+    JSONValue elsewhere = request("/api/sessions?directory=/elsewhere");
+    elsewhere.array.length.should == 1;
+    request("/api/profiles/alpha")["session"]["title"].should == elsewhere[0]["title"];
     connection.query("delete from sessions");
-    state = request("/api/client/state");
-    state["sessions"].array.length.should == 0;
-    state["profiles"][0]["session"]["title"].str.should == "";
+    request("/api/sessions").array.length.should == 0;
+    request("/api/profiles/alpha")["session"]["title"].str.should == "";
 }
-

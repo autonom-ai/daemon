@@ -33,7 +33,7 @@ unittest
     finishHookSession(first);
     JSONValue second = hookSession(fixture, "managed-second", "alpha");
     foreach (i; 0..3)
-        request("/api/client/state")["profiles"][0]["session"]["id"].str.should == "managed-second";
+        request("/api/profiles/alpha")["session"]["id"].str.should == "managed-second";
 
     finishHookSession(second);
     request("/api/profiles/alpha")["session"]["id"].str.should == "managed-second";

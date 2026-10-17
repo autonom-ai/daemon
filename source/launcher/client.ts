@@ -97,7 +97,11 @@ export class DaemonClient
     async getState(directory?: string): Promise<unknown>
     {
         const query = directory ? `?directory=${encodeURIComponent(directory)}` : "";
-        return this.request(`/api/client/state${query}`);
+        const [profiles, sessions] = await Promise.all([
+            this.request("/api/profiles"),
+            this.request(`/api/sessions${query}`)
+        ]);
+        return { profiles, sessions };
     }
 
 

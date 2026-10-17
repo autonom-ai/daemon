@@ -3,7 +3,7 @@ module daemon.app;
 import daemon.agent.profile;
 import daemon.agent.store;
 import daemon.api;
-import daemon.coord.access;
+import daemon.coord.api;
 import daemon.events.event;
 import daemon.events.schedule;
 import daemon.hooks;
@@ -15,7 +15,7 @@ import serverino;
 mixin ServerinoMain!(
     daemon.agent.profile,
     daemon.agent.store,
-    daemon.coord.access,
+    daemon.coord.api,
     daemon.events.event,
     daemon.events.schedule,
     daemon.hooks,
