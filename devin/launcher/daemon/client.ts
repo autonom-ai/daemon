@@ -1,5 +1,5 @@
+import { object, text } from "../parse";
 import { ensureDefaultConfig, readRouterKey } from "./config";
-import { object, text } from "./config";
 
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
@@ -7,7 +7,7 @@ import { lstat, open } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { isAbsolute, join, resolve } from "node:path";
 
-const MAX_RESPONSE_BYTES = 6 * 1024 * 1024;
+const maxResponseBytes = 6 * 1024 * 1024;
 
 export type Health = {
     configFile: string;
@@ -205,7 +205,7 @@ async function responseJson(response: Response): Promise<unknown>
             if (result.done)
                 break;
             bytes += result.value.byteLength;
-            if (bytes > MAX_RESPONSE_BYTES)
+            if (bytes > maxResponseBytes)
                 throw new Error("Autonom response exceeds the display limit.");
             chunks.push(result.value);
         }

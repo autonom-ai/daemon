@@ -1,5 +1,6 @@
-import { captureInvocation, CdpClient } from "../../launcher/cdp";
-import { PipeTransport } from "../../launcher/desktop";
+import { captureInvocation } from "../../../launcher/cdp/capture";
+import { CdpClient } from "../../../launcher/cdp/client";
+import { PipeTransport } from "../../../launcher/cdp/transport";
 
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";

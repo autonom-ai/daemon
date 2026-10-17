@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +17,7 @@ const common = {
 await Promise.all([
     build({
         ...common,
-        entryPoints: [join(launcher, "launcher.ts")],
+        entryPoints: [join(launcher, "app.ts")],
         outfile: join(dist, "launcher.js"),
         platform: "node",
         format: "cjs",
@@ -25,7 +25,7 @@ await Promise.all([
     }),
     build({
         ...common,
-        entryPoints: [join(launcher, "runtime.ts")],
+        entryPoints: [join(launcher, "center/runtime.ts")],
         outfile: join(dist, "runtime.js"),
         platform: "browser",
         format: "iife",
@@ -34,23 +34,42 @@ await Promise.all([
     }),
     build({
         ...common,
-        entryPoints: [join(launcher, "buildcli.ts")],
+        entryPoints: [join(launcher, "desktop/check.ts")],
         outfile: join(dist, "build.js"),
         platform: "node",
         format: "cjs",
         loader: { ".svg": "text", ".css": "text" },
     }),
 ]);
+async function testFiles(directory)
+{
+    const ret = [];
+    for (const entry of await readdir(directory, { withFileTypes: true }))
+    {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory())
+            ret.push(...await testFiles(path));
+        else if (entry.name.endsWith(".ts"))
+            ret.push(path);
+    }
+
+    return ret;
+}
+
+await rm(join(dist, "tests"), { recursive: true, force: true });
 for (const suite of ["unit", "integration"])
 {
-    const tests = (await readdir(join(devin, "tests", suite))).filter((name) => name.endsWith(".ts"));
+    const tests = await testFiles(join(devin, "tests", suite));
     if (tests.length)
+    {
         await build({
             ...common,
-            entryPoints: tests.map((name) => join(devin, "tests", suite, name)),
+            entryPoints: tests,
+            outbase: join(devin, "tests", suite),
             outdir: join(dist, "tests", suite),
             platform: "node",
             format: "cjs",
             loader: { ".svg": "text", ".css": "text" },
         });
+    }
 }

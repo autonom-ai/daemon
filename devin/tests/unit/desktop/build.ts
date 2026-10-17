@@ -1,12 +1,12 @@
 import {
-    DESKTOP_COMMIT,
-    DESKTOP_MAIN,
-    DESKTOP_VERSION,
+    desktopCommit,
+    desktopMain,
+    desktopVersion,
     type PackageInfo,
     type PackageLookup,
     verifyDesktopBuild,
     verifyPackageFile,
-} from "../../launcher/build";
+} from "../../../launcher/desktop/build";
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -15,9 +15,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-const WORKBENCH = "out/vs/workbench/workbench.desktop.main.js";
-const PACKAGE_ID = "devin-desktop-3.10.67-1.el8.x86_64";
-const DISTRO = "f".repeat(64);
+const workbench = "out/vs/workbench/workbench.desktop.main.js";
+const packageId = "devin-desktop-3.10.67-1.el8.x86_64";
+const distro = "f".repeat(64);
 
 function sha256(content: string): string
 {
@@ -28,10 +28,10 @@ async function fixture(files: Record<string, string> = {}): Promise<string>
 {
     const app = await mkdtemp(join(tmpdir(), "autonom-build-"));
     const entries: Record<string, string> = {
-        "package.json": JSON.stringify({ version: DESKTOP_VERSION, main: DESKTOP_MAIN }),
-        "product.json": JSON.stringify({ commit: DESKTOP_COMMIT }),
+        "package.json": JSON.stringify({ version: desktopVersion, main: desktopMain }),
+        "product.json": JSON.stringify({ commit: desktopCommit }),
         "out/main.js": "main bundle",
-        [WORKBENCH]: "hot-updated workbench",
+        [workbench]: "hot-updated workbench",
         ...files,
     };
     for (const [file, content] of Object.entries(entries))
@@ -51,7 +51,7 @@ function lookup(app: string, options: {
 } = {}): PackageLookup
 {
     const files = new Map(
-        ["package.json", "product.json", "out/main.js", WORKBENCH]
+        ["package.json", "product.json", "out/main.js", workbench]
             .map((file) => [join(app, file), {
                 digest: options.digests?.[file] ?? sha256(""),
                 linkTo: options.links?.has(file) ? "/elsewhere" : "",
@@ -63,8 +63,8 @@ function lookup(app: string, options: {
         if (!files.has(path))
             return undefined;
         return {
-            id: PACKAGE_ID,
-            distro: DISTRO,
+            id: packageId,
+            distro: distro,
             digestAlgorithm: options.algorithm ?? 8,
             files,
         };
@@ -74,7 +74,7 @@ function lookup(app: string, options: {
 async function genuineLookup(app: string): Promise<PackageLookup>
 {
     const digests: Record<string, string> = {};
-    for (const file of ["package.json", "product.json", "out/main.js", WORKBENCH])
+    for (const file of ["package.json", "product.json", "out/main.js", workbench])
         digests[file] = sha256(await readFile(join(app, file), "utf8"));
     return lookup(app, { digests });
 }
@@ -86,10 +86,10 @@ test("a hot-updated workbench verifies through its owning package", async () =>
     {
         const identity = await verifyDesktopBuild(app, await genuineLookup(app));
         assert.equal(identity.source, "package");
-        assert.equal(identity.packageId, PACKAGE_ID);
-        assert.equal(identity.distro, DISTRO);
-        assert.equal(identity.version, DESKTOP_VERSION);
-        assert.equal(identity.commit, DESKTOP_COMMIT);
+        assert.equal(identity.packageId, packageId);
+        assert.equal(identity.distro, distro);
+        assert.equal(identity.version, desktopVersion);
+        assert.equal(identity.commit, desktopCommit);
     }
     finally
     {
@@ -116,7 +116,7 @@ test("changed version, entrypoint, or commit always refuse", async () =>
     try
     {
         const files = { "package.json": "package.json", "product.json": "product.json",
-            "out/main.js": "out/main.js", [WORKBENCH]: "workbench" } as const;
+            "out/main.js": "out/main.js", [workbench]: "workbench" } as const;
         const digests = Object.fromEntries(await Promise.all(Object.keys(files).map(async (file) =>
             [file, sha256(await readFile(join(app, file), "utf8"))])));
         const owned = lookup(app, { digests });
@@ -158,7 +158,7 @@ test("a file modified after packaging fails the recorded digest", async () =>
     const app = await fixture();
     try
     {
-        const digests = { [WORKBENCH]: "0".repeat(64) };
+        const digests = { [workbench]: "0".repeat(64) };
         await assert.rejects(verifyDesktopBuild(app, lookup(app, { digests })), /does not match/);
     }
     finally
@@ -173,7 +173,7 @@ test("a package config file tolerates local edits while executables stay byte-ex
     try
     {
         const digests = Object.fromEntries(await Promise.all(
-            ["package.json", "product.json", "out/main.js", WORKBENCH].map(async (file) =>
+            ["package.json", "product.json", "out/main.js", workbench].map(async (file) =>
                 [file, sha256(await readFile(join(app, file), "utf8"))])));
         const edited = JSON.parse(await readFile(join(app, "product.json"), "utf8"));
         edited.checksums = { stale: true };
@@ -207,7 +207,7 @@ test("a file outside the owning package refuses", async () =>
         assert.equal(sha256actual.expected, null);
         await assert.rejects(verifyDesktopBuild(app, async (path) =>
             path === join(app, "package.json")
-                ? { id: PACKAGE_ID, distro: DISTRO, digestAlgorithm: 8, files: new Map() }
+                ? { id: packageId, distro: distro, digestAlgorithm: 8, files: new Map() }
                 : undefined), /not a regular file shipped/);
     }
     finally
@@ -223,8 +223,8 @@ test("a symlinked verified file refuses even when the package records it", async
     {
         const target = join(app, "elsewhere.js");
         await writeFile(target, "foreign");
-        await rm(join(app, WORKBENCH));
-        await symlink(target, join(app, WORKBENCH));
+        await rm(join(app, workbench));
+        await symlink(target, join(app, workbench));
         await assert.rejects(verifyDesktopBuild(app, await genuineLookup(app)), /regular file|ELOOP/);
     }
     finally
@@ -240,7 +240,7 @@ test("package file checks report genuine, foreign, and unowned files", async () 
     {
         const owned = await genuineLookup(app);
         const main = await verifyPackageFile(join(app, "out/main.js"), owned);
-        assert.equal(main.packageId, PACKAGE_ID);
+        assert.equal(main.packageId, packageId);
         assert.equal(main.sha256, main.expected);
         const edited = join(app, "product.json");
         await writeFile(edited, "{\"commit\":\"tampered\"}");

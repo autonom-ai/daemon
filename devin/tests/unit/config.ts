@@ -1,14 +1,5 @@
-import {
-    DEFAULT_CONFIG_TEMPLATE,
-    ensureDefaultConfig,
-    readDaemonConfig,
-    readDataDir,
-    readRouterKey,
-    readSettings,
-    saveDaemon,
-    saveSettings,
-    validateSettings,
-} from "../../launcher/config";
+import { readSettings, saveSettings, validateSettings } from "../../launcher/config";
+import { defaultConfigTemplate, ensureDefaultConfig, readDaemonConfig, readDataDir, readRouterKey, saveDaemon } from "../../launcher/daemon/config";
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -59,7 +50,7 @@ test("the daemon configuration exposes known fields and a data directory", async
     try
     {
         const path = join(root, "config.yml");
-        await writeFile(path, `${DEFAULT_CONFIG_TEMPLATE}unknownField: 1\n`);
+        await writeFile(path, `${defaultConfigTemplate}unknownField: 1\n`);
         assert.deepEqual(await readDaemonConfig(path), {
             dataDir: "~/.local/share/autonom",
             devinCommand: "devin",

@@ -1,13 +1,6 @@
-import {
-    connectDebugTransport,
-    DESKTOP_COMMIT,
-    DESKTOP_VERSION,
-    launchDesktop,
-    PipeTransport,
-    resolveDesktopBinary,
-    verifyDesktopBuild,
-    workbenchUrl,
-} from "../../launcher/desktop";
+import { PipeTransport } from "../../../launcher/cdp/transport";
+import { desktopCommit, desktopVersion, verifyDesktopBuild } from "../../../launcher/desktop/build";
+import { connectDebugTransport, launchDesktop, resolveDesktopBinary, workbenchUrl } from "../../../launcher/desktop/process";
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -113,14 +106,14 @@ test("an unsupported Desktop build fails closed", async () =>
     {
         await mkdir(join(appRoot, "out/vs/workbench"), { recursive: true });
         await writeFile(join(appRoot, "out/vs/workbench/workbench.desktop.main.js"), "bundle");
-        await writeFile(join(appRoot, "product.json"), JSON.stringify({ commit: DESKTOP_COMMIT }));
+        await writeFile(join(appRoot, "product.json"), JSON.stringify({ commit: desktopCommit }));
         await writeFile(join(appRoot, "package.json"), JSON.stringify({ version: "1.127.0" }));
         await assert.rejects(verifyDesktopBuild(appRoot), /Unsupported Devin Desktop build/);
         await writeFile(join(appRoot, "package.json"),
-            JSON.stringify({ version: DESKTOP_VERSION, main: "./out/main.js" }));
+            JSON.stringify({ version: desktopVersion, main: "./out/main.js" }));
         await writeFile(join(appRoot, "product.json"), JSON.stringify({ commit: "0000000000000000000000000000000000000000" }));
         await assert.rejects(verifyDesktopBuild(appRoot), /Unsupported Devin Desktop build/);
-        await writeFile(join(appRoot, "product.json"), JSON.stringify({ commit: DESKTOP_COMMIT }));
+        await writeFile(join(appRoot, "product.json"), JSON.stringify({ commit: desktopCommit }));
         await assert.rejects(verifyDesktopBuild(appRoot), /pristine build/);
     }
     finally
@@ -210,7 +203,7 @@ test("Desktop children run without inherited host or capability variables", asyn
 
 test("the launcher rejects an invalid --debug port before touching Desktop", async () =>
 {
-    const launcher = resolve(__dirname, "../../launcher.js");
+    const launcher = resolve(__dirname, "../../../launcher.js");
     for (const argument of ["--debug=", "--debug=0", "--debug=65536", "--debug=abc"])
     {
         const failure = await execute("node", [launcher, argument])

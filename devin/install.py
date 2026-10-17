@@ -312,7 +312,7 @@ def main():
             "dist/launcher.js",
             "dist/runtime.js",
             "devin/hooks.v1.json",
-            "devin/launcher/cdp.mjs",
+            "devin/launcher/cdp/control.mjs",
             "source/daemon/interop/devin/hook.py",
             "source/mcp/server.py",
             "bin/autonom-daemon",

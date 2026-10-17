@@ -1,15 +1,16 @@
-import type { DaemonClient } from "./client";
-import type { LauncherSettings } from "./config";
-import { ensureDefaultConfig, readDaemonConfig, readDataDir, saveDaemon, saveSettings, validateSettings } from "./config";
-import { object, text } from "./config";
+import type { LauncherSettings } from "../config";
+import { saveSettings, validateSettings } from "../config";
+import type { DaemonClient } from "../daemon/client";
+import { ensureDefaultConfig, readDaemonConfig, readDataDir, saveDaemon } from "../daemon/config";
+import { object, text } from "../parse";
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import { join } from "node:path";
 
-const MAX_REQUEST_BYTES = 256 * 1024;
-const CORS_HEADERS = {
+const maxRequestBytes = 256 * 1024;
+const corsHeaders = {
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "content-type, x-autonom-bridge",
     "access-control-allow-methods": "POST",
@@ -69,7 +70,7 @@ async function respond(
     {
         if (request.method === "OPTIONS")
         {
-            response.writeHead(204, CORS_HEADERS);
+            response.writeHead(204, corsHeaders);
             response.end();
             return;
         }
@@ -83,7 +84,7 @@ async function respond(
         if (message === undefined)
             return fail(response, 400, "The bridge request must be a JSON object.");
         const result = await dispatch(context, message);
-        response.writeHead(200, { ...CORS_HEADERS, "content-type": "application/json" });
+        response.writeHead(200, { ...corsHeaders, "content-type": "application/json" });
         response.end(JSON.stringify({ result: result ?? null }));
     }
     catch (error)
@@ -187,7 +188,7 @@ async function readBody(request: IncomingMessage): Promise<string>
     for await (const chunk of request)
     {
         bytes += (chunk as Buffer).length;
-        if (bytes > MAX_REQUEST_BYTES)
+        if (bytes > maxRequestBytes)
             throw new Error("The bridge request exceeds the size limit.");
         chunks.push(chunk as Buffer);
     }
@@ -196,6 +197,6 @@ async function readBody(request: IncomingMessage): Promise<string>
 
 function fail(response: ServerResponse, status: number, error: string): void
 {
-    response.writeHead(status, { ...CORS_HEADERS, "content-type": "application/json" });
+    response.writeHead(status, { ...corsHeaders, "content-type": "application/json" });
     response.end(JSON.stringify({ error }));
 }

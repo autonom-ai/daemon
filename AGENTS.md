@@ -64,7 +64,8 @@ Use intentional access sections and field-like accessors; choose `auto`, `ref`,
 conventions. Tests follow Selenium's domain layout and `@Name`/`unittest`,
 `@ShouldFailWith`, and scope cleanup conventions. Prefer real components;
 model simulation and narrow installer filesystem fixtures are permitted.
-Keep tests against installed peers in explicit integration suites. Avoid unrelated formatting and speculative abstractions.
+Aim for 200 lines per file; stay under 400, reserving longer files for one
+cohesive owner. Keep tests against installed peers in explicit integration suites. Avoid unrelated formatting and speculative abstractions.
 
 # Desktop safety
 

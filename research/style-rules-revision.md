@@ -123,13 +123,16 @@ layers, or file splits solely to satisfy a style checklist.
   then public API. Public API followed by a trailing private helper section is
   also established. Within a class, put fields before methods and the
   constructor after the fields.
-- Keep `package.d` modules to `public import` re-exports. Put enums and
+- Use `package.d` for a package facade or its cohesive primary owner, as in
+  Selenium browser/driver and Intuit provider modules. Do not split a real owner
+  solely to make `package.d` contain only re-exports. Put enums and
   module-level constants before their consumers; constants specific to one
   type may live in that type's access section.
 - Keep related types together when they share an owner. Split a file when
   ownership or responsibility becomes unclear, not at an arbitrary line
-  count. A cohesive class may be several hundred lines; a file above roughly
-  800 lines deserves review, especially when it contains multiple owners.
+  count. Aim for roughly 200 lines per file. Stay under 400 lines; use the upper
+  allowance only for a readable, cohesive owner with one scope (usually a
+  class) making up most of the file. Split distinct responsibilities first.
 
 ### Braces, Functions, and Control Flow
 

@@ -1,5 +1,5 @@
-import { config, CONTENT, fixture } from "../support";
-import { install } from "../../launcher/runtime";
+import { install } from "../../../launcher/center/runtime";
+import { config, fixture, testContent } from "../../support";
 
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
@@ -163,7 +163,7 @@ test("HTML actions are lazy and repeated opens reuse the same source", async () 
 test("JS actions do not navigate to a page and run with the scoped UI context", async () =>
 {
     const environment = fixture();
-    const content = { ...CONTENT, sections: [{ id: "tools", items: [{
+    const content = { ...testContent, sections: [{ id: "tools", items: [{
         id: "run",
         actions: { left_click: { type: "js" as const, file: "run.js", version: "script-one" } },
     }] }] };
@@ -189,7 +189,7 @@ test("JS actions do not navigate to a page and run with the scoped UI context", 
         assert.equal(runtime.status().compiledScripts, 1);
         assert.equal(runtime.status().loadedActions, 1);
         assert.equal(environment.commands.length, 2);
-        await runtime.update(config({ ...content, sections: [] }));
+        await runtime.update(config({ ...testContent, sections: [] }));
         assert.equal(runtime.status().compiledScripts, 0);
         await assert.rejects(runtime.runScript("run", "script-one"), /not available/);
     }
@@ -223,7 +223,7 @@ test("a failed lazy page refresh keeps the previous snapshot active", async () =
         {
             throw new Error("unavailable");
         };
-        const content = { ...CONTENT, revision: "next", sections: [{ id: "pages", items: [{
+        const content = { ...testContent, revision: "next", sections: [{ id: "pages", items: [{
             id: "automations",
             label: "Changed",
             actions: { left_click: { type: "html" as const, file: "pages/welcome.html", version: "next" } },
@@ -248,10 +248,10 @@ test("the default HTML item is not opened or prefetched while Editor is selected
         dispose: () => undefined,
     };
     const environment = fixture();
-    const runtime = install(environment.services, config({ ...CONTENT, activeItem: "automations" }));
+    const runtime = install(environment.services, config({ ...testContent, activeItem: "automations" }));
     try
     {
-        await runtime.update(config({ ...CONTENT, activeItem: "automations" }));
+        await runtime.update(config({ ...testContent, activeItem: "automations" }));
         assert.equal(runtime.status().activeItem, null);
         assert.equal(environment.commands.length, 0);
         assert.equal(messages.length, 0);

@@ -1,5 +1,5 @@
-import type { CdpClient } from "../../launcher/cdp";
-import { startControlSocket } from "../../launcher/control";
+import type { CdpClient } from "../../../launcher/cdp/client";
+import { startControlSocket } from "../../../launcher/cdp/control";
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-const WORKBENCH = "vscode-file://vscode-app/opt/devin/resources/app/out/vs/code/electron-browser/workbench/workbench.html";
+const workbench = "vscode-file://vscode-app/opt/devin/resources/app/out/vs/code/electron-browser/workbench/workbench.html";
 
 function fakeCdp(detached: string[] = []): CdpClient
 {
@@ -16,7 +16,7 @@ function fakeCdp(detached: string[] = []): CdpClient
         async targets(): Promise<unknown>
         {
             return [
-                { id: "page-1", type: "page", url: WORKBENCH },
+                { id: "page-1", type: "page", url: workbench },
                 { id: "worker-1", type: "worker", url: "" },
             ];
         },
@@ -70,7 +70,7 @@ test("the control socket serves status, targets, and eval for a live launcher", 
     const detached: string[] = [];
     const control = await startControlSocket(path, {
         cdp: fakeCdp(detached),
-        workbenchUrl: WORKBENCH,
+        workbenchUrl: workbench,
         status: async () => ({ windows: [] }),
         hot: async () => ({ ok: true }),
         detach: async () => ({ ok: true }),
@@ -99,7 +99,7 @@ test("a non-socket control path is never overwritten", async () =>
         await writeFile(path, "unrelated file");
         await assert.rejects(startControlSocket(path, {
             cdp: fakeCdp(),
-            workbenchUrl: WORKBENCH,
+            workbenchUrl: workbench,
             status: async () => ({}),
             hot: async () => ({}),
             detach: async () => ({}),
@@ -117,7 +117,7 @@ test("a second launcher cannot take over a live control socket", async () =>
     const path = await socketPath();
     const context = {
         cdp: fakeCdp(),
-        workbenchUrl: WORKBENCH,
+        workbenchUrl: workbench,
         status: async () => ({}),
         hot: async () => ({}),
         detach: async () => ({}),

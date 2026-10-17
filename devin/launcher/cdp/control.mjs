@@ -2,7 +2,7 @@
 import { createConnection } from "node:net";
 import { join } from "node:path";
 
-const USAGE = `Usage: node devin/launcher/cdp.mjs <command> [arguments]
+const usage = `Usage: node devin/launcher/cdp/control.mjs <command> [arguments]
 
 Talks to a running Autonom launcher over its private control socket.
 
@@ -47,7 +47,7 @@ function request(action, arguments_)
 const [action, ...arguments_] = process.argv.slice(2);
 if (!action || action === "--help" || action === "-h")
 {
-    process.stdout.write(`${USAGE}\n`);
+    process.stdout.write(`${usage}\n`);
     process.exit(action ? 0 : 1);
 }
 

@@ -1,13 +1,13 @@
-import type { CdpClient, CdpSession } from "./cdp";
-import { object, text } from "./config";
+import { object, text } from "../parse";
+import type { CdpClient, CdpSession } from "./client";
 
 import { chmod, lstat, mkdir, rm, writeFile } from "node:fs/promises";
-import { createServer, createConnection } from "node:net";
 import type { Socket } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { dirname, join } from "node:path";
 
-const MAX_REQUEST_BYTES = 1024 * 1024;
-const MAX_SCREENSHOT_BYTES = 32 * 1024 * 1024;
+const maxRequestBytes = 1024 * 1024;
+const maxScreenshotBytes = 32 * 1024 * 1024;
 
 export type ControlContext = {
     cdp: CdpClient;
@@ -74,7 +74,7 @@ function handle(socket: Socket, context: ControlContext): void
     socket.on("data", (chunk: string) =>
     {
         buffer += chunk;
-        if (buffer.length > MAX_REQUEST_BYTES)
+        if (buffer.length > maxRequestBytes)
         {
             socket.destroy();
             return;
@@ -143,7 +143,7 @@ async function action(context: ControlContext, message: Record<string, unknown>)
                     throw new Error("The renderer did not return a screenshot.");
 
                 const png = Buffer.from(data, "base64");
-                if (png.length > MAX_SCREENSHOT_BYTES)
+                if (png.length > maxScreenshotBytes)
                     throw new Error("The screenshot exceeds the size limit.");
 
                 await writeFile(path, png, { flag: "wx", mode: 0o600 });

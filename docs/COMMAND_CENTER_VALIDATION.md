@@ -22,7 +22,7 @@ Corollaries:
 | Live launcher run | The built launcher attaches to the installed Desktop | Nothing beyond the tested build |
 | Adversarial/negative test | The system fails closed on hostile or malformed input | Happy-path correctness |
 
-A release needs all four. Unit coverage lives in `devin/tests/unit/`: `content.ts` (overlay math, page CSP), `center.ts` (schema, confinement, size caps), `runtime.ts` (overlay immutability, descriptor rollback, provider mode), `desktop.ts` (pipe framing, binary resolution, build pin), `cdp.ts` (request correlation, session scoping, capture), `config.ts` (settings and daemon YAML), `bridge.ts` (authorization and actions), `control.ts` (socket protocol).
+A release needs all four. Unit coverage lives in `devin/tests/unit/`: `center/content.ts` (overlay math, page CSP), `center/config.ts` (schema, confinement, size caps), `center/runtime.ts` (overlay immutability, descriptor rollback, provider mode), `desktop/process.ts` (pipe framing, binary resolution, build pin), `cdp/client.ts` (request correlation, session scoping, capture), `config.ts` (settings and daemon YAML), `center/bridge.ts` (authorization and actions), `cdp/control.ts` (socket protocol).
 
 ## Live acceptance procedure
 
@@ -62,10 +62,10 @@ Do not copy or replace the user-data directory to get a "clean" run — test the
 ### 3. Observe through the control socket
 
 ```bash
-node devin/launcher/cdp.mjs status
-node devin/launcher/cdp.mjs targets
-node devin/launcher/cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
-node devin/launcher/cdp.mjs screenshot workbench /tmp/autonom-autonom.png
+node devin/launcher/cdp/control.mjs status
+node devin/launcher/cdp/control.mjs targets
+node devin/launcher/cdp/control.mjs eval workbench "globalThis.__autonomCenter.status()"
+node devin/launcher/cdp/control.mjs screenshot workbench /tmp/autonom-autonom.png
 ```
 
 Assert:
@@ -93,7 +93,7 @@ Click the on-screen toggle (not a programmatic state set) and re-assert:
 Edit a page file, then:
 
 ```bash
-node devin/launcher/cdp.mjs hot
+node devin/launcher/cdp/control.mjs hot
 ```
 
 Confirm the new content renders in the same window. This is the rapid-iteration path and must not require a Desktop restart.
@@ -123,7 +123,7 @@ There is no integrity-suppression path. The installer does not change any checks
 ### 8. Clean up
 
 ```bash
-node devin/launcher/cdp.mjs detach
+node devin/launcher/cdp/control.mjs detach
 ```
 
 Verify native labels and navigation return, then stop the launcher. Desktop keeps running without the Command Center overlay.
@@ -134,7 +134,7 @@ While developing the runtime bundle or the pages:
 
 ```bash
 npm --prefix devin run build
-node devin/launcher/cdp.mjs hot
+node devin/launcher/cdp/control.mjs hot
 ```
 
 `hot` re-reads the definition and the rebuilt runtime and re-installs it in place. Use it for runtime/UI changes; the full launcher restart is still required to validate the launch path itself.

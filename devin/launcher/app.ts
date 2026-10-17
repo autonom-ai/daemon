@@ -1,27 +1,26 @@
-import { acpRegistryIcons, ensureAcpAgent } from "./acp";
-import { captureServices, CdpClient } from "./cdp";
-import type { CdpSession } from "./cdp";
-import { startBridge } from "./bridge";
-import { DaemonClient } from "./client";
-import type { ActionCache, LauncherSettings } from "./config";
-import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, loadAction, loadCenter, readDaemonConfig, readSettings } from "./config";
-import { visibleItems } from "./center";
-import { defaultSocketPath, isLauncherRunning, startControlSocket } from "./control";
-import { appRootFor, launchDesktop, openInDesktop, resolveDesktopBinary, verifyDesktopBuild, workbenchUrl } from "./desktop";
-import type { RuntimeStatus } from "./runtime";
+import { acpRegistryIcons, ensureAcpAgent } from "./acp/registry";
+import type { CdpSession } from "./cdp/client";
+import { CdpClient } from "./cdp/client";
+import { defaultSocketPath, isLauncherRunning, startControlSocket } from "./cdp/control";
+import { startBridge } from "./center/bridge";
+import type { ActionCache } from "./center/config";
+import { loadAction, loadCenter } from "./center/config";
+import { visibleItems } from "./center/content";
+import { watchContent } from "./center/watch";
+import { executeScript, installRuntime, runtimeStatus } from "./center/window";
+import { environmentPort, parseArguments } from "./cli";
+import type { LauncherSettings } from "./config";
+import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, readSettings } from "./config";
+import { DaemonClient } from "./daemon/client";
+import { readDaemonConfig } from "./daemon/config";
+import { verifyDesktopBuild } from "./desktop/build";
+import { appRootFor, launchDesktop, openInDesktop, resolveDesktopBinary, workbenchUrl } from "./desktop/process";
 
-import { watch } from "node:fs";
-import type { FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
-const HEARTBEAT_INTERVAL = 5000;
-const ATTACH_TIMEOUT = 60000;
-
-type Options = {
-    arguments: string[];
-    debugPort: number | undefined;
-};
+const heartbeatInterval = 5000;
+const attachTimeout = 60000;
 
 async function main(): Promise<void>
 {
@@ -91,7 +90,6 @@ async function main(): Promise<void>
     });
     const cdp = new CdpClient(transport);
     const sessions = new Map<string, CdpSession>();
-    const installed = new Set<string>();
     const windows = new Map<number, CdpSession>();
     const warnings = new Map<string, string>();
     let control: { close(): Promise<void> } | undefined;
@@ -100,56 +98,20 @@ async function main(): Promise<void>
     let stopping = false;
     let refreshing: Promise<void> | undefined;
     let foundWindow = false;
-    let watcher: FSWatcher | undefined;
-    let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+    let watcher: { close(): void } | undefined;
     let reloading: Promise<unknown> | undefined;
-
-    async function status(session: CdpSession): Promise<RuntimeStatus | null>
-    {
-        return await session.evaluate(`(() => {
-            const runtime = globalThis.__autonomCenter;
-            if (!runtime) return null;
-            runtime.heartbeat();
-            const status = runtime.status();
-            return {
-                connected: status.connected, mode: status.mode, enabled: status.enabled,
-                revision: status.revision, activeItem: status.activeItem, windowId: status.windowId,
-                editorActive: status.editorActive,
-                items: status.items.slice(0, 100).map(({id, label, path}) => ({id, label, path})),
-                sections: status.sections,
-                loadedActions: status.loadedActions, compiledScripts: status.compiledScripts
-            };
-        })()`) as RuntimeStatus | null;
-    }
 
     async function install(session: CdpSession): Promise<void>
     {
-        if (!await captureServices(session))
-            throw new Error("The agent sidebar is not mounted. Open the agent window (Ctrl+').");
-
-        try
+        const current = await installRuntime(session, runtimeSource, {
+            content, bridge: { url: bridge.url, token: bridge.token },
+        });
+        if (current)
         {
-            const config = JSON.stringify({ content, bridge: { url: bridge.url, token: bridge.token } });
-            await session.evaluate(`(async () => {
-                ${runtimeSource}
-                const config = ${config};
-                const runtime = AutonomRuntime.install(globalThis.__autonomServices, config);
-                try { await runtime.update(config); }
-                catch (error) { runtime.dispose(); throw error; }
-            })()`, 45000);
-            const current = await status(session);
-            if (current)
-            {
-                windows.set(current.windowId, session);
-                installed.add(session.targetId);
-            }
+            windows.set(current.windowId, session);
+        }
 
-            log(`Attached ${session.targetId}: ${current?.mode}, active ${current?.activeItem ?? "none"}`);
-        }
-        finally
-        {
-            await session.evaluate("delete globalThis.__autonomServices").catch(() => undefined);
-        }
+        log(`Attached ${session.targetId}: ${current?.mode}, active ${current?.activeItem ?? "none"}`);
     }
 
     async function refreshWindows(): Promise<void>
@@ -199,7 +161,7 @@ async function main(): Promise<void>
                         AutonomRuntime.prepareShell(${JSON.stringify(content.css)}, ${icons});
                     } else globalThis.__autonomShell.heartbeat();
                 })()`);
-                if (!await status(session))
+                if (!await runtimeStatus(session))
                     await install(session);
 
                 warnings.delete(target.id);
@@ -251,13 +213,7 @@ async function main(): Promise<void>
         if (source.type !== "js" || !action)
             throw new Error("The selected item is not a JS action.");
 
-        const key = JSON.stringify(id);
-        const version = JSON.stringify(action.version);
-        if (!await session.evaluate(`globalThis.__autonomCenter?.hasScript(${key},${version})`))
-            await session.evaluate(`globalThis.__autonomCenter.setScript(${key},${version},async (context) => {\n`
-                + `${source.source}\n});`);
-
-        await session.evaluate(`globalThis.__autonomCenter.runScript(${key},${version})`, 45000);
+        await executeScript(session, id, action.version, source.source);
         return null;
     }
 
@@ -284,7 +240,7 @@ async function main(): Promise<void>
 
         for (const session of sessions.values())
         {
-            const current = await status(session);
+            const current = await runtimeStatus(session);
             const selected = visibleItems(next).find((item) => item.id === current?.activeItem);
             if (current?.mode === "autonom" && selected?.actions?.left_click.type === "html")
                 await loadAction(path, next, selected.id, next.revision!, actionCache);
@@ -322,29 +278,18 @@ async function main(): Promise<void>
             return;
 
         watcher?.close();
-        watcher = watch(dirname(contentPath), { recursive: true }, (_event, filename) =>
+        watcher = watchContent(dirname(contentPath), () =>
         {
-            if (stopping || disabled)
-                return;
-
-            if (filename && ![".yml", ".html", ".js", ".css"].includes(extname(String(filename))))
-                return;
-
-            clearTimeout(reloadTimer);
-            reloadTimer = setTimeout(() =>
-            {
-                if (!stopping && !disabled)
-                    void hot().catch((error) => log(`UI reload rejected: ${error.message}`));
-            }, 75);
-        });
-        watcher.on("error", (error) => log(`UI watcher: ${error.message}`));
+            if (!stopping && !disabled)
+                void hot().catch((error) => log(`UI reload rejected: ${error.message}`));
+        }, (error) => log(`UI watcher: ${error.message}`));
     }
 
     async function report(): Promise<unknown>
     {
         const ret = [];
         for (const [targetId, session] of sessions)
-            ret.push({ targetId, status: await status(session), error: warnings.get(targetId) ?? null });
+            ret.push({ targetId, status: await runtimeStatus(session), error: warnings.get(targetId) ?? null });
 
         return { windows: ret };
     }
@@ -356,7 +301,6 @@ async function main(): Promise<void>
 
         stopping = true;
         clearTimeout(heartbeat);
-        clearTimeout(reloadTimer);
         watcher?.close();
         await reloading?.catch(() => undefined);
         await detach();
@@ -382,7 +326,7 @@ async function main(): Promise<void>
         }
 
         if (!stopping)
-            heartbeat = setTimeout(() => void tick(), HEARTBEAT_INTERVAL);
+            heartbeat = setTimeout(() => void tick(), heartbeatInterval);
     }
 
     process.on("SIGINT", () => void shutdown(0));
@@ -422,7 +366,7 @@ async function main(): Promise<void>
         watchAssets();
         log(`Workspace ${process.cwd()}`);
         log(`Control socket ${socketPath}`);
-        const deadline = Date.now() + ATTACH_TIMEOUT;
+        const deadline = Date.now() + attachTimeout;
         while (!foundWindow && !stopping)
         {
             if (Date.now() > deadline)
@@ -440,37 +384,6 @@ async function main(): Promise<void>
         log(error instanceof Error ? error.message : String(error));
         await shutdown(1);
     }
-}
-
-function parseArguments(argv: string[]): Options
-{
-    const ret: Options = { arguments: [], debugPort: undefined };
-    for (const argument of argv)
-    {
-        if (argument === "--debug")
-            ret.debugPort = 9222;
-        else if (argument.startsWith("--debug="))
-            ret.debugPort = port(argument.slice("--debug=".length));
-        else
-            ret.arguments.push(argument);
-    }
-
-    return ret;
-}
-
-function port(value: string): number
-{
-    const ret = Number(value);
-    if (!Number.isInteger(ret) || ret < 1 || ret > 65535)
-        throw new Error("The port must be an integer between 1 and 65535.");
-
-    return ret;
-}
-
-function environmentPort(): number | undefined
-{
-    const value = process.env.AUTONOM_PORT;
-    return value?.trim() ? port(value) : undefined;
 }
 
 function log(message: string): void

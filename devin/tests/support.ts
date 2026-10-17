@@ -1,4 +1,4 @@
-import type { CenterContent } from "../launcher/center";
+import type { CenterContent } from "../launcher/center/content";
 
 export type Fixture = {
     services: any;
@@ -92,7 +92,7 @@ export function fixture(): Fixture
     };
 }
 
-export const CONTENT: CenterContent = {
+export const testContent: CenterContent = {
     enabled: true,
     revision: "demo",
     sections: [{ id: "pages", label: "Pages", items: [{
@@ -102,9 +102,9 @@ export const CONTENT: CenterContent = {
     }] }],
 };
 
-export const BRIDGE = { url: "http://127.0.0.1:1", token: "unit-token" };
+export const bridge = { url: "http://127.0.0.1:1", token: "unit-token" };
 
-export function config(content: CenterContent = CONTENT): { content: CenterContent; bridge: typeof BRIDGE }
+export function config(content: CenterContent = testContent): { content: CenterContent; bridge: typeof bridge }
 {
-    return { content, bridge: BRIDGE };
+    return { content, bridge: bridge };
 }

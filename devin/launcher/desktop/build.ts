@@ -5,18 +5,18 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-export const DESKTOP_VERSION = "1.126.0";
-export const DESKTOP_COMMIT = "0b186d6e13a1a48a46430c51fe414dd0747d46f6";
-export const WORKBENCH_HASH = "302af387606888341f563bbbac96db129c821602a9fa2bd7f37313899450a6e1";
-export const DESKTOP_MAIN = "./out/main.js";
+export const desktopVersion = "1.126.0";
+export const desktopCommit = "0b186d6e13a1a48a46430c51fe414dd0747d46f6";
+export const pinnedWorkbenchHash = "302af387606888341f563bbbac96db129c821602a9fa2bd7f37313899450a6e1";
+export const desktopMain = "./out/main.js";
 
-const MAX_METADATA_BYTES = 1024 * 1024;
-const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
-const MAX_PACKAGE_OUTPUT_BYTES = 32 * 1024 * 1024;
-const PACKAGE_QUERY_TIMEOUT_MS = 20000;
-const SHA256_DIGEST_ALGORITHM = 8;
-const WORKBENCH_FILE = "out/vs/workbench/workbench.desktop.main.js";
-const PACKAGE_FILES = ["package.json", "product.json", "out/main.js", WORKBENCH_FILE];
+const maxMetadataBytes = 1024 * 1024;
+const maxBundleBytes = 64 * 1024 * 1024;
+const maxPackageOutputBytes = 32 * 1024 * 1024;
+const packageQueryTimeoutMs = 20000;
+const sha256DigestAlgorithm = 8;
+const workbenchFile = "out/vs/workbench/workbench.desktop.main.js";
+const packageFiles = ["package.json", "product.json", "out/main.js", workbenchFile];
 
 export type BuildIdentity = {
     version: string;
@@ -55,8 +55,8 @@ const execute = promisify(execFile);
 async function rpmQuery(args: string[]): Promise<string>
 {
     const result = await execute("rpm", args, {
-        maxBuffer: MAX_PACKAGE_OUTPUT_BYTES,
-        timeout: PACKAGE_QUERY_TIMEOUT_MS,
+        maxBuffer: maxPackageOutputBytes,
+        timeout: packageQueryTimeoutMs,
         windowsHide: true,
     });
     return result.stdout;
@@ -79,7 +79,7 @@ export async function rpmPackageLookup(path: string): Promise<PackageInfo | unde
     const header = await rpmQuery(["-q", "--qf", "%{FILEDIGESTALGO}\n[%{PACKAGEDIGESTALGOS}:%{PACKAGEDIGESTS}\n]", id]);
     const lines = header.split("\n").filter((line) => line.trim());
     const digestAlgorithm = Number(lines[0]);
-    const distro = lines.slice(1).find((line) => line.startsWith(`${SHA256_DIGEST_ALGORITHM}:`))
+    const distro = lines.slice(1).find((line) => line.startsWith(`${sha256DigestAlgorithm}:`))
         ?.split(":", 2)[1] ?? "";
     const dump = await rpmQuery(["-q", "--dump", id]);
     const files = new Map<string, PackageFile>();
@@ -121,7 +121,7 @@ async function readMetadata(path: string): Promise<Record<string, unknown>>
     try
     {
         const attributes = await descriptor.stat();
-        if (!attributes.isFile() || attributes.size > MAX_METADATA_BYTES)
+        if (!attributes.isFile() || attributes.size > maxMetadataBytes)
             throw new Error("The Desktop build metadata is not a bounded regular file.");
         const parsed: unknown = JSON.parse(await descriptor.readFile("utf8"));
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
@@ -140,7 +140,7 @@ async function requirePackageFile(info: PackageInfo, path: string,
     const entry = info.files.get(path);
     if (!entry || entry.linkTo)
         throw new Error(`${path} is not a regular file shipped by ${info.id}.`);
-    const actual = await fileDigest(path, MAX_BUNDLE_BYTES);
+    const actual = await fileDigest(path, maxBundleBytes);
     if (actual !== entry.digest && !(mutableConfig && entry.config))
         throw new Error(`${path} does not match the ${info.id} package digest.`);
     return actual;
@@ -153,22 +153,22 @@ export async function verifyDesktopBuild(
 {
     const metadata = await readMetadata(join(appRoot, "package.json"));
     const product = await readMetadata(join(appRoot, "product.json"));
-    if (metadata.version !== DESKTOP_VERSION || metadata.main !== DESKTOP_MAIN
-        || product.commit !== DESKTOP_COMMIT)
-        throw new Error(`Unsupported Devin Desktop build. The Command Center requires version ${DESKTOP_VERSION} and its pinned commit.`);
-    const workbenchHash = await fileDigest(join(appRoot, WORKBENCH_FILE), MAX_BUNDLE_BYTES);
-    if (workbenchHash === WORKBENCH_HASH)
-        return { version: DESKTOP_VERSION, commit: DESKTOP_COMMIT, distro: "", workbenchHash, source: "pin" };
+    if (metadata.version !== desktopVersion || metadata.main !== desktopMain
+        || product.commit !== desktopCommit)
+        throw new Error(`Unsupported Devin Desktop build. The Command Center requires version ${desktopVersion} and its pinned commit.`);
+    const workbenchHash = await fileDigest(join(appRoot, workbenchFile), maxBundleBytes);
+    if (workbenchHash === pinnedWorkbenchHash)
+        return { version: desktopVersion, commit: desktopCommit, distro: "", workbenchHash, source: "pin" };
     const info = await lookup(join(appRoot, "package.json"));
     if (!info)
         throw new Error("The native Desktop host bundle is not the verified pristine build. Restore it before launching.");
-    if (info.digestAlgorithm !== SHA256_DIGEST_ALGORITHM)
+    if (info.digestAlgorithm !== sha256DigestAlgorithm)
         throw new Error(`Desktop package ${info.id} uses an unsupported file digest algorithm.`);
-    for (const file of PACKAGE_FILES)
+    for (const file of packageFiles)
         await requirePackageFile(info, join(appRoot, file), file === "product.json");
     return {
-        version: DESKTOP_VERSION,
-        commit: DESKTOP_COMMIT,
+        version: desktopVersion,
+        commit: desktopCommit,
         distro: info.distro,
         workbenchHash,
         source: "package",
@@ -181,11 +181,11 @@ export async function verifyPackageFile(
     lookup: PackageLookup = rpmPackageLookup,
 ): Promise<PackageFileCheck>
 {
-    const sha256 = await fileDigest(path, MAX_BUNDLE_BYTES);
+    const sha256 = await fileDigest(path, maxBundleBytes);
     const info = await lookup(path);
     if (!info)
         return { path, sha256, expected: null };
-    if (info.digestAlgorithm !== SHA256_DIGEST_ALGORITHM)
+    if (info.digestAlgorithm !== sha256DigestAlgorithm)
         throw new Error(`Desktop package ${info.id} uses an unsupported file digest algorithm.`);
     const entry = info.files.get(path);
     const expected = entry && !entry.linkTo ? entry.digest : null;

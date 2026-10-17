@@ -1,12 +1,13 @@
-import { loadAction, loadCenter } from "../../launcher/config";
-import type { ActionCache } from "../../launcher/config";
+import type { ActionCache } from "../../../launcher/center/config";
+import { loadAction, loadCenter } from "../../../launcher/center/config";
+
+import { stringify } from "yaml";
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { stringify } from "yaml";
 
 async function center(files: Record<string, string>, config: unknown): Promise<string>
 {

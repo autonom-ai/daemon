@@ -1,13 +1,14 @@
-import autonomFillMarkup from "../../assets/icons/autonom-fill.svg";
-import { object, readPrivateFile, writePrivateFile } from "./config";
+import autonomFillMarkup from "../../../assets/icons/autonom-fill.svg";
+import { object } from "../parse";
+import { readPrivateFile, writePrivateFile } from "../storage";
 
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const ACP_AGENT_ID = "devin-autonom";
+export const acpAgentId = "devin-autonom";
 
-const ACP_AGENT = {
+const acpAgent = {
     name: "Autonom",
     version: "0.1.0",
     description: "Devin Local with daemon-owned Autonom sessions and scheduled wakes.",
@@ -15,7 +16,7 @@ const ACP_AGENT = {
     icon: `data:image/svg+xml;base64,${Buffer.from(autonomFillMarkup).toString("base64")}`,
 };
 
-const ENABLED_AGENT_KEYS = ["devin.acp.enabledAgents", "windsurf.acp.enabledAgents"];
+const enabledAgentKeys = ["devin.acp.enabledAgents", "windsurf.acp.enabledAgents"];
 
 export function acpRegistryPath(): string
 {
@@ -150,15 +151,15 @@ export async function ensureAcpAgent(options: {
         binary.env = options.env;
 
     const entry = {
-        id: ACP_AGENT_ID,
-        ...ACP_AGENT,
+        id: acpAgentId,
+        ...acpAgent,
         distribution: { binary: { [platform]: binary } },
     };
 
     const registryPath = options.registryPath ?? acpRegistryPath();
     const registry = await readJsonFile(registryPath);
     const agents = (Array.isArray(registry.agents) ? registry.agents : [])
-        .filter((agent) => object(agent)?.id !== ACP_AGENT_ID);
+        .filter((agent) => object(agent)?.id !== acpAgentId);
     const next = [...agents, entry];
     if (JSON.stringify(registry.agents) !== JSON.stringify(next))
     {
@@ -170,12 +171,12 @@ export async function ensureAcpAgent(options: {
     const settingsPath = options.settingsPath ?? acpSettingsPath();
     const settings = await readJsonFile(settingsPath);
     let dirty = false;
-    for (const key of ENABLED_AGENT_KEYS)
+    for (const key of enabledAgentKeys)
     {
         const enabled = object(settings[key]) ?? {};
-        if (enabled[ACP_AGENT_ID] !== true)
+        if (enabled[acpAgentId] !== true)
         {
-            enabled[ACP_AGENT_ID] = true;
+            enabled[acpAgentId] = true;
             dirty = true;
         }
         settings[key] = enabled;

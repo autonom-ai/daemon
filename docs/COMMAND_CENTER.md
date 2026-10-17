@@ -137,12 +137,12 @@ UI bridge actions are `getAction` (validated lazy HTML/JS source), `runScript` (
 The launcher serves `$XDG_RUNTIME_DIR/autonom/launcher.sock` with mode 0600. It is a private, same-user channel for inspection and never a network endpoint:
 
 ```bash
-node devin/launcher/cdp.mjs status
-node devin/launcher/cdp.mjs targets
-node devin/launcher/cdp.mjs eval workbench "globalThis.__autonomCenter.status()"
-node devin/launcher/cdp.mjs screenshot workbench /tmp/autonom.png
-node devin/launcher/cdp.mjs hot
-node devin/launcher/cdp.mjs detach
+node devin/launcher/cdp/control.mjs status
+node devin/launcher/cdp/control.mjs targets
+node devin/launcher/cdp/control.mjs eval workbench "globalThis.__autonomCenter.status()"
+node devin/launcher/cdp/control.mjs screenshot workbench /tmp/autonom.png
+node devin/launcher/cdp/control.mjs hot
+node devin/launcher/cdp/control.mjs detach
 ```
 
 `hot` re-reads `ui.yml`, asset versions, CSS, and the runtime bundle. A changed runtime is reinstalled; layout-only updates use the existing runtime. Asset edits also reload automatically. `detach` disposes the runtime and restores native Devin; `hot` resumes attachment after a detach. Control evaluations and screenshots release their temporary CDP sessions, and status reads the live renderer rather than cached state.

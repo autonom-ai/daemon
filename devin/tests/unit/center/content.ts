@@ -1,5 +1,5 @@
-import { isFullDocument, overlayItems, pageHtml } from "../../launcher/center";
-import type { SidebarItem } from "../../launcher/center";
+import type { SidebarItem } from "../../../launcher/center/content";
+import { isFullDocument, overlayItems, pageHtml } from "../../../launcher/center/content";
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
