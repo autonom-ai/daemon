@@ -498,6 +498,20 @@ public:
     {
         Session[] ret;
         bool[string] listed;
+        foreach (call; executions)
+        {
+            string id = call.sessionId;
+            if (!call.running || !id.length || id in removed)
+                continue;
+
+            if (id !in sessions)
+                sessions[id] = new Session(id, this);
+
+            Session entry = sessions[id];
+            if (entry.execution is null || entry.execution.createdAt <= call.createdAt)
+                entry.bindCall(call);
+        }
+
         foreach (data; readSessionCatalog(sessionDatabase))
         {
             Session.validateId(data.id);
@@ -517,12 +531,15 @@ public:
         }
         foreach (id, entry; sessions)
         {
-            if (id !in listed && id !in removed &&
-                (entry.isRunning() || observedSession(id)))
+            if (id !in listed)
             {
                 entry.updateMetadata(SessionMetadata.init);
-                if ((!directory.length || entry.workspace == directory) && !acp.length)
+                if (id !in removed && (entry.isRunning() || observedSession(id)) &&
+                    (!directory.length || entry.workspace == directory) &&
+                    (!acp.length || entry.metadata.acp == acp))
+                {
                     ret ~= entry;
+                }
             }
         }
 

@@ -2,6 +2,9 @@ module tests.http.client;
 
 import tests.http.common;
 import tests.common;
+import tests.interop.devin.common : database;
+
+import arsd.sqlite;
 import unit_threaded : Name, Serial, should;
 
 import core.sys.linux.sys.file : flock, LOCK_EX;
@@ -46,5 +49,35 @@ unittest
     request("/api/client/state")["humanEvents"].integer.should == 0;
     request("/api/client/events?profile=alpha").array.length.should == 1;
     request("/api/messages?session=managed-one&source=dms")["messages"].array.length.should == 1;
+}
+
+@Name("Client state shares current session metadata across profiles and directory-filtered listings") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    Sqlite connection = database(fixture);
+    scope(exit)
+        destroy(connection);
+
+    fixture.store.register("alpha", "session-one");
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    JSONValue state = request("/api/client/state");
+    state["profiles"][0]["session"]["title"].str.should == "First title";
+    connection.query("update sessions set title = 'Updated title', working_directory = '/elsewhere'");
+    state = request("/api/client/state?directory="~fixture.root);
+    state["sessions"].array.length.should == 0;
+    state["profiles"][0]["session"]["title"].str.should == "Updated title";
+    state = request("/api/client/state?directory=/elsewhere");
+    state["profiles"][0]["session"]["title"].should == state["sessions"][0]["title"];
+    connection.query("delete from sessions");
+    state = request("/api/client/state");
+    state["sessions"].array.length.should == 0;
+    state["profiles"][0]["session"]["title"].str.should == "";
 }
 

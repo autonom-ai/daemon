@@ -97,13 +97,8 @@ public:
     {
         if (refresh)
             _metadata = bridge.sessionMetadata(id);
+
         SessionMetadata data = metadata;
-        if (!data.id.length && _execution !is null)
-        {
-            data.model = _execution.model;
-            data.mode = _execution.mode;
-            data.directory = _execution.workspace;
-        }
 
         JSONValue ret = data.toJSON();
         ret["id"] = JSONValue(id);
@@ -114,7 +109,25 @@ public:
     }
 
     SessionMetadata metadata()
-        => _metadata;
+    {
+        SessionMetadata ret = _metadata;
+        if (!ret.id.length)
+        {
+            if (_execution !is null)
+            {
+                ret.model = _execution.model;
+                ret.mode = _execution.mode;
+                ret.directory = _execution.workspace;
+            }
+            else
+                ret.directory = bridge.observedDirectory(id);
+
+            if (isRunning() || bridge.observedSession(id))
+                ret.acp = "autonom";
+        }
+
+        return ret;
+    }
 
     SessionStatus status()
     {
