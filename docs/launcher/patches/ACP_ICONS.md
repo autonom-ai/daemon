@@ -65,7 +65,9 @@ with both variables set fails and must be reported as an unverified live gate.
 
 The existing Sessions performance check additionally requires an actual session
 whose provider has registry icon metadata. Native Devin Local/OpenCode SVGs
-alone do not exercise this patch. The current benchmark counts inline masks only; computed direct/pseudo-mask
-counting remains a follow-up, with the nonzero assertion preserved. If no
-eligible session exists, report the unmet precondition; an Agents-page pass does
-not substitute for session-list acceptance.
+alone do not exercise this patch. The benchmark counts a host whose computed
+direct or `::before` mask matches an installed dictionary entry, so both the
+inline React hosts and the `[data-acp-icon]:before` codicons count; visibility,
+viewport, and the nonzero assertion are unchanged. If no eligible session
+exists, report the unmet precondition; an Agents-page pass does not substitute
+for session-list acceptance.

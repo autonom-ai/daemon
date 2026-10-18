@@ -28,14 +28,21 @@ export async function benchmark(targetId: string): Promise<Sample>
                 let start=performance.now(); shell.update(css); update.push(performance.now()-start);
                 start=performance.now(); shell.heartbeat(); heartbeat.push(performance.now()-start);
             }
+            const icons=Object.values(globalThis.__autonomBundle?.icons??{});
+            const masked=element => [getComputedStyle(element),getComputedStyle(element,"::before")]
+                .flatMap(style => [style.maskImage,style.webkitMaskImage])
+                .some(mask => mask && mask!=="none" && icons.some(icon => mask.includes(icon)));
             return {
                 update, heartbeat, metricsBefore, metricsAfter:shell.performance?.() ?? null,
                 nodes:document.querySelectorAll("*").length,
                 candidates:document.querySelectorAll(selector).length,
-                visibleMasks:[...document.querySelectorAll("[style]")].filter(element => {
+                // Count every host the patch can reach, including ACP codicons whose mask
+                // renders through a ::before rule rather than an inline mask-image.
+                visibleMasks:[...document.querySelectorAll(selector)].filter(element => {
                     const rect=element.getBoundingClientRect();
-                    return element.style.getPropertyValue("mask-image") && rect.width && rect.height
-                        && rect.right>0 && rect.bottom>0 && rect.left<innerWidth && rect.top<innerHeight;
+                    return rect.width && rect.height
+                        && rect.right>0 && rect.bottom>0 && rect.left<innerWidth && rect.top<innerHeight
+                        && masked(element);
                 }).length
             };
         })()`) as Sample;
