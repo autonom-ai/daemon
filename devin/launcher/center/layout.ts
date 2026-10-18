@@ -1,6 +1,7 @@
 import uiCss from "../../../assets/ui.css";
 import type { CenterContent, SidebarItem } from "./content";
 import { spacesSection } from "./content";
+import { createIcon } from "./icons";
 import { createSections } from "./sections";
 import { prepareShell } from "./shell";
 
@@ -129,6 +130,41 @@ export function createLayout(context: {
 
                 button.dataset.autonomItem = id;
                 rows.set(id, row);
+
+                const item = items.get(id);
+                if (item?.icon)
+                {
+                    const iconSvg = createIcon(item.icon);
+                    if (iconSvg)
+                    {
+                        const iconSlot = button.querySelector<HTMLElement>('[data-slot="sidebar-menu-button-icon"]');
+                        if (iconSlot)
+                        {
+                            if (iconSlot.dataset.autonomIcon !== item.icon)
+                            {
+                                iconSlot.dataset.autonomIcon = item.icon;
+                                if (typeof iconSlot.replaceChildren === "function")
+                                    iconSlot.replaceChildren(iconSvg);
+                                else
+                                {
+                                    while (iconSlot.firstChild)
+                                        iconSlot.removeChild(iconSlot.firstChild);
+                                    iconSlot.appendChild(iconSvg);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            const existing = button.querySelector<SVGElement>("svg");
+                            if (existing && (existing as any).dataset?.autonomIcon !== item.icon)
+                            {
+                                (iconSvg as any).dataset ??= {};
+                                (iconSvg as any).dataset.autonomIcon = item.icon;
+                                existing.replaceWith(iconSvg);
+                            }
+                        }
+                    }
+                }
             }
 
             sections.sync(menu, content.sections, rows);

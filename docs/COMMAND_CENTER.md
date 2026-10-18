@@ -92,9 +92,19 @@ devin_cloud:
 items:
     - id: schedules
       label: Schedules
-      icon: automations
+      icon: timer
       actions:
           left_click: pages/schedules.html
+    - id: policy
+      label: Policy
+      icon: shield-lock
+      actions:
+          left_click: pages/policy.html
+    - id: settings
+      label: Settings
+      icon: cog
+      actions:
+          left_click: pages/settings.html
 
 sections:
     - id: rooms
@@ -126,7 +136,7 @@ sections:
       items: []
 ```
 
-Sections and items render in YAML order, with the top-level `items` list ahead of the sections; section labels are optional and empty labeled sections are supported. `devin_cloud` lists native manifest IDs to import, plus the reserved id `spaces`. Imported entries can be placed in a section, or follow the top-level items when unplaced. No native item, including Wiki, is implicitly inserted. In Autonom mode (`enabled: true` with the Autonom provider) the native Spaces section is hidden unless `spaces` is listed in `devin_cloud`; `spaces` never creates a sidebar item and only keeps that native region visible. Devin Cloud mode always restores the native sidebar, including Spaces. Imported entries cannot replace their native action with a custom script/page. Hidden items remain non-interactive. `active_item` must identify a visible HTML action and opens only in Autonom's Agent view.
+Sections and items render in YAML order, with the top-level `items` list ahead of the sections; section labels are optional and empty labeled sections are supported. Navigation sidebar items resolve icons (`timer`, `shield-lock`, `cog`) from bundled Lucide SVG assets in `assets/icons/`, ensuring clean rendering independent of Devin Cloud icon sets. `devin_cloud` lists native manifest IDs to import, plus the reserved id `spaces`. Imported entries can be placed in a section, or follow the top-level items when unplaced. No native item, including Wiki, is implicitly inserted. In Autonom mode (`enabled: true` with the Autonom provider) the native Spaces section is hidden unless `spaces` is listed in `devin_cloud`; `spaces` never creates a sidebar item and only keeps that native region visible. Devin Cloud mode always restores the native sidebar, including Spaces. Imported entries cannot replace their native action with a custom script/page. Hidden items remain non-interactive. `active_item` must identify a visible HTML action and opens only in Autonom's Agent view.
 
 Only `left_click` is supported. An `.html` file displays a native webview; a `.js` file runs as an async renderer function with `context.item`, `context.section`, `context.open(id)`, `context.executeCommand(command, ...args)`, `context.request(message)`, and `context.refresh()`. `context.section` is set only for section-button scripts and holds `{id, label}` of the owning section. Example JS action: `await context.refresh();`. Scripts are trusted UI code, not sandboxed plugins; they have renderer access but no launcher Node API or daemon secret. Compilation happens through the existing CDP transport without weakening Trusted Types.
 

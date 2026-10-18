@@ -6,22 +6,17 @@ devin_cloud:
 items:
     - id: schedules
       label: Schedules
-      icon: automations
+      icon: timer
       actions:
           left_click: pages/schedules.html
-    - id: events
-      label: Events
-      icon: oncall
-      actions:
-          left_click: pages/events.html
     - id: policy
       label: Policy
-      icon: security
+      icon: shield-lock
       actions:
           left_click: pages/policy.html
     - id: settings
       label: Settings
-      icon: settings
+      icon: cog
       actions:
           left_click: pages/settings.html
 
