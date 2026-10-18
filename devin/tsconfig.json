@@ -26,6 +26,7 @@
   },
   "include": [
     "launcher/**/*.ts",
+    "benchmarks/**/*.ts",
     "tests/**/*.ts"
   ]
 }

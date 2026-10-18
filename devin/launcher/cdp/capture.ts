@@ -22,14 +22,19 @@ function probe(): any
     return null;
 }
 
-export async function captureServices(session: CdpSession): Promise<boolean>
+export async function captureServices(
+    session: CdpSession, timing?: (phase: string, duration: number) => void,
+): Promise<boolean>
 {
+    const started = performance.now();
+    const measure = (phase: string) => timing?.(phase, performance.now() - started);
     const found = await session.evaluate(`globalThis.__autonomAttachProbe=(${probe.toString()})();`
         + "Boolean(globalThis.__autonomAttachProbe)");
     if (found !== true)
         return false;
 
     await session.request("Debugger.enable", { maxScriptsCacheSize: 0 });
+    measure("debugger-ready");
     try
     {
         await captureInvocation(
@@ -37,12 +42,14 @@ export async function captureServices(session: CdpSession): Promise<boolean>
             "globalThis.__autonomAttachProbe.props.getDesktopNavSurfacesSnapshot",
             "globalThis.__autonomServices={manifest:this._manifestService,controller:yAe.prototype};true",
         );
+        measure("manifest-captured");
         await captureInvocation(
             session,
             "globalThis.__autonomAttachProbe.props.getActiveDesktopNavSurfaceSnapshot",
             "globalThis.__autonomServices.groups=o;globalThis.__autonomServices.windowId=e.vscodeWindowId;"
                 + "globalThis.__autonomServices.api=globalThis.__autonomAttachProbe.api;true",
         );
+        measure("services-captured");
         return true;
     }
     finally

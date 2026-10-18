@@ -17,6 +17,20 @@ const common = {
 await Promise.all([
     build({
         ...common,
+        entryPoints: [join(devin, "benchmarks/startup.ts")],
+        outfile: join(dist, "benchmarks/startup.js"),
+        platform: "node",
+        format: "cjs",
+    }),
+    build({
+        ...common,
+        entryPoints: [join(devin, "benchmarks/run.ts")],
+        outfile: join(dist, "benchmarks/sidebar.js"),
+        platform: "node",
+        format: "cjs",
+    }),
+    build({
+        ...common,
         entryPoints: [join(launcher, "app.ts")],
         outfile: join(dist, "launcher.js"),
         platform: "node",

@@ -1,5 +1,4 @@
-import { acpRegistryIcons, ensureAcpAgent } from "./acp/registry";
-import type { CdpSession } from "./cdp/client";
+import { ensureAcpAgent } from "./acp/registry";
 import { CdpClient } from "./cdp/client";
 import { defaultSocketPath, isLauncherRunning, startControlSocket } from "./cdp/control";
 import { startBridge } from "./center/bridge";
@@ -7,7 +6,8 @@ import type { ActionCache } from "./center/config";
 import { loadAction, loadCenter } from "./center/config";
 import { declaredItems, visibleItems } from "./center/content";
 import { watchContent } from "./center/watch";
-import { executeScript, installRuntime, runtimeStatus } from "./center/window";
+import { executeScript, runtimeStatus } from "./center/window";
+import { Windows } from "./center/windows";
 import { environmentPort, parseArguments } from "./cli";
 import type { LauncherSettings } from "./config";
 import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, readSettings } from "./config";
@@ -89,120 +89,30 @@ async function main(): Promise<void>
         ...(options.debugPort === undefined ? {} : { debugPort: options.debugPort }),
     });
     const cdp = new CdpClient(transport);
-    const sessions = new Map<string, CdpSession>();
-    const windows = new Map<number, CdpSession>();
-    const warnings = new Map<string, string>();
+    const attached = new Windows(cdp, [
+        workbenchUrl(appRoot),
+        `vscode-file://vscode-app${join(appRoot, "out/vs/sessions/electron-browser/sessions.html")}`,
+    ], () => ({ source: runtimeSource, config: {
+        content, bridge: { url: bridge.url, token: bridge.token },
+    } }), log);
+    const sessions = attached.sessions;
+    const windows = attached.byId;
     let control: { close(): Promise<void> } | undefined;
     let heartbeat: ReturnType<typeof setTimeout> | undefined;
     let disabled = false;
     let stopping = false;
-    let refreshing: Promise<void> | undefined;
-    let foundWindow = false;
     let watcher: { close(): void } | undefined;
     let reloading: Promise<unknown> | undefined;
 
-    async function install(session: CdpSession): Promise<void>
-    {
-        const current = await installRuntime(session, runtimeSource, {
-            content, bridge: { url: bridge.url, token: bridge.token },
-        });
-        if (current)
-        {
-            windows.set(current.windowId, session);
-        }
-
-        log(`Attached ${session.targetId}: ${current?.mode}, active ${current?.activeItem ?? "none"}`);
-    }
-
-    async function refreshWindows(): Promise<void>
-    {
-        if (disabled || stopping)
-            return;
-
-        const urls = [
-            workbenchUrl(appRoot),
-            `vscode-file://vscode-app${join(appRoot, "out/vs/sessions/electron-browser/sessions.html")}`,
-        ];
-        const targets = (await cdp.targets()).filter((target) => target.type === "page"
-            && urls.includes(target.url.split(/[?#]/)[0]!));
-        if (targets.length)
-            foundWindow = true;
-
-        const icons = JSON.stringify(await acpRegistryIcons().catch(() => ({})));
-
-        for (const [id, session] of sessions)
-        {
-            if (targets.some((target) => target.id === id))
-                continue;
-
-            sessions.delete(id);
-            warnings.delete(id);
-            for (const [windowId, current] of windows)
-                if (current === session)
-                    windows.delete(windowId);
-
-            await session.detach();
-        }
-
-        for (const target of targets)
-        {
-            try
-            {
-                let session = sessions.get(target.id);
-                if (!session)
-                {
-                    session = await cdp.attach(target.id);
-                    sessions.set(target.id, session);
-                }
-
-                await session.evaluate(`(() => {
-                    const shell = globalThis.__autonomShell;
-                    if (!shell) {
-                        ${runtimeSource}
-                        AutonomRuntime.prepareShell(${JSON.stringify(content.css)}, ${icons});
-                    } else {
-                        shell.update(${JSON.stringify(content.css)}, ${icons});
-                        shell.heartbeat();
-                    }
-                })()`);
-                if (!await runtimeStatus(session))
-                    await install(session);
-
-                warnings.delete(target.id);
-            }
-            catch (error)
-            {
-                const message = error instanceof Error ? error.message : String(error);
-                if (warnings.get(target.id) !== message)
-                    log(`${target.id}: ${message}`);
-
-                warnings.set(target.id, message);
-            }
-        }
-    }
-
     function refresh(): Promise<void>
     {
-        refreshing ??= refreshWindows().finally(() =>
-        {
-            refreshing = undefined;
-        });
-        return refreshing;
+        return disabled || stopping ? Promise.resolve() : attached.refresh();
     }
 
     async function detach(): Promise<unknown>
     {
         disabled = true;
-        await refreshing?.catch(() => undefined);
-        for (const session of sessions.values())
-        {
-            await session.evaluate("globalThis.__autonomCenter?.dispose();globalThis.__autonomShell?.dispose()").catch(() => undefined);
-            await session.detach();
-        }
-
-        sessions.clear();
-        windows.clear();
-        warnings.clear();
+        await attached.detach();
         return { ok: true };
     }
 
@@ -238,7 +148,7 @@ async function main(): Promise<void>
         const path = settings.commandCenterConfig;
         const next = await loadCenter(path);
         const source = await readFile(runtimePath, "utf8");
-        await refreshing?.catch(() => undefined);
+        await attached.settled();
         if (stopping)
             throw new Error("The launcher is stopping.");
 
@@ -255,6 +165,7 @@ async function main(): Promise<void>
         content = next;
         runtimeSource = source;
         disabled = false;
+        attached.disabled = false;
         const versions = new Map(declaredItems(content).filter((item) => item.actions)
             .map((item) => [resolve(dirname(contentPath), item.actions!.left_click.file), item.actions!.left_click.version]));
         for (const [file, cached] of actionCache)
@@ -264,7 +175,7 @@ async function main(): Promise<void>
         for (const session of sessions.values())
         {
             if (replaced)
-                await install(session);
+                await attached.install(session);
             else
                 await session.evaluate(`globalThis.__autonomCenter.update(${JSON.stringify({
                     content, bridge: { url: bridge.url, token: bridge.token },
@@ -289,13 +200,9 @@ async function main(): Promise<void>
         }, (error) => log(`UI watcher: ${error.message}`));
     }
 
-    async function report(): Promise<unknown>
+    function report(): Promise<unknown>
     {
-        const ret = [];
-        for (const [targetId, session] of sessions)
-            ret.push({ targetId, status: await runtimeStatus(session), error: warnings.get(targetId) ?? null });
-
-        return { windows: ret };
+        return attached.report();
     }
 
     async function shutdown(code: number): Promise<void>
@@ -330,7 +237,7 @@ async function main(): Promise<void>
         }
 
         if (!stopping)
-            heartbeat = setTimeout(() => void tick(), heartbeatInterval);
+            heartbeat = setTimeout(() => void tick(), attached.pending ? 100 : heartbeatInterval);
     }
 
     process.on("SIGINT", () => void shutdown(0));
@@ -342,11 +249,11 @@ async function main(): Promise<void>
     });
     child?.on("exit", (code) =>
     {
-        if (!foundWindow)
+        if (!attached.found)
             log("Desktop forwarded this launch to an existing process without a debugging pipe. "
                 + "Restart your normal Desktop profile through the launcher.");
 
-        void shutdown(foundWindow ? (code ?? 0) : 1);
+        void shutdown(attached.found ? (code ?? 0) : 1);
     });
     try
     {
@@ -367,18 +274,19 @@ async function main(): Promise<void>
             hot,
             detach,
         });
+        await attached.start();
         watchAssets();
         log(`Workspace ${process.cwd()}`);
         log(`Control socket ${socketPath}`);
         const deadline = Date.now() + attachTimeout;
-        while (!foundWindow && !stopping)
+        while (!attached.found && !stopping)
         {
             if (Date.now() > deadline)
                 throw new Error("Timed out waiting for a Desktop window. Inspect targets through the control socket.");
 
             await refresh();
-            if (!foundWindow)
-                await new Promise((resolve_) => setTimeout(resolve_, 1000));
+            if (!attached.found)
+                await new Promise((resolve_) => setTimeout(resolve_, 100));
         }
 
         void tick();

@@ -148,6 +148,7 @@ export function install(services: any, config: RuntimeConfig): any
     });
 
     const runtime = {
+        mode: () => mode,
         heartbeat(): void
         {
             if (disposed)
@@ -182,10 +183,7 @@ export function install(services: any, config: RuntimeConfig): any
                 compiledScripts: actions.scripts.size,
             };
         },
-        navigationState(): unknown
-        {
-            return { autonom: savedAutonomSurface, native: savedNativeSurface };
-        },
+        navigationState: () => ({ autonom: savedAutonomSurface, native: savedNativeSurface }),
         async update(next: RuntimeConfig): Promise<RuntimeStatus>
         {
             if (disposed)

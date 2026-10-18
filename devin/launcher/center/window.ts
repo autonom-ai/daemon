@@ -2,6 +2,8 @@ import { captureServices } from "../cdp/capture";
 import type { CdpSession } from "../cdp/client";
 import type { RuntimeConfig, RuntimeStatus } from "./types";
 
+import { createHash } from "node:crypto";
+
 export async function runtimeStatus(session: CdpSession): Promise<RuntimeStatus | null>
 {
     return await session.evaluate(`(() => {
@@ -22,17 +24,18 @@ export async function runtimeStatus(session: CdpSession): Promise<RuntimeStatus 
 
 export async function installRuntime(
     session: CdpSession, source: string, config: RuntimeConfig,
+    timing?: (phase: string, duration: number) => void,
 ): Promise<RuntimeStatus | null>
 {
-    if (!await captureServices(session))
+    await ensureBundle(session, source);
+    if (!await captureServices(session, timing))
         throw new Error("The agent sidebar is not mounted. Open the agent window (Ctrl+').");
 
     try
     {
         await session.evaluate(`(async () => {
-            ${source}
             const config = ${JSON.stringify(config)};
-            const runtime = AutonomRuntime.install(globalThis.__autonomServices, config);
+            const runtime = globalThis.__autonomBundle.runtime.install(globalThis.__autonomServices, config);
             try { await runtime.update(config); }
             catch (error) { runtime.dispose(); throw error; }
         })()`, 45000);
@@ -55,4 +58,28 @@ export async function executeScript(
             + `${source}\n});`);
 
     await session.evaluate(`globalThis.__autonomCenter.runScript(${key},${version})`, 45000);
+}
+
+async function ensureBundle(session: CdpSession, source: string): Promise<void>
+{
+    const version = createHash("sha256").update(source).digest("hex");
+    if (await session.evaluate(`globalThis.__autonomBundle?.version === ${JSON.stringify(version)}`))
+        return;
+
+    await session.evaluate(`(() => {
+        if (globalThis.__autonomBundle) globalThis.__autonomShell?.dispose();
+        ${source}
+        globalThis.__autonomBundle = {version:${JSON.stringify(version)}, runtime:AutonomRuntime};
+    })()`);
+}
+
+export async function prepareWindow(
+    session: CdpSession, source: string, css: string, icons: Record<string, string>,
+): Promise<void>
+{
+    await ensureBundle(session, source);
+    await session.evaluate(`(() => {
+        if (!document.head || !document.body) return;
+        globalThis.__autonomBundle.runtime.prepareShell(${JSON.stringify(css)}, ${JSON.stringify(icons)});
+    })()`);
 }
