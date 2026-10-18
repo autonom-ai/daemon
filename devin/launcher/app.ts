@@ -64,9 +64,9 @@ async function main(): Promise<void>
             acpArguments.push("--devin", daemonConfig.devinCommand);
         await ensureAcpAgent({ command: join(repository, "bin", "autonom-acp"), args: acpArguments });
     }
-    catch (error)
+    catch
     {
-        log(`ACP registration skipped: ${error instanceof Error ? error.message : String(error)}`);
+        log("ACP registration skipped: verify the connector binary, registry, and Desktop settings.");
     }
     let contentPath = settings.commandCenterConfig;
     let content = await loadCenter(contentPath);

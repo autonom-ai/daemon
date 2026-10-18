@@ -18,6 +18,7 @@ export class Windows
     private queued = false;
     private icons: Record<string, string> = {};
     private iconsAt = 0;
+    private iconRefresh: Promise<void> | undefined;
     private restored: { targetId: string; patches: unknown[] }[] = [];
     private readonly started = performance.now();
     private readonly iconCatalog = new IconCatalog(undefined, (message) => this.log(message));
@@ -28,7 +29,9 @@ export class Windows
         private readonly payload: () => { source: string; config: RuntimeConfig },
         private readonly log: (message: string) => void,
     )
-    { }
+    {
+        this.icons = this.iconCatalog.snapshot();
+    }
 
     async start(): Promise<void>
     {
@@ -132,8 +135,17 @@ export class Windows
         this.found ||= targets.length > 0;
         if (Date.now() - this.iconsAt >= 5000)
         {
-            this.icons = await this.iconCatalog.read().catch(() => this.icons);
             this.iconsAt = Date.now();
+            this.iconRefresh ??= this.iconCatalog.read().then((icons) =>
+            {
+                if (JSON.stringify(icons) === JSON.stringify(this.icons))
+                    return;
+
+                this.icons = icons;
+                if (!this.disabled)
+                    void this.refresh().catch((error) => this.log(error.message));
+            }).catch(() => this.log("ACP icon registry refresh failed."))
+                .finally(() => this.iconRefresh = undefined);
         }
 
         for (const [id, session] of this.sessions)

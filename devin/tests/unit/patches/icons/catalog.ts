@@ -1,5 +1,5 @@
 import { iconByteLimit } from "../../../../launcher/patches/icons/assets";
-import { IconCatalog } from "../../../../launcher/patches/icons/catalog";
+import { IconCatalog, iconCatalogByteLimit } from "../../../../launcher/patches/icons/catalog";
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -54,7 +54,13 @@ test("the catalog converts registered icons and keeps the registry byte-for-byte
         { id: "base64", icon: encoded },
     ] }, null, 4));
     const before = await readFile(path);
-    const icons = await new IconCatalog(path).read();
+    const catalog = new IconCatalog(path);
+    const initial = catalog.snapshot();
+    assert.deepEqual(Object.keys(initial), ["devin-autonom"]);
+    const icons = await catalog.read();
+    assert.deepEqual(catalog.snapshot(), icons);
+    delete initial["devin-autonom"];
+    assert.ok(catalog.snapshot()["devin-autonom"]);
     for (const provider of ["antigravity", "relative", "absolute", "file", "percent", "base64"])
         assert.equal(icons[provider], encoded);
     assert.match(icons["devin-autonom"]!, /^data:image\/svg\+xml;base64,/);
@@ -180,4 +186,54 @@ test("invalid data and missing files do not suppress a valid registered Autonom 
         { id: "devin-autonom", icon: encoded },
     ]);
     assert.deepEqual(await new IconCatalog(path).read(), { "devin-autonom": encoded });
+});
+
+test("reversed response completion preserves dictionary ordering and unchanged serialized results", async (context) =>
+{
+    let reverse = false;
+    const completed: string[] = [];
+    const url = await endpoint(context, (request, response) =>
+    {
+        const first = request.url === "/first.svg";
+        setTimeout(() =>
+        {
+            completed.push(request.url!);
+            response.setHeader("Content-Type", "image/svg+xml");
+            response.end(svg);
+        }, first !== reverse ? 35 : 5);
+    });
+    const path = await registry(context, [
+        { id: "first", icon: `${url}/first.svg` }, { id: "second", icon: `${url}/second.svg` },
+    ]);
+    const catalog = new IconCatalog(path);
+    const initial = JSON.stringify(await catalog.read());
+    assert.deepEqual(completed, ["/second.svg", "/first.svg"]);
+    reverse = true;
+    completed.length = 0;
+    assert.equal(JSON.stringify(await new IconCatalog(path).read()), initial);
+    assert.deepEqual(completed, ["/first.svg", "/second.svg"]);
+    assert.equal(JSON.stringify(await catalog.read()), initial);
+});
+
+test("dictionary and source-cache budgets stop downloads and preserve warm refresh results", async (context) =>
+{
+    let requests = 0;
+    const body = Buffer.alloc(iconByteLimit, " ");
+    body.write(svg);
+    const url = await endpoint(context, (_request, response) =>
+    {
+        requests++;
+        response.setHeader("Content-Type", "image/svg+xml");
+        response.end(body);
+    });
+    const path = await registry(context, Array.from({ length: 20 }, (_, index) =>
+        ({ id: `agent-${index}`, icon: `${url}/${index}.svg` })));
+    const warnings: string[] = [];
+    const catalog = new IconCatalog(path, (message) => warnings.push(message));
+    const icons = await catalog.read();
+    assert.ok(Buffer.byteLength(JSON.stringify(icons)) <= iconCatalogByteLimit);
+    assert.ok(Object.keys(icons).length > 1 && Object.keys(icons).length <= 12);
+    assert.ok(requests < 20);
+    assert.ok(warnings.length > 0 && warnings.every((message) => !message.includes(url)));
+    assert.ok(JSON.stringify(await catalog.read()) === JSON.stringify(icons), "A warm refresh changed the icon dictionary.");
 });

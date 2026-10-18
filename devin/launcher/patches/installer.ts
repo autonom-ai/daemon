@@ -3,7 +3,7 @@ import { object } from "../parse";
 import { readPrivateFile } from "../storage";
 
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /** Observes installer provenance; the launcher never applies this disk patch. */
 export async function installerStatus(repository: string, appRoot: string, build: BuildIdentity)
@@ -14,8 +14,9 @@ export async function installerStatus(repository: string, appRoot: string, build
         const record = object(JSON.parse(await readPrivateFile(join(repository, "install.json"))));
         const cli = object(record?.cli);
         const identity = object(record?.build);
+        const backupPath = resolve(appRoot, "..", "..", `${hook}.autonom.orig`);
         if (record?.version !== 2 || typeof cli?.stubHash !== "string"
-            || typeof cli.originalHash !== "string" || typeof cli.backupPath !== "string"
+            || typeof cli.originalHash !== "string" || cli.backupPath !== backupPath
             || identity?.version !== build.version || identity.commit !== build.commit)
             throw new Error("Installation record does not match the verified Desktop build.");
         const digest = (source: string) => createHash("sha256").update(source).digest("hex");

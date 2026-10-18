@@ -13,13 +13,18 @@ the bundled Base64 fallback in memory.
 file paths (relative to the registry directory). It emits canonical Base64 image
 data URIs. Reads are bounded to 256 KiB per image; remote requests share a
 three-second batch deadline, at most four concurrent loads, and three redirects.
+The serialized provider dictionary (including fallback) and retained source-cache
+records each have a four-MiB budget, eight MiB combined. Exhaustion stops further loads; already running reads
+remain subject to the image and deadline bounds. Provider ordering follows the
+registry, so response completion order does not trigger redundant renderer scans.
 Unsupported MIME types and malformed sources fail independently. Logs identify
 only the provider, without remote URLs or credential-bearing metadata.
 
 Identical sources share one cached asset and concurrent reads share one refresh.
 Local file metadata changes invalidate their cache. Remote successes refresh
 after five minutes, failures retry after one minute, and a failed refresh retains
-a previously successful asset. Removed sources are pruned. The registry is read
+a previously successful asset. Removed sources are pruned. Remote conversion runs in the background, so attachment starts with the
+in-memory Autonom fallback and does not wait for network icons. The registry is read
 at most once per launcher refresh interval (five seconds); only the Base64
 provider dictionary crosses CDP. The renderer performs no icon network fetches.
 

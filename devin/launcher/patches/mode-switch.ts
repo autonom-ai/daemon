@@ -68,13 +68,13 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
     try
     {
         observer = new MutationObserver((records) =>
-    {
-        acp.changed(records);
-        frame ??= setTimeout(() =>
         {
-            frame = undefined;
-            render();
-        });
+            acp.changed(records);
+            frame ??= setTimeout(() =>
+            {
+                frame = undefined;
+                render();
+            });
         });
     }
     catch (error)
@@ -172,6 +172,9 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                             forward(root, nativeEditor);
                             delay(() =>
                             {
+                                if (pending !== transition)
+                                    return;
+
                                 if (!shell.editorActive())
                                     void target.__autonomCenter?.toggleEditor()
                                         .catch((error: Error) => console.error("[autonom]", error));
