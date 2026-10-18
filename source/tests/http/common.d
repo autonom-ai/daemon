@@ -66,7 +66,8 @@ RunningDaemon startDaemon(Fixture fixture)
         stdin,
         ret.log,
         ret.log,
-        ["AUTONOM_CONFIG": fixture.path, "AUTONOM_PORT": "18080"],
+        ["AUTONOM_CONFIG": fixture.path, "AUTONOM_PORT": "18080",
+            "XDG_CONFIG_HOME": buildPath(fixture.root, "xdg-config")],
         Config.retainStdin | Config.retainStdout | Config.retainStderr
     );
     waitUntil(delegate bool() {

@@ -42,7 +42,7 @@ class DaemonTestCase(unittest.TestCase):
         config = self.workspace / "config.yml"
         config.write_text("dataDir: data\ndevinCommand: /bin/false\nsessionLockDir: locks\nrouter:\n  type: openrouter\n  key: unused\n"
                           "  url: https://openrouter.ai\n  name: OpenRouter\n")
-        self.env = dict(os.environ, AUTONOM_CONFIG=str(config), AUTONOM_PORT=str(self.port),
+        self.env = dict(os.environ, XDG_CONFIG_HOME=str(self.workspace / "xdg-config"), AUTONOM_CONFIG=str(config), AUTONOM_PORT=str(self.port),
                         AUTONOM_DATA_DIR=str(self.data), AUTONOM_RUN_TOKEN="", AUTONOM_CLIENT_TOKEN="")
         self.log = tempfile.TemporaryFile()
         self.addCleanup(self.log.close)

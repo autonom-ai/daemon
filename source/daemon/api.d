@@ -19,6 +19,7 @@ import daemon.interop.api;
 import daemon.interop.devin.bridge : Bridge;
 import daemon.interop.devin.calls;
 import daemon.interop.devin.connection;
+import daemon.interop.devin.hooks : installHooks;
 import daemon.interop.devin.session.api;
 import daemon.interop.devin.session.control;
 import daemon.interop.devin.session.permissions;
@@ -55,6 +56,7 @@ Scheduler scheduler;
 void setupDomain()
 {
     configuration = Config.get(environment.get("AUTONOM_CONFIG", Config.defaultPath));
+    installHooks();
     bridge = new Bridge(configuration);
     profileStore = new ProfileStore(configuration, bridge);
     events = new EventStore(configuration, profileStore);

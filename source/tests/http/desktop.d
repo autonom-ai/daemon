@@ -30,7 +30,8 @@ unittest
     options.preExecFunction = &createProcessGroup;
     ProcessPipes relay = pipeProcess(
         ["bin/autonom-acp", "--devin", fixture.config.devinCommand, "--config", fixture.path],
-        Redirect.stdin | Redirect.stdout, ["AUTONOM_PORT": "18080"], options);
+        Redirect.stdin | Redirect.stdout, ["AUTONOM_PORT": "18080",
+            "XDG_CONFIG_HOME": buildPath(fixture.root, "xdg-config")], options);
     LineCollector frames = new LineCollector();
     Thread reader = new Thread({ frames.pump(relay.stdout); });
     reader.start();
