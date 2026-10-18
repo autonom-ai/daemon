@@ -73,9 +73,9 @@ cohesive owner. Keep tests against installed peers in explicit integration suite
 
 # Desktop safety
 
-Read [the Desktop contract](docs/COMMAND_CENTER.md) and
-[the validation procedure](docs/COMMAND_CENTER_VALIDATION.md) before changes
-to native integration. Respect the pinned build and integrity checks. Only
+Read [the Desktop contract and its live validation
+procedure](docs/COMMAND_CENTER.md) before changes to native integration.
+Respect the pinned build and integrity checks. Only
 patch the installed CLI shim and copy the launcher payload; never rewrite
 vendor bundles, checksums, CSP, or profile data, weaken sandboxing, or hide
 integrity warnings. Runtime patches must restore exact descriptors.

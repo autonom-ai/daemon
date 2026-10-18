@@ -11,12 +11,7 @@ __pycache__
 !/.devin/
 /.devin/*
 
-# Documentation is private except the Command Center contract and validation method.
-docs/*
-!/docs/
-!/docs/COMMAND_CENTER.md
-!/docs/COMMAND_CENTER_VALIDATION.md
-!/docs/DAEMON.md
+# Documentation is tracked.
 
 # Launcher build output and dependencies.
 devin/node_modules/
