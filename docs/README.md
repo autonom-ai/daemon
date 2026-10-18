@@ -6,7 +6,8 @@ Autonom is three processes that share one domain model. The daemon owns state, t
 - [Coordination](COORDINATION.md) — profiles, rooms, messages, pings, events, schedules, the MCP tools, and the on-disk layout.
 - [Policy and hooks](POLICY.md) — the workspace policy file, screening, the Devin CLI hooks the daemon installs, and how a tool call is stopped.
 - [Daemon architecture](DAEMON.md) — worker ownership, configuration, HTTP surface, bounds, and deployment.
-- [Command Center](COMMAND_CENTER.md) — the Devin Desktop adapter, the sidebar contract, the native pin, and the live validation procedure.
+- [Launcher](launcher/README.md) — startup, installation, and the native patch catalog.
+- [Command Center](launcher/patches/COMMAND_CENTER.md) — the Devin Desktop adapter, the sidebar contract, the native pin, and the live validation procedure.
 
 ## Subsystems
 

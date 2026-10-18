@@ -1,10 +1,12 @@
-import uiCss from "../../../assets/ui.css";
-import type { CenterContent, SidebarItem } from "./content";
-import { spacesSection } from "./content";
-import type { Directory } from "./directory";
-import { createIcon } from "./icons";
+import uiCss from "../../../../assets/ui.css";
+import type { CenterContent, SidebarItem } from "../../center/content";
+import { spacesSection } from "../../center/content";
+import type { Directory } from "../../center/directory";
+import { Patches, restorePatches } from "../lifecycle";
+import { createPatch } from "../status";
+import { Sidebar } from "./sidebar";
 import { createSections } from "./sections";
-import { prepareShell } from "./shell";
+import { prepareShell } from "../mode-switch";
 
 export function createLayout(context: {
     readonly content: CenterContent;
@@ -15,10 +17,24 @@ export function createLayout(context: {
 }): { render(): void; dispose(): void }
 {
     const sections = createSections(context.directory);
-    let spacesGroups = new Set<HTMLElement>();
+    const sidebar = new Sidebar();
+    const owner = createPatch("command-center.sidebar");
+    const feedback = new Map<HTMLButtonElement, Patches>();
     let disposed = false;
     let observer: MutationObserver | undefined;
     let observerFrame: ReturnType<typeof setTimeout> | undefined;
+
+    function restoreFeedback(): boolean
+    {
+        try
+        {
+            return restorePatches(feedback.values());
+        }
+        finally
+        {
+            feedback.clear();
+        }
+    }
 
     function renderLayout(): void
     {
@@ -96,26 +112,18 @@ export function createLayout(context: {
             }
         }
 
-        for (const group of spacesGroups)
-            if (!region.has(group))
-                group.style.display = "";
-
-        for (const group of region)
-            group.style.display = hide ? "none" : "";
-
-        spacesGroups = region;
+        sidebar.hideSpaces(region, hide);
     }
 
     function renderSections(): void
     {
         const { content, items, enabled } = context;
         const menus = new Set(document.querySelectorAll<HTMLUListElement>('ul[aria-label="Pages"]'));
-        for (const button of document.querySelectorAll<HTMLElement>("button[data-autonom-item]"))
-            if (!enabled || !items.has(button.dataset.autonomItem!))
-                delete button.dataset.autonomItem;
+        sidebar.prune(new Set(enabled ? items.keys() : []));
 
         if (!enabled)
         {
+            restoreFeedback();
             sections.prune(new Set());
             return;
         }
@@ -130,49 +138,8 @@ export function createLayout(context: {
                 if (!id || !button)
                     continue;
 
-                button.dataset.autonomItem = id;
                 rows.set(id, row);
-
-                const item = items.get(id);
-                if (item?.icon)
-                {
-                    const iconSvg = createIcon(item.icon);
-                    if (iconSvg)
-                    {
-                        iconSvg.setAttribute("width", "18");
-                        iconSvg.setAttribute("height", "18");
-                        (iconSvg as any).dataset ??= {};
-                        (iconSvg as any).dataset.autonomIcon = item.icon;
-
-                        const iconSlot = button.parentElement?.querySelector<HTMLElement>('[data-slot="sidebar-menu-button-icon"]')
-                            ?? row.querySelector<HTMLElement>('[data-slot="sidebar-menu-button-icon"]')
-                            ?? button.querySelector<HTMLElement>('[data-slot="sidebar-menu-button-icon"]');
-                        if (iconSlot)
-                        {
-                            const currentSvg = iconSlot.querySelector<SVGElement>("svg");
-                            if (iconSlot.dataset.autonomIcon !== item.icon || (currentSvg as any)?.dataset?.autonomIcon !== item.icon)
-                            {
-                                iconSlot.dataset.autonomIcon = item.icon;
-                                if (typeof iconSlot.replaceChildren === "function")
-                                    iconSlot.replaceChildren(iconSvg);
-                                else
-                                {
-                                    while (iconSlot.firstChild)
-                                        iconSlot.removeChild(iconSlot.firstChild);
-                                    iconSlot.appendChild(iconSvg);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            const existing = button.parentElement?.querySelector<SVGElement>("svg")
-                                ?? row.querySelector<SVGElement>("svg")
-                                ?? button.querySelector<SVGElement>("svg");
-                            if (existing && (existing as any).dataset?.autonomIcon !== item.icon)
-                                existing.replaceWith(iconSvg);
-                        }
-                    }
-                }
+                sidebar.button(button, row, id, items.get(id)?.icon);
             }
 
             sections.sync(menu, content.sections, rows);
@@ -184,7 +151,7 @@ export function createLayout(context: {
     function onClick(event: MouseEvent): void
     {
         const { items, enabled } = context;
-        if (!enabled || event.button !== 0)
+        if (disposed || !enabled || event.button !== 0)
             return;
 
         const button = (event.target as Element | null)?.closest<HTMLButtonElement>("button[data-autonom-item]");
@@ -194,32 +161,47 @@ export function createLayout(context: {
 
         event.preventDefault();
         event.stopImmediatePropagation();
-        button.setAttribute("aria-busy", "true");
-        void context.activate(id).catch((error) =>
+        if (feedback.has(button))
+            return;
+
+        const patch = new Patches("command-center.click");
+        feedback.set(button, patch);
+        patch.attribute(button, "aria-busy", "true");
+        void Promise.resolve().then(() =>
         {
-            button.title = error instanceof Error ? error.message : String(error);
+            if (!disposed && feedback.get(button) === patch)
+                return context.activate(id);
+        }).catch((error) =>
+        {
+            if (disposed || feedback.get(button) !== patch)
+                return;
+
+            patch.attribute(button, "title", error instanceof Error ? error.message : String(error));
             console.error("[autonom]", error);
-        }).finally(() => button.removeAttribute("aria-busy"));
+        }).finally(() =>
+        {
+            patch.restore();
+            if (feedback.get(button) === patch)
+                feedback.delete(button);
+        });
     }
 
+    owner.cleanup(() => sidebar.restore());
+    owner.cleanup(() => sections.prune(new Set()));
+    owner.cleanup(() => globalThis.document?.removeEventListener("click", onClick, true));
+    owner.cleanup(() =>
+    {
+        observer?.disconnect();
+        clearTimeout(observerFrame);
+    });
+    owner.cleanup(restoreFeedback);
     globalThis.document?.addEventListener("click", onClick, true);
     return {
         render: renderLayout,
         dispose(): void
         {
             disposed = true;
-            observer?.disconnect();
-            if (observerFrame !== undefined)
-                clearTimeout(observerFrame);
-
-            globalThis.document?.removeEventListener("click", onClick, true);
-            sections.prune(new Set());
-            for (const group of spacesGroups)
-                group.style.display = "";
-
-            spacesGroups.clear();
-            for (const button of globalThis.document?.querySelectorAll<HTMLElement>("button[data-autonom-item]") ?? [])
-                delete button.dataset.autonomItem;
+            owner.restore();
         },
     };
 }

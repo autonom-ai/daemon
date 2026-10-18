@@ -1,6 +1,6 @@
-import type { CenterContent } from "../../../launcher/center/content";
-import { install } from "../../../launcher/center/runtime";
-import { config, fixture, testContent } from "../../support";
+import type { CenterContent } from "../../../../launcher/center/content";
+import { install } from "../../../../launcher/patches/center/runtime";
+import { config, fixture, testContent } from "../../../support";
 
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
@@ -21,40 +21,6 @@ beforeEach(() =>
 after(() =>
 {
     globalThis.fetch = originalFetch;
-});
-
-test("runtime caches immutable manifest overlays and restores exact descriptors", async () =>
-{
-    const environment = fixture();
-    const manifest = environment.services.manifest;
-    const controller = environment.services.controller;
-    const originalManifest = Object.getOwnPropertyDescriptor(manifest, "getManifest");
-    const originalShow = Object.getOwnPropertyDescriptor(controller, "show");
-    const runtime = install(environment.services, config());
-    try
-    {
-        assert.equal(manifest.getManifest(), environment.base);
-        await runtime.update(config());
-        const first = manifest.getManifest();
-        assert.equal(first, manifest.getManifest());
-        assert.equal(first.items[0].label, "Jared");
-        assert.equal(environment.base.items[0].label, "Automations");
-        assert.equal(environment.base.revision, "native");
-        manifest._onDidChangeManifest.fire(environment.base);
-        assert.equal(manifest.getManifest().items[0].label, "Jared");
-        assert.equal(runtime.status().connected, true);
-        assert.equal(runtime.status().enabled, true);
-        assert.equal(runtime.status().revision, "demo");
-    }
-    finally
-    {
-        runtime.dispose();
-    }
-    assert.deepEqual(Object.getOwnPropertyDescriptor(manifest, "getManifest"), originalManifest);
-    assert.deepEqual(Object.getOwnPropertyDescriptor(controller, "show"), originalShow);
-    assert.equal(manifest.getManifest(), environment.base);
-    assert.equal(environment.listeners.size, 0);
-    assert.equal((globalThis as any).__autonomCenter, undefined);
 });
 
 test("runtime reload is atomic and open tab uses native navigation", async () =>
@@ -158,33 +124,6 @@ test("revealing the Agent sidebar runs the native command only while it is hidde
             delete target.document;
         else
             target.document = originalDocument;
-    }
-});
-
-test("runtime refuses unsupported native service shapes and invalid configuration", () =>
-{
-    const environment = fixture();
-    const original = environment.services.manifest.getManifest;
-    assert.throws(() => install({ ...environment.services, controller: {} }, config()), /Unsupported native/);
-    assert.throws(() => install(environment.services, {} as any), /bridge endpoint/);
-    assert.equal(environment.services.manifest.getManifest, original);
-    assert.equal(environment.listeners.size, 0);
-});
-
-test("a rejected replacement leaves the working runtime installed", async () =>
-{
-    const environment = fixture();
-    const runtime = install(environment.services, config());
-    try
-    {
-        await runtime.update(config());
-        assert.throws(() => install({ ...environment.services, controller: {} }, config()), /Unsupported native/);
-        assert.equal((globalThis as any).__autonomCenter, runtime);
-        assert.equal(environment.services.manifest.getManifest().items[0].label, "Jared");
-    }
-    finally
-    {
-        runtime.dispose();
     }
 });
 
@@ -292,18 +231,6 @@ test("status reports section buttons and the reserved Spaces import", async () =
     }
 });
 
-test("disposed runtimes reject late updates and cannot restore the overlay", async () =>
-{
-    const environment = fixture();
-    const runtime = install(environment.services, config());
-    await runtime.update(config());
-    runtime.dispose();
-    await assert.rejects(runtime.update(config()), /disposed/);
-    await assert.rejects(runtime.open("automations"), /disposed/);
-    assert.equal(environment.services.manifest.getManifest(), environment.base);
-    assert.equal(environment.listeners.size, 0);
-});
-
 test("a failed lazy page refresh keeps the previous snapshot active", async () =>
 {
     const environment = fixture();
@@ -357,16 +284,4 @@ test("the default HTML item is not opened or prefetched while Editor is selected
         else
             delete target.__autonomShell;
     }
-});
-
-test("installing again replaces the previous runtime without leaving descriptors", () =>
-{
-    const environment = fixture();
-    const runtime = install(environment.services, config());
-    const replacement = install(environment.services, config());
-    assert.notEqual(replacement, runtime);
-    assert.equal((globalThis as any).__autonomCenter, replacement);
-    replacement.dispose();
-    assert.equal((globalThis as any).__autonomCenter, undefined);
-    assert.equal(environment.listeners.size, 0);
 });

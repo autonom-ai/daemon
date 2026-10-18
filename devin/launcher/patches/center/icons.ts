@@ -1,5 +1,5 @@
-import autonomFillMarkup from "../../../assets/icons/autonom-fill.svg";
-import autonomLineMarkup from "../../../assets/icons/autonom.svg";
+import autonomFillMarkup from "../../../../assets/icons/autonom-fill.svg";
+import autonomLineMarkup from "../../../../assets/icons/autonom.svg";
 
 import {
     Cloud,

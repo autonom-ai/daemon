@@ -1,8 +1,17 @@
-import { captureServices } from "../cdp/capture";
+import { captureServices } from "./capture";
 import type { CdpSession } from "../cdp/client";
-import type { RuntimeConfig, RuntimeStatus } from "./types";
+import type { RuntimeConfig, RuntimeStatus } from "../center/types";
+import type { PatchStatus } from "./lifecycle";
 
 import { createHash } from "node:crypto";
+
+const captures = new WeakMap<CdpSession, PatchStatus>();
+
+export async function windowPatches(session: CdpSession): Promise<unknown[]>
+{
+    const renderer = await session.evaluate("globalThis.__autonomBundle?.runtime.patchStatus() ?? []") as unknown[];
+    return [...(captures.has(session) ? [captures.get(session)] : []), ...renderer];
+}
 
 export async function runtimeStatus(session: CdpSession): Promise<RuntimeStatus | null>
 {
@@ -28,22 +37,34 @@ export async function installRuntime(
 ): Promise<RuntimeStatus | null>
 {
     await ensureBundle(session, source);
-    if (!await captureServices(session, timing))
-        throw new Error("The agent sidebar is not mounted. Open the agent window (Ctrl+').");
-
+    captures.set(session, { name: "native-services", state: "installed" });
     try
     {
+        if (!await captureServices(session, timing))
+            throw new Error("The agent sidebar is not mounted. Open the agent window (Ctrl+').");
+
         await session.evaluate(`(async () => {
             const config = ${JSON.stringify(config)};
             const runtime = globalThis.__autonomBundle.runtime.install(globalThis.__autonomServices, config);
-            try { await runtime.update(config); }
+            try {
+                globalThis.__autonomBundle.runtime.prepareShell(config.content.css, globalThis.__autonomBundle.icons);
+                await runtime.update(config);
+            }
             catch (error) { runtime.dispose(); throw error; }
         })()`, 45000);
         return await runtimeStatus(session);
     }
+    catch (error)
+    {
+        captures.set(session, { name: "native-services", state: "failed",
+            errors: [error instanceof Error ? error.message : String(error)] });
+        throw error;
+    }
     finally
     {
         await session.evaluate("delete globalThis.__autonomServices").catch(() => undefined);
+        if (captures.get(session)?.state !== "failed")
+            captures.set(session, { name: "native-services", state: "restored" });
     }
 }
 
@@ -67,9 +88,9 @@ async function ensureBundle(session: CdpSession, source: string): Promise<void>
         return;
 
     await session.evaluate(`(() => {
-        if (globalThis.__autonomBundle) globalThis.__autonomShell?.dispose();
         ${source}
-        globalThis.__autonomBundle = {version:${JSON.stringify(version)}, runtime:AutonomRuntime};
+        globalThis.__autonomBundle = {version:${JSON.stringify(version)}, runtime:AutonomRuntime,
+            icons:globalThis.__autonomBundle?.icons};
     })()`);
 }
 
@@ -80,6 +101,7 @@ export async function prepareWindow(
     await ensureBundle(session, source);
     await session.evaluate(`(() => {
         if (!document.head || !document.body) return;
-        globalThis.__autonomBundle.runtime.prepareShell(${JSON.stringify(css)}, ${JSON.stringify(icons)});
+        globalThis.__autonomBundle.icons = ${JSON.stringify(icons)};
+        globalThis.__autonomBundle.runtime.prepareShell(${JSON.stringify(css)}, globalThis.__autonomBundle.icons);
     })()`);
 }

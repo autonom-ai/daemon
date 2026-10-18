@@ -1,4 +1,4 @@
-import { createIcon, sectionIcon } from "../../../launcher/center/icons";
+import { createIcon, sectionIcon } from "../../../../launcher/patches/center/icons";
 
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";

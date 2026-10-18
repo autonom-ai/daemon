@@ -6,8 +6,9 @@ import type { ActionCache } from "./center/config";
 import { loadAction, loadCenter } from "./center/config";
 import { declaredItems, visibleItems } from "./center/content";
 import { watchContent } from "./center/watch";
-import { executeScript, runtimeStatus } from "./center/window";
+import { executeScript, runtimeStatus } from "./patches/window";
 import { Windows } from "./center/windows";
+import { installerStatus } from "./patches/installer";
 import { environmentPort, parseArguments } from "./cli";
 import type { LauncherSettings } from "./config";
 import { defaultDaemonConfigPath, defaultSettingsPath, expandPath, readSettings } from "./config";
@@ -52,7 +53,9 @@ async function main(): Promise<void>
         commandCenterConfig: expandPath(stored.commandCenterConfig ?? join(repository, "assets", "ui.yml")),
     };
     const appRoot = appRootFor(binary);
-    await verifyDesktopBuild(appRoot);
+    const build = await verifyDesktopBuild(appRoot);
+    const installer = await installerStatus(repository, appRoot, build);
+    log(`Patch ${JSON.stringify(installer)}`);
     try
     {
         const daemonConfig = await readDaemonConfig(settings.configFile);
@@ -200,9 +203,9 @@ async function main(): Promise<void>
         }, (error) => log(`UI watcher: ${error.message}`));
     }
 
-    function report(): Promise<unknown>
+    async function report(): Promise<unknown>
     {
-        return attached.report();
+        return { ...await attached.report(), installer };
     }
 
     async function shutdown(code: number): Promise<void>

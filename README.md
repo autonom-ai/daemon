@@ -93,7 +93,7 @@ The Command Center reads `~/.config/autonom/launcher.yml` for its port and confi
 - [Coordination](docs/COORDINATION.md)
 - [Policy and hooks](docs/POLICY.md)
 - [Daemon architecture](docs/DAEMON.md)
-- [Command Center](docs/COMMAND_CENTER.md)
+- [Command Center](docs/launcher/patches/COMMAND_CENTER.md)
 
 ## Development
 

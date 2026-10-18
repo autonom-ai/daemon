@@ -81,6 +81,9 @@ test("local changes reload and removed providers prune their shared source cache
     const icons = await catalog.read();
     assert.equal(icons.local, `data:image/svg+xml;base64,${Buffer.from(changed).toString("base64")}`);
     assert.equal(requests, 1);
+    await rm(file);
+    assert.equal((await catalog.read()).local, icons.local);
+    await writeFile(file, changed);
     await writeFile(path, JSON.stringify({ agents: [] }));
     assert.deepEqual(Object.keys(await catalog.read()), ["devin-autonom"]);
     await writeFile(path, JSON.stringify({ agents }));

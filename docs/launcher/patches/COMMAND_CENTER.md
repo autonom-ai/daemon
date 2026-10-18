@@ -1,6 +1,6 @@
 # Command Center
 
-The Command Center is the launcher in `devin/launcher/`. It starts Devin Desktop with a private debugging pipe, attaches to the workbench renderer over CDP, and injects a sidebar that lists Autonom's rooms, profiles, and pages. It replaces one native presentation — the Agent/Editor switch — and restores every descriptor it touches.
+The Command Center is the native navigation and page patch in `devin/launcher/patches/center/`. It starts Devin Desktop with a private debugging pipe, attaches to the workbench renderer over CDP, and injects a sidebar that lists Autonom's rooms, profiles, and pages. It replaces one native presentation — the Agent/Editor switch — and restores every descriptor it touches.
 
 ## Status and safety model
 
@@ -8,7 +8,7 @@ The debugging pipe is created by the launcher and inherited as file descriptors 
 
 `devin/install.py` replaces only the `bin/devin-desktop` shim, preserving the original byte-for-byte, and copies the launcher bundle and assets beside the Desktop installation. The Electron binary, package entrypoint, main and workbench bundles, `product.json`, CSP, and profile data are untouched. There is no checksum rewriting and no integrity-warning suppression. The adapter wraps the native navigation manifest getter and the window's surface controller in memory, and restores every descriptor on dispose.
 
-Before spawning Desktop the launcher reconciles the local ACP connector registry: it removes any existing `devin-autonom` entry from `~/.windsurf/acp/registry.json` and appends a canonical one pointing at the co-located `bin/autonom-acp`, passing `--config <daemon config>` and `--devin <devinCommand>`. It also sets `devin-autonom: true` under `devin.acp.enabledAgents` and `windsurf.acp.enabledAgents` in Desktop's user `settings.json`. A missing agent binary or unreadable file logs a warning and never blocks the launch; the installer performs no registry writes of its own.
+Before spawning Desktop the launcher reconciles the local ACP connector registry: it reconciles `devin-autonom` in `~/.windsurf/acp/registry.json`, preserving user metadata and the original icon field, pointing at the co-located `bin/autonom-acp`, passing `--config <daemon config>` and `--devin <devinCommand>`. It also sets `devin-autonom: true` under `devin.acp.enabledAgents` and `windsurf.acp.enabledAgents` in Desktop's user `settings.json`. A missing agent binary or unreadable file logs a warning and never blocks the launch; the installer performs no registry writes of its own.
 
 An already-running unmanaged Desktop must be restarted once: a second window in that process cannot inherit a new pipe. After that, further launches delegate their window requests to the managed instance.
 
@@ -36,9 +36,9 @@ The inspected navigation pipeline is:
 
 Selecting an Autonom item calls `devin.desktopNav.openSurface`. The adapter keeps a stable cached overlay snapshot, notifies the native manifest event, and leaves React responsible for rendering.
 
-Custom HTML is placed in a separate native webview over the controller's existing page mount. The native remote webview stays mounted and is hidden only while a custom page is active; no native sidebar siblings, chat, composer, or other page is hidden. Custom webviews have no local resource roots, and a full HTML document supplies its own CSP; fragments are wrapped with `default-src 'none'` and no scripts. A 30-second lease removes the runtime wrappers if the launcher disappears.
+Custom HTML is placed in a separate native webview over the controller's existing page mount. A separate history adapter borrows the native shell title, active surface, sidebar, route callback, and history Map. It restores exact descriptors, map membership (including present `undefined`), and visibility priority, while preserving a foreign replacement. It never writes the controller current/loaded surface fields. The native remote webview stays mounted and is hidden only while a custom page is active; no native sidebar siblings, chat, composer, or other page is hidden. Custom webviews have no local resource roots, and a full HTML document supplies its own CSP; fragments are wrapped with `default-src 'none'` and no scripts. A 30-second lease removes the runtime wrappers if the launcher disappears.
 
-The attach flow captures the private native references with two brief CDP debugger pauses; every breakpoint is removed and the renderer resumed in a `finally`, and the debugger domain is disabled afterwards. `hot` recaptures those references before replacing the runtime, and a failed capture leaves the existing runtime installed.
+The attach flow captures the private native references with two brief CDP debugger pauses; every breakpoint is removed and the renderer resumed in a `finally`, and the debugger domain is disabled afterwards. `hot` recaptures those references before replacing the runtime, and a failed capture leaves the existing runtime and mode switch installed. Temporary debugger hooks and object groups are released even when acquisition fails.
 
 ## Native visual language
 
@@ -149,9 +149,11 @@ node devin/launcher/cdp/control.mjs hot
 node devin/launcher/cdp/control.mjs detach
 ```
 
-`hot` re-reads the definition, asset versions, CSS, and the runtime bundle; a changed runtime is reinstalled. `detach` disposes the runtime and restores native Desktop. Control evaluations and screenshots release their temporary CDP sessions, and `status` reads the live renderer rather than cached state.
+`hot` re-reads the definition, asset versions, CSS, and the runtime bundle; a changed runtime is reinstalled. `detach` disposes the runtime and restores native Desktop. Control evaluations and screenshots release their temporary CDP sessions, and `status` reads the live renderer and lists named patch hooks and their installed/restored/skipped/failed state. Detached windows retain their final restoration report, and installer shim provenance is reported separately.
 
 ## Build
+
+See [launcher installation](../INSTALLER.md) for installer ownership and rollback.
 
 ```sh
 npm --prefix devin ci
@@ -180,7 +182,7 @@ A release needs all four.
 ### Procedure
 
 1. **Preconditions.** Desktop 1.126.0 at the pinned commit and hash; no unmanaged Desktop window already running; the repository `assets/` present; no concurrent change to the user data directory. Record the baseline first: `pgrep -af devin-desktop`, the workbench bundle SHA-256, and `git status --short`.
-2. **Build and launch.** `npm ci && npm run check && npm test` in `devin/`, then `node dist/launcher.js <workspace>`, or `sudo python3 devin/install.py --no-build`, quit Desktop, and `devin-desktop --debug` for installed validation. Do not copy the user-data directory to get a clean run.
+2. **Build and launch.** `npm ci && npm run check && npm test` in `devin/`, then install with `sudo python3 devin/install.py --no-build` and start a controllable instance with `devin-desktop --debug` verbatim. Use a separate window in the authenticated profile for testing. Do not copy the user-data directory to get a clean run.
 3. **Observe.** Through the control socket, assert `status` reports the expected `mode`, `enabled`, `revision`, and item labels; the Pages list contains the configured rows and excludes hidden ones; the custom webview is present with native content hidden while active; and default pipe mode exposes no DevTools listener.
 4. **Drive real controls.** Click the on-screen switch (never set state programmatically) and assert Autonom shows the configured labels, Devin Cloud restores native labels and removes the custom page, and switching back needs no reload. Repeat for three cycles.
 5. **Reload without restarting.** Edit a page, run `control.mjs hot`, and confirm the new content renders in the same window.
@@ -198,6 +200,6 @@ Record the Desktop version, commit, and bundle hash; the launcher command and ex
 
 ## Reading more
 
-- [Sessions](SESSIONS.md) — the daemon the bridge talks to.
-- [Coordination](COORDINATION.md) — the rooms and profiles this sidebar lists.
-- [Daemon architecture](DAEMON.md) — capabilities, configuration, and deployment.
+- [Sessions](../../SESSIONS.md) — the daemon the bridge talks to.
+- [Coordination](../../COORDINATION.md) — the rooms and profiles this sidebar lists.
+- [Daemon architecture](../../DAEMON.md) — capabilities, configuration, and deployment.

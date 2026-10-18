@@ -1,7 +1,8 @@
-import type { SidebarButton, SidebarSection } from "./content";
+import type { SidebarButton, SidebarSection } from "../../center/content";
 import { sectionIcon } from "./icons";
-import type { Directory } from "./directory";
+import type { Directory } from "../../center/directory";
 import { createEntries } from "./entries";
+import { Patches, restorePatches } from "../lifecycle";
 
 type SectionHeader = {
     li: HTMLLIElement;
@@ -10,6 +11,7 @@ type SectionHeader = {
     signature: string;
     searching: boolean;
     empty: HTMLLIElement | undefined;
+    hiddenRows: Map<HTMLElement, Patches>;
 };
 
 const labelRowClass = "group/sidebar-label-row flex h-8 shrink-0 items-center justify-between "
@@ -38,17 +40,28 @@ const emptyClass = "px-2.5 py-1.5 text-[12px] text-ide-editor-color opacity-70";
  */
 export function createSections(directory?: Directory): {
     sync(menu: HTMLUListElement, sections: SidebarSection[], rows: Map<string, HTMLElement>): void;
-    prune(menus: Set<HTMLUListElement>): void;
+    prune(menus: Set<HTMLUListElement>): boolean;
 }
 {
     const headers = new Map<HTMLUListElement, Map<string, SectionHeader>>();
     const queries = new Map<string, string>();
     const entries = createEntries();
 
-    function remove(header: SectionHeader): void
+    function remove(removed: SectionHeader[]): boolean
     {
-        header.empty?.remove();
-        header.li.remove();
+        try
+        {
+            return restorePatches(removed.flatMap((header) => [...header.hiddenRows.values()]));
+        }
+        finally
+        {
+            for (const header of removed)
+            {
+                header.hiddenRows.clear();
+                header.empty?.remove();
+                header.li.remove();
+            }
+        }
     }
 
     function signatureOf(section: SidebarSection): string
@@ -175,7 +188,8 @@ export function createSections(directory?: Directory): {
         row.dataset.slot = "sidebar-label-row";
         row.className = labelRowClass;
         li.appendChild(row);
-        const header: SectionHeader = { li, row, section, signature: signatureOf(section), searching: false, empty: undefined };
+        const header: SectionHeader = { li, row, section, signature: signatureOf(section), searching: false,
+            empty: undefined, hiddenRows: new Map() };
         fillRow(header);
         return header;
     }
@@ -188,6 +202,7 @@ export function createSections(directory?: Directory): {
 
         const section = header.section;
         const query = queries.get(section.id)?.toLowerCase();
+        const rows = new Set<HTMLElement>();
         let visible = entries.filter(header.li, query);
         for (const item of section.items)
         {
@@ -201,8 +216,30 @@ export function createSections(directory?: Directory): {
 
             const label = button.getAttribute("aria-label") ?? row.textContent ?? "";
             const show = !query || label.toLowerCase().includes(query);
-            row.style.display = show ? "" : "none";
+            rows.add(row);
+            if (show)
+            {
+                header.hiddenRows.get(row)?.restore();
+                header.hiddenRows.delete(row);
+            }
+            else
+            {
+                let patch = header.hiddenRows.get(row);
+                if (!patch)
+                {
+                    patch = new Patches("command-center.section-search");
+                    header.hiddenRows.set(row, patch);
+                }
+                patch.style(row, "display", "none");
+            }
             visible += Number(show);
+        }
+        for (const [row, patch] of header.hiddenRows)
+        {
+            if (rows.has(row))
+                continue;
+            patch.restore();
+            header.hiddenRows.delete(row);
         }
 
         if (query && visible === 0)
@@ -270,21 +307,24 @@ export function createSections(directory?: Directory): {
                 anchor = header.li;
             }
 
+            const removed: SectionHeader[] = [];
             for (const [id, header] of sectionHeaders)
             {
                 if (displayed.has(id))
                     continue;
 
-                remove(header);
+                removed.push(header);
                 sectionHeaders.delete(id);
                 queries.delete(id);
             }
+            remove(removed);
 
             for (const section of sections)
                 filter(menu, section.id);
         },
-        prune(menus): void
+        prune(menus): boolean
         {
+            const removed: SectionHeader[] = [];
             for (const [menu, sectionHeaders] of headers)
             {
                 if (menus.has(menu))
@@ -292,13 +332,14 @@ export function createSections(directory?: Directory): {
 
                 for (const [id, header] of sectionHeaders)
                 {
-                    remove(header);
+                    removed.push(header);
                     sectionHeaders.delete(id);
                     queries.delete(id);
                 }
 
                 headers.delete(menu);
             }
+            return remove(removed);
         },
     };
 }

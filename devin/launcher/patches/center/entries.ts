@@ -1,4 +1,4 @@
-import type { DirectoryEntry } from "./directory";
+import type { DirectoryEntry } from "../../center/directory";
 import { sectionIcon } from "./icons";
 
 /** Listing rows have no action until room/profile navigation is implemented. */

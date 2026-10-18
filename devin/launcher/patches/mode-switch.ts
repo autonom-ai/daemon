@@ -1,56 +1,12 @@
-import autonomFillMarkup from "../../../assets/icons/autonom-fill.svg";
-import autonomLineMarkup from "../../../assets/icons/autonom.svg";
 import uiCss from "../../../assets/ui.css";
-
-import { createAcpIcons } from "../acp/icons";
-
-import { Cloud, Pencil, type IconNode } from "lucide";
+import { createAcpIcons } from "./icons/renderer";
+import { Patches, restorePatches } from "./lifecycle";
+import { shellIcons } from "./mode-icons";
+import { createPatch } from "./status";
 
 const leaseTimeout = 30000;
-/** The native Agent transition reapplies its own sidebar state; settle before revealing. */
 const transitionDelay = 150;
-
 type Mode = "autonom" | "devin-cloud" | "editor";
-
-interface ShellIcon
-{
-    viewBox: string;
-    line: string;
-    fill: string;
-    stroked: boolean;
-}
-
-function iconSet(lineMarkup: string, fillMarkup: string): ShellIcon
-{
-    const extractPaths = (markup: string) =>
-        [...markup.matchAll(/[\s]d="([^"]+)"/g)].map((match) => match[1]).join(" ");
-
-    return {
-        viewBox: /viewBox="([^"]+)"/.exec(lineMarkup)?.[1] ?? "0 0 24 24",
-        line: extractPaths(lineMarkup),
-        fill: extractPaths(fillMarkup),
-        stroked: lineMarkup.includes('stroke="currentColor"'),
-    };
-}
-
-function iconSetFromNode(lineNode: IconNode, fillNode?: IconNode): ShellIcon
-{
-    const extract = (node: IconNode) =>
-        node.map(([, attrs]) => attrs.d).filter(Boolean).join(" ");
-
-    return {
-        viewBox: "0 0 24 24",
-        line: extract(lineNode),
-        fill: fillNode ? extract(fillNode) : extract(lineNode),
-        stroked: true,
-    };
-}
-
-const shellIcons: Record<Mode, ShellIcon> = {
-    autonom: iconSet(autonomLineMarkup, autonomFillMarkup),
-    "devin-cloud": iconSetFromNode(Cloud),
-    editor: iconSetFromNode(Pencil, Pencil.slice(0, 1)),
-};
 
 /** The pinned workbench marks its root while the Agent sidebar is hidden. */
 export function agentSidebarHidden(): boolean
@@ -68,12 +24,14 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
         return target.__autonomShell;
     }
 
+    const owner = createPatch("mode-switch");
     const style = document.createElement("style");
     style.textContent = css;
+    owner.cleanup(() => style.remove());
     document.head.appendChild(style);
     const switches = new Map<HTMLElement, {
         host: HTMLElement;
-        display: string;
+        patches: Patches;
         agent: HTMLButtonElement;
         editor: HTMLButtonElement;
     }>();
@@ -81,8 +39,35 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
     let lease: ReturnType<typeof setTimeout> | undefined;
     let frame: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
-    const acp = createAcpIcons(icons ?? {}, render);
-    const observer = new MutationObserver((records) =>
+    let transition = 0;
+    const timers = new Map<ReturnType<typeof setTimeout>, () => void>();
+    function delay(callback: () => void, duration: number, cancel = () => {}): void
+    {
+        const timer = setTimeout(() =>
+        {
+            timers.delete(timer);
+            if (!disposed)
+                callback();
+            else
+                cancel();
+        }, duration);
+        timers.set(timer, cancel);
+    }
+    let acp: ReturnType<typeof createAcpIcons>;
+    try
+    {
+        acp = createAcpIcons(icons ?? {}, render);
+    }
+    catch (error)
+    {
+        owner.restore();
+        throw error;
+    }
+    owner.cleanup(() => acp.dispose());
+    let observer: MutationObserver;
+    try
+    {
+        observer = new MutationObserver((records) =>
     {
         acp.changed(records);
         frame ??= setTimeout(() =>
@@ -90,7 +75,27 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
             frame = undefined;
             render();
         });
-    });
+        });
+    }
+    catch (error)
+    {
+        owner.restore();
+        throw error;
+    }
+
+    function forward(root: HTMLElement, button: HTMLButtonElement | null): void
+    {
+        const patch = new Patches("mode-switch.forward");
+        patch.style(root, "display", "");
+        try
+        {
+            button?.click();
+        }
+        finally
+        {
+            patch.restore();
+        }
+    }
 
     function render(): void
     {
@@ -103,8 +108,7 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
             if (root.isConnected && entry.host.isConnected)
                 continue;
 
-            root.style.display = entry.display;
-            entry.host.remove();
+            entry.patches.restore();
             switches.delete(root);
         }
 
@@ -118,8 +122,7 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
             let entry = switches.get(root);
             if (entry && (entry.agent !== agent || entry.editor !== editor))
             {
-                root.style.display = entry.display;
-                entry.host.remove();
+                entry.patches.restore();
                 switches.delete(root);
                 entry = undefined;
             }
@@ -161,12 +164,13 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                     button.appendChild(svg);
                     button.addEventListener("click", () =>
                     {
+                        const pending = ++transition;
                         const nativeAgent = root.querySelector<HTMLButtonElement>('button[aria-label="Agent"]');
                         const nativeEditor = root.querySelector<HTMLButtonElement>('button[aria-label="Editor"]');
                         if (mode === "editor")
                         {
-                            nativeEditor?.click();
-                            setTimeout(() =>
+                            forward(root, nativeEditor);
+                            delay(() =>
                             {
                                 if (!shell.editorActive())
                                     void target.__autonomCenter?.toggleEditor()
@@ -180,20 +184,23 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                         requested = mode;
                         const switching = nativeEditor?.getAttribute("aria-pressed") === "true";
                         if (switching)
-                            nativeAgent?.click();
+                            forward(root, nativeAgent);
 
                         const center = target.__autonomCenter;
                         if (center)
                             void center.setMode(mode)
                                 .then(async () =>
                                 {
-                                    if (mode !== "autonom")
+                                    if (disposed || pending !== transition || target.__autonomCenter !== center
+                                        || mode !== "autonom")
                                         return;
 
                                     if (switching)
-                                        await new Promise((resolve_) => setTimeout(resolve_, transitionDelay));
+                                        await new Promise<void>((resolve_) => delay(resolve_, transitionDelay, resolve_));
 
-                                    await center.revealAgentSidebar();
+                                    if (!disposed && pending === transition && target.__autonomCenter === center
+                                        && !shell.editorActive())
+                                        await center.revealAgentSidebar();
                                 })
                                 .catch((error: Error) => console.error("[autonom]", error));
                         render();
@@ -201,10 +208,13 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                     host.appendChild(button);
                 }
 
-                entry = { host, agent, editor, display: root.style.display };
+                const patches = new Patches("mode-switch.element");
+                patches.cleanup(() => host.remove());
+                patches.style(root, "display", "none");
+                entry = { host, agent, editor, patches };
                 switches.set(root, entry);
                 root.after(host);
-                root.style.display = "none";
+
             }
 
             const mode = editor.getAttribute("aria-pressed") === "true" ? "editor"
@@ -237,6 +247,29 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
             attributeFilter: ["aria-pressed", "style", "class", "src"] });
     }
 
+    owner.cleanup(() =>
+    {
+        try
+        {
+            return restorePatches([...switches.values()].map((entry) => entry.patches));
+        }
+        finally
+        {
+            switches.clear();
+        }
+    });
+    owner.cleanup(() =>
+    {
+        clearTimeout(lease);
+        clearTimeout(frame);
+        observer.disconnect();
+        for (const [timer, cancel] of timers)
+        {
+            clearTimeout(timer);
+            cancel();
+        }
+        timers.clear();
+    });
     const shell = {
         performance: () => acp.performance(),
         requestedMode(): "autonom" | "devin-cloud"
@@ -269,25 +302,19 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                 return;
 
             disposed = true;
-            clearTimeout(lease);
-            if (frame !== undefined)
-                clearTimeout(frame);
-
-            observer.disconnect();
-            for (const [root, entry] of switches)
-            {
-                root.style.display = entry.display;
-                entry.host.remove();
-            }
-
-            acp.dispose();
-            style.remove();
-            if (target.__autonomShell === shell)
-                delete target.__autonomShell;
+            owner.restore();
         },
     };
-    target.__autonomShell = shell;
-    shell.heartbeat();
-    render();
-    return shell;
+    try
+    {
+        owner.set(target, "__autonomShell", shell);
+        shell.heartbeat();
+        return shell;
+    }
+    catch (error)
+    {
+        disposed = true;
+        owner.restore();
+        throw error;
+    }
 }

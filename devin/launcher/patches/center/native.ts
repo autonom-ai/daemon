@@ -1,4 +1,4 @@
-import type { RuntimeConfig } from "./types";
+import type { RuntimeConfig } from "../../center/types";
 
 export function validateServices(services: any): void
 {

@@ -39,7 +39,7 @@ await Promise.all([
     }),
     build({
         ...common,
-        entryPoints: [join(launcher, "center/runtime.ts")],
+        entryPoints: [join(launcher, "patches/center/runtime.ts")],
         outfile: join(dist, "runtime.js"),
         platform: "browser",
         format: "iife",
