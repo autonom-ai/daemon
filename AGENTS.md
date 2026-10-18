@@ -1,5 +1,9 @@
 # Development
 
+To start a controllable Devin Desktop instance, run `devin-desktop --debug` verbatim.
+Do not add a data directory unless required, as this will cause the instance not to be authed.
+Devin Desktop allows for multiple simultaneous instances.
+
 - D: `dub build --compiler=ldc2 --config=daemon` and
   `dub build --compiler=ldc2 --config=relay`.
 - Tests: `dub run --compiler=ldc2 --config=unit --build=unittest`.
