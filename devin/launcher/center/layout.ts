@@ -1,6 +1,7 @@
 import uiCss from "../../../assets/ui.css";
 import type { CenterContent, SidebarItem } from "./content";
 import { spacesSection } from "./content";
+import type { Directory } from "./directory";
 import { createIcon } from "./icons";
 import { createSections } from "./sections";
 import { prepareShell } from "./shell";
@@ -9,10 +10,11 @@ export function createLayout(context: {
     readonly content: CenterContent;
     readonly items: Map<string, SidebarItem>;
     readonly enabled: boolean;
+    readonly directory?: Directory;
     activate: (id: string) => Promise<void>;
 }): { render(): void; dispose(): void }
 {
-    const sections = createSections();
+    const sections = createSections(context.directory);
     let spacesGroups = new Set<HTMLElement>();
     let disposed = false;
     let observer: MutationObserver | undefined;

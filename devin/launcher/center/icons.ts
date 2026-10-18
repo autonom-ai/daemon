@@ -4,6 +4,7 @@ import autonomLineMarkup from "../../../assets/icons/autonom.svg";
 import {
     Cloud,
     Cog,
+    Hash,
     Pencil,
     Plus,
     Search,
@@ -11,6 +12,7 @@ import {
     ShieldLock,
     Sliders,
     Timer,
+    User,
     X,
     createElement,
     type IconNode,
@@ -18,6 +20,8 @@ import {
 
 const lucideIcons: Record<string, IconNode> = {
     timer: Timer,
+    hash: Hash,
+    user: User,
     "shield-lock": ShieldLock,
     "shield-check": ShieldLock,
     shieldCheck: ShieldCheck,

@@ -1,9 +1,11 @@
 import { ActionStore, actionKey } from "./actions";
 import type { CenterContent, NativeItem, SidebarItem } from "./content";
-import { declaredItems, overlayItems, spacesSection } from "./content";
+import { declaredItems, overlayItems } from "./content";
+import { Directory } from "./directory";
 import { createLayout } from "./layout";
 import { validateConfig, validateServices } from "./native";
 import { Patches } from "./patches";
+import { runtimeSnapshot } from "./snapshot";
 import type { RuntimeConfig, RuntimeStatus } from "./types";
 import { createPageViews } from "./views";
 
@@ -45,7 +47,9 @@ export function install(services: any, config: RuntimeConfig): any
     let navigation = 0;
 
     const views = createPageViews(itemFor, actions, () => content.revision, () => disposed);
+    const directory = new Directory((message) => actions.request(message), () => layout.render());
     const layout = createLayout({
+        directory,
         get content()
         {
             return content;
@@ -154,34 +158,22 @@ export function install(services: any, config: RuntimeConfig): any
             if (disposed)
                 return;
 
+            if (globalThis.document?.body && content.enabled && mode === "autonom")
+                directory.refresh();
+
             clearTimeout(lease);
             lease = setTimeout(() => runtime.dispose(), leaseTimeout);
         },
         status(): RuntimeStatus
         {
-            return {
-                connected: !disposed,
-                mode,
-                enabled: content.enabled && mode === "autonom",
-                revision: content.revision ?? null,
+            return runtimeSnapshot({
+                disposed, mode, content, windowId,
                 activeItem: itemFor(groups.getActiveNavSurface(windowId))?.id ?? null,
-                windowId,
                 editorActive: target.__autonomShell?.editorActive() ?? false,
-                items: effectiveManifest().items.map((item: NativeItem) =>
-                {
-                    return { id: item.id, label: item.label, path: item.path };
-                }),
-                sections: content.sections.map((section) => ({
-                    id: section.id,
-                    label: section.label ?? null,
-                    items: section.items.filter((item) => !item.hidden).map((item) => item.id),
-                    buttons: (section.buttons ?? []).filter((button) => !button.hidden).map((button) => button.id),
-                })),
-                spaces: !(content.enabled && mode === "autonom")
-                    || Boolean(content.devinCloud?.includes(spacesSection)),
+                manifest: effectiveManifest(),
                 loadedActions: actions.sources.size + actions.scripts.size,
                 compiledScripts: actions.scripts.size,
-            };
+            });
         },
         navigationState: () => ({ autonom: savedAutonomSurface, native: savedNativeSurface }),
         async update(next: RuntimeConfig): Promise<RuntimeStatus>
@@ -223,6 +215,7 @@ export function install(services: any, config: RuntimeConfig): any
             cachedManifest = undefined;
             notify();
             layout.render();
+            runtime.heartbeat();
             const item = effectiveManifest().items.find((entry: NativeItem) => entry.id === active?.id);
             if (active && (!item || item.path !== active.path))
                 groups.setActiveNavSurface(windowId, item ? { id: item.id, path: item.path } : null);
@@ -344,6 +337,7 @@ export function install(services: any, config: RuntimeConfig): any
             cachedManifest = undefined;
             notify();
             layout.render();
+            runtime.heartbeat();
             for (const instance of views.all.keys())
                 views.remove(instance);
 
@@ -369,6 +363,7 @@ export function install(services: any, config: RuntimeConfig): any
 
             disposed = true;
             clearTimeout(lease);
+            directory.dispose();
             layout.dispose();
             target.__autonomShell?.dispose();
             actions.dispose();

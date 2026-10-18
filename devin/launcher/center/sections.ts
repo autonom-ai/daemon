@@ -1,5 +1,7 @@
 import type { SidebarButton, SidebarSection } from "./content";
 import { sectionIcon } from "./icons";
+import type { Directory } from "./directory";
+import { createEntries } from "./entries";
 
 type SectionHeader = {
     li: HTMLLIElement;
@@ -34,13 +36,14 @@ const emptyClass = "px-2.5 py-1.5 text-[12px] text-ide-editor-color opacity-70";
  * sidebar-label-row/sidebar-group-label presentation with hover-ready icon
  * buttons, plus an inline search field filtering the section's rows.
  */
-export function createSections(): {
+export function createSections(directory?: Directory): {
     sync(menu: HTMLUListElement, sections: SidebarSection[], rows: Map<string, HTMLElement>): void;
     prune(menus: Set<HTMLUListElement>): void;
 }
 {
     const headers = new Map<HTMLUListElement, Map<string, SectionHeader>>();
     const queries = new Map<string, string>();
+    const entries = createEntries();
 
     function remove(header: SectionHeader): void
     {
@@ -185,7 +188,7 @@ export function createSections(): {
 
         const section = header.section;
         const query = queries.get(section.id)?.toLowerCase();
-        let visible = 0;
+        let visible = entries.filter(header.li, query);
         for (const item of section.items)
         {
             if (item.hidden)
@@ -260,6 +263,7 @@ export function createSections(): {
                     }
                 }
 
+                entries.sync(header.li, section.id, directory?.entries(section.id) ?? []);
                 if (header.li.parentElement !== menu || header.li.nextElementSibling !== anchor)
                     menu.insertBefore(header.li, anchor);
 
