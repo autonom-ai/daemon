@@ -22,15 +22,4 @@ docs/*
 devin/node_modules/
 /dist/
 
-research/*
-# Keep the requested, reviewed architecture research visible; ignore scratch data.
-!research/README.md
-!research/review.md
-!research/daemon-map.md
-!research/repo-map.md
-!research/sessions-acp.md
-!research/permissions.md
-!research/verification.md
-!research/style-rules-revision.md
-!research/plan.md
-!research/disposition.md
+/research/
