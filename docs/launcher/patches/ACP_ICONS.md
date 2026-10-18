@@ -62,3 +62,10 @@ canonical Base64 dictionary entry, and unmasked labels or inputs. These tests
 observe the selected context without navigating it. The icon check skips when
 either required environment variable is absent; a missing native provider row
 with both variables set fails and must be reported as an unverified live gate.
+
+The existing Sessions performance check additionally requires an actual session
+whose provider has registry icon metadata. Native Devin Local/OpenCode SVGs
+alone do not exercise this patch. The current benchmark counts inline masks only; computed direct/pseudo-mask
+counting remains a follow-up, with the nonzero assertion preserved. If no
+eligible session exists, report the unmet precondition; an Agents-page pass does
+not substitute for session-list acceptance.
