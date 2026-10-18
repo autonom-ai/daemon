@@ -10,6 +10,17 @@ import { test } from "node:test";
 
 const target = process.env.AUTONOM_TEST_TARGET;
 
+/** Read the native visible section without counting its retained hidden counterpart. */
+function sectionRoot(section: string): HTMLElement
+{
+    const roots = [...document.querySelectorAll<HTMLElement>(`[data-autonom-section="${section}"]`)]
+        .filter((element) => element.getBoundingClientRect().height > 0);
+    if (roots.length !== 1)
+        throw new Error(`Expected one visible ${section} section, observed ${roots.length}.`);
+
+    return roots[0]!;
+}
+
 test("the live room and profile rows match daemon listings and filter through native section search",
     { skip: !target }, async () =>
 {
@@ -25,9 +36,10 @@ test("the live room and profile rows match daemon listings and filter through na
         {
             const expected = await daemon.request<{ name: string }[]>(`/api/${section}`);
             assert.ok(expected.length > 0, `The actual daemon needs at least one ${section} entry for this live check.`);
-            const selector = `[data-autonom-directory="${section}"] > li`;
+            const header = `(${sectionRoot.toString()})(${JSON.stringify(section)})`;
+            const rows = `[...(${header}).querySelectorAll('[data-autonom-directory] > li')]`;
             const observed = await window.session.evaluate(`(() => {
-                return [...document.querySelectorAll(${JSON.stringify(selector)})].map(row => ({
+                return ${rows}.map(row => ({
                     name: row.dataset.autonomEntry,
                     icons: row.querySelectorAll('svg').length,
                     actions: row.querySelectorAll('button, a, [role="button"]').length,
@@ -52,14 +64,14 @@ test("the live room and profile rows match daemon listings and filter through na
             const input = `[data-autonom-section="${section}"] input`;
             await click(window.session, input);
             await window.session.request("Input.insertText", { text: "__autonom_no_matching_entry__" });
-            assert.equal(await window.session.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), expected.length);
-            assert.equal(await window.session.evaluate(`(() => [...document.querySelectorAll(${JSON.stringify(selector)})]
+            assert.equal(await window.session.evaluate(`${rows}.length`), expected.length);
+            assert.equal(await window.session.evaluate(`(() => ${rows}
                 .filter(row => row.getBoundingClientRect().height > 0).length)()`), 0);
-            assert.equal(await window.session.evaluate(`document.querySelector('[data-autonom-section-empty="${section}"]')?.textContent`),
+            assert.equal(await window.session.evaluate(`(${header}).querySelector('[data-autonom-section-empty]')?.textContent`),
                 `No ${section} found`);
             await window.session.request("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
             await window.session.request("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
-            assert.equal(await window.session.evaluate(`(() => [...document.querySelectorAll(${JSON.stringify(selector)})]
+            assert.equal(await window.session.evaluate(`(() => ${rows}
                 .filter(row => row.getBoundingClientRect().height > 0).length)()`), expected.length);
             console.log(JSON.stringify({ section, rows: observed.length, icon, search: "passed" }));
         }

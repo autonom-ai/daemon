@@ -49,11 +49,15 @@ test("the live icon patch leaves native labels, inputs, and non-icon controls in
             return {
                 checked: labels.length,
                 masked: labels.filter(element => element.style.getPropertyValue("mask-image") || element.style.getPropertyValue("--acp-icon")).length,
-                switchCount: document.querySelectorAll('[data-autonom-mode-switch] button').length
+                switches: [...document.querySelectorAll('[data-autonom-mode-switch]')]
+                    .filter(element => element.getBoundingClientRect().height > 0).length,
+                switchCount: [...document.querySelectorAll('[data-autonom-mode-switch] button')]
+                    .filter(element => element.getBoundingClientRect().height > 0).length
             };
-        })()`) as { checked: number; masked: number; switchCount: number };
+        })()`) as { checked: number; masked: number; switches: number; switchCount: number };
         assert.ok(result.checked > 3);
         assert.equal(result.masked, 0);
+        assert.equal(result.switches, 1);
         assert.equal(result.switchCount, 3);
     }
     finally
