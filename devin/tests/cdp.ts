@@ -70,7 +70,10 @@ export async function connectWindow(targetId: string): Promise<{ session: CdpSes
 export async function click(session: CdpSession, selector: string): Promise<void>
 {
     const point = await session.evaluate(`(() => {
-        const element = document.querySelector(${JSON.stringify(selector)});
+        const element = [...document.querySelectorAll(${JSON.stringify(selector)})].find(element => {
+            const rect = element.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== "hidden";
+        });
         const rect = element?.getBoundingClientRect();
         if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error("The native control is not visible");
         return {x:rect.x+rect.width/2, y:rect.y+rect.height/2};

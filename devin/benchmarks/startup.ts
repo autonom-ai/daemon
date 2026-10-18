@@ -50,6 +50,9 @@ async function main(): Promise<void>
                     return {
                         dom: document.readyState !== "loading", shell: Boolean(globalThis.__autonomShell),
                         center: Boolean(center), timeOrigin: performance.timeOrigin,
+                        control: [...document.querySelectorAll('[data-autonom-mode="autonom"]')].some(element => {
+                            const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0;
+                        }),
                         sidebar: Boolean(center && [...document.querySelectorAll("[data-autonom-section]")].some(element => {
                             const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0;
                         }))
@@ -62,7 +65,7 @@ async function main(): Promise<void>
                         if (snapshot[phase] && observations[`${phase}ObservedMs`] === undefined)
                             observations[`${phase}ObservedMs`] = performance.now() - started;
 
-                    if (snapshot.shell && !requested)
+                    if (snapshot.control && !requested)
                     {
                         await click(session, '[data-autonom-mode="autonom"]');
                         requested = true;
@@ -78,16 +81,28 @@ async function main(): Promise<void>
         }
 
         observations.ready = ready;
-        await writeFile(output, JSON.stringify(observations, null, 2) + "\n", { mode: 0o600 });
         if (!ready)
             throw new Error(`The native sidebar did not become ready; partial timings saved to ${output}`);
 
         console.log(JSON.stringify(observations));
     }
+    catch (error)
+    {
+        observations.error = error instanceof Error ? error.message : String(error);
+        throw error;
+    }
     finally
     {
-        await session?.detach();
-        browser.close();
+        observations.ready = ready;
+        try
+        {
+            await writeFile(output, JSON.stringify(observations, null, 2) + "\n", { mode: 0o600 });
+        }
+        finally
+        {
+            await session?.detach();
+            browser.close();
+        }
     }
 }
 
