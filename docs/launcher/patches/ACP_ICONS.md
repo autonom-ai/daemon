@@ -50,3 +50,15 @@ mode changes, remounts, hot replacement, detach, and lease expiry. Assert Base64
 masks and untouched native labels alongside screenshots. If no session for a
 provider exists, report its session-row gate as unverified rather than rendering
 a replacement test row.
+
+For the read-only integration checks, first select a separate test window with
+the candidate launcher attached and open its actual native Agents settings or a
+provider session row. Run `npm --prefix devin run build`, then
+`AUTONOM_TEST_TARGET=<target> AUTONOM_TEST_ICON_PROVIDER=<provider-id> node --test --test-concurrency=1 dist/tests/integration/patches/status.js dist/tests/integration/patches/icons.js`
+(set `AUTONOM_TEST_CDP_PORT` when using a debug port other than 9222). The status
+check requires all seven installed hook groups and one visible native mode-switch
+replacement; the icon check requires that provider's visible native icon, a
+canonical Base64 dictionary entry, and unmasked labels or inputs. These tests
+observe the selected context without navigating it. The icon check skips when
+either required environment variable is absent; a missing native provider row
+with both variables set fails and must be reported as an unverified live gate.
