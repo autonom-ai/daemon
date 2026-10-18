@@ -2,7 +2,6 @@ module daemon.interop.devin.session.catalog;
 
 import daemon.interop.devin.bridge : Bridge;
 import daemon.interop.devin.connection : observedDirectory;
-import daemon.interop.devin.db : readSessionMetadata;
 import daemon.interop.devin.session : Session;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.storage : openFile;
@@ -12,7 +11,6 @@ import core.sys.linux.sys.file : flock, LOCK_EX, LOCK_NB;
 import core.sys.posix.fcntl : O_RDONLY;
 import std.exception : ErrnoException;
 import std.file : exists;
-import std.path : buildPath;
 import std.stdio : File;
 
 bool online(Bridge owner, string id)
@@ -36,7 +34,7 @@ bool online(Bridge owner, string id)
 SessionMetadata sessionMetadata(Bridge owner, string id)
 {
     Session.validateId(id);
-    SessionMetadata ret = readSessionMetadata(owner.sessionDatabase, id);
+    SessionMetadata ret = owner.catalog.metadata(id);
 
     if (!ret.id.length)
         ret.directory = owner.observedDirectory(id);
@@ -45,4 +43,4 @@ SessionMetadata sessionMetadata(Bridge owner, string id)
 }
 
 string lockPath(const Bridge owner, string id)
-    => buildPath(owner.sessionLockDir, id~".lock");
+    => owner.catalog.lockPath(id);

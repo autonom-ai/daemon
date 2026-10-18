@@ -11,6 +11,7 @@ import unit_threaded : Name, should;
 
 import core.thread : Thread;
 import core.time : msecs;
+import std.path : buildPath;
 import std.json : JSONValue;
 
 @Name("A stale ping starts a fresh session in the pinging workspace")
@@ -23,7 +24,7 @@ unittest
     installCli(fixture.fixture);
     Profile marlow = fixture.start("marlow");
     Profile wren = fixture.store.register("wren", "session-2");
-    writeSessionDatabase(fixture.config.sessionDatabase, marlow.session.id, "SWE-2", "/elsewhere");
+    writeSessionDatabase(buildPath(fixture.config.dataDir, "cli", "sessions.db"), marlow.session.id, "SWE-2", "/elsewhere");
     writeSessionDatabase(fixture.config.sessionDatabase, "session-2", "adaptive", fixture.fixture.root);
     Thread.sleep(1100.msecs);
 

@@ -79,4 +79,5 @@ unittest
             spawned.canFind(name~"="~val).should == true;
     }
     spawned.canFind("PATH=").should == true;
+    spawned.canFind("CHISEL_SESSION_DB="~buildPath(fixture.config.dataDir, "cli", "sessions.db")).should == true;
 }

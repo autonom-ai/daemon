@@ -29,10 +29,11 @@ CallResult runAcp(
     string port,
     string dataDir,
     Access access,
-    bool compactFirst = false
+    bool compactFirst = false,
+    string database = null
 )
 {
-    string[string] child = cliEnvironment();
+    string[string] child = cliEnvironment(database);
     child.remove("AUTONOM_CLIENT_TOKEN");
     child["AUTONOM_DATA_DIR"] = dataDir;
     if (runToken.length)
