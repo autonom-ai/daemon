@@ -6,6 +6,7 @@ import { createLayout } from "./layout";
 import { validateConfig, validateServices } from "./native";
 import { Patches } from "./patches";
 import { runtimeSnapshot } from "./snapshot";
+import { agentSidebarHidden } from "./shell";
 import type { RuntimeConfig, RuntimeStatus } from "./types";
 import { createPageViews } from "./views";
 
@@ -287,6 +288,13 @@ export function install(services: any, config: RuntimeConfig): any
         async toggleEditor(): Promise<void>
         {
             await api.executeCommand("devin.webapp.toggleAgentWindow");
+        },
+        async revealAgentSidebar(): Promise<void>
+        {
+            if (!agentSidebarHidden())
+                return;
+
+            await api.executeCommand("workbench.action.focusAuxiliaryBar");
         },
         setScript(id: string, version: string, run: (context: any) => Promise<unknown>): void
         {

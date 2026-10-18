@@ -50,6 +50,12 @@ const shellIcons: Record<Mode, ShellIcon> = {
     editor: iconSetFromNode(Pencil, Pencil.slice(0, 1)),
 };
 
+/** The pinned workbench marks its root while the Agent sidebar is hidden. */
+export function agentSidebarHidden(): boolean
+{
+    return Boolean(globalThis.document?.querySelector(".monaco-workbench")?.classList.contains("noauxiliarybar"));
+}
+
 export function prepareShell(css = uiCss, icons?: Record<string, string>): any
 {
     const target = globalThis as any;
@@ -173,8 +179,11 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                         if (nativeEditor?.getAttribute("aria-pressed") === "true")
                             nativeAgent?.click();
 
-                        void target.__autonomCenter?.setMode(mode)
-                            .catch((error: Error) => console.error("[autonom]", error));
+                        const center = target.__autonomCenter;
+                        if (center)
+                            void center.setMode(mode)
+                                .then(() => mode === "autonom" ? center.revealAgentSidebar() : undefined)
+                                .catch((error: Error) => console.error("[autonom]", error));
                         render();
                     });
                     host.appendChild(button);

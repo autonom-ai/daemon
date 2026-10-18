@@ -113,6 +113,54 @@ test("provider mode returns to native Devin navigation and switches back without
     }
 });
 
+test("revealing the Agent sidebar runs the native command only while it is hidden", async () =>
+{
+    const target = globalThis as any;
+    const originalDocument = target.document;
+    const environment = fixture();
+    const runtime = install(environment.services, config());
+    const revealWith = async (hidden: boolean): Promise<void> =>
+    {
+        target.document = {
+            querySelector(selector: string): unknown
+            {
+                return selector === ".monaco-workbench" ? { classList: { contains: () => hidden } } : null;
+            },
+        };
+        try
+        {
+            await runtime.revealAgentSidebar();
+        }
+        finally
+        {
+            if (originalDocument === undefined)
+                delete target.document;
+            else
+                target.document = originalDocument;
+        }
+    };
+
+    try
+    {
+        await runtime.update(config());
+        await revealWith(true);
+        assert.deepEqual(environment.commands, [{ command: "workbench.action.focusAuxiliaryBar", surface: undefined }]);
+        await revealWith(false);
+        assert.equal(environment.commands.length, 1);
+        delete target.document;
+        await runtime.revealAgentSidebar();
+        assert.equal(environment.commands.length, 1);
+    }
+    finally
+    {
+        runtime.dispose();
+        if (originalDocument === undefined)
+            delete target.document;
+        else
+            target.document = originalDocument;
+    }
+});
+
 test("runtime refuses unsupported native service shapes and invalid configuration", () =>
 {
     const environment = fixture();
