@@ -7,6 +7,8 @@ import { createAcpIcons } from "../acp/icons";
 import { Cloud, Pencil, type IconNode } from "lucide";
 
 const leaseTimeout = 30000;
+/** The native Agent transition reapplies its own sidebar state; settle before revealing. */
+const transitionDelay = 150;
 
 type Mode = "autonom" | "devin-cloud" | "editor";
 
@@ -176,13 +178,23 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                         }
 
                         requested = mode;
-                        if (nativeEditor?.getAttribute("aria-pressed") === "true")
+                        const switching = nativeEditor?.getAttribute("aria-pressed") === "true";
+                        if (switching)
                             nativeAgent?.click();
 
                         const center = target.__autonomCenter;
                         if (center)
                             void center.setMode(mode)
-                                .then(() => mode === "autonom" ? center.revealAgentSidebar() : undefined)
+                                .then(async () =>
+                                {
+                                    if (mode !== "autonom")
+                                        return;
+
+                                    if (switching)
+                                        await new Promise((resolve_) => setTimeout(resolve_, transitionDelay));
+
+                                    await center.revealAgentSidebar();
+                                })
                                 .catch((error: Error) => console.error("[autonom]", error));
                         render();
                     });
