@@ -25,6 +25,145 @@ class StubStyle
     }
 }
 
+class MockElement
+{
+    readonly tagName: string;
+    readonly attributes = new Map<string, string>();
+    readonly children: MockElement[] = [];
+    readonly dataset: Record<string, string> = {};
+    readonly style: any;
+    parentElement: MockElement | null = null;
+    isConnected = true;
+    textContent = "";
+    title = "";
+    type = "";
+    private readonly listeners = new Map<string, Array<() => void>>();
+
+    constructor(tagName: string)
+    {
+        this.tagName = tagName.toUpperCase();
+        this.style = {
+            display: "",
+            getPropertyValue: (name: string) => this.style[name] ?? "",
+            setProperty: (name: string, value: string) => { this.style[name] = value; },
+            removeProperty: (name: string) => { delete this.style[name]; },
+        };
+    }
+
+    setAttribute(name: string, value: string): void
+    {
+        this.attributes.set(name, value);
+    }
+
+    getAttribute(name: string): string | null
+    {
+        return this.attributes.get(name) ?? null;
+    }
+
+    removeAttribute(name: string): void
+    {
+        this.attributes.delete(name);
+    }
+
+    appendChild<T extends MockElement>(child: T): T
+    {
+        child.parentElement = this;
+        child.isConnected = this.isConnected;
+        this.children.push(child);
+        return child;
+    }
+
+    after(newElement: MockElement): void
+    {
+        if (!this.parentElement)
+            return;
+
+        const index = this.parentElement.children.indexOf(this);
+        if (index !== -1)
+        {
+            newElement.parentElement = this.parentElement;
+            newElement.isConnected = this.parentElement.isConnected;
+            this.parentElement.children.splice(index + 1, 0, newElement);
+        }
+    }
+
+    remove(): void
+    {
+        this.isConnected = false;
+        if (this.parentElement)
+        {
+            const index = this.parentElement.children.indexOf(this);
+            if (index !== -1)
+                this.parentElement.children.splice(index, 1);
+            this.parentElement = null;
+        }
+    }
+
+    addEventListener(event: string, listener: () => void): void
+    {
+        const list = this.listeners.get(event) ?? [];
+        list.push(listener);
+        this.listeners.set(event, list);
+    }
+
+    click(): void
+    {
+        for (const listener of this.listeners.get("click") ?? [])
+            listener();
+    }
+
+    getBoundingClientRect(): { width: number; height: number }
+    {
+        return { width: 100, height: 24 };
+    }
+
+    querySelector<T = MockElement>(selector: string): T | null
+    {
+        return (this.querySelectorAll<T>(selector)[0] ?? null) as T | null;
+    }
+
+    querySelectorAll<T = MockElement>(selector: string): T[]
+    {
+        const matches: MockElement[] = [];
+        const match = (elem: MockElement) =>
+        {
+            if (matchesSelector(elem, selector))
+                matches.push(elem);
+            for (const child of elem.children)
+                match(child);
+        };
+
+        for (const child of this.children)
+            match(child);
+
+        return matches as T[];
+    }
+}
+
+function matchesSelector(elem: MockElement, selector: string): boolean
+{
+    if (selector === ".agent-editor-switch")
+        return (elem.getAttribute("class") ?? "").split(/\s+/).includes("agent-editor-switch");
+    if (selector === 'button[aria-label="Agent"]')
+        return elem.tagName === "BUTTON" && elem.getAttribute("aria-label") === "Agent";
+    if (selector === 'button[aria-label="Editor"]')
+        return elem.tagName === "BUTTON" && elem.getAttribute("aria-label") === "Editor";
+    if (selector === "button")
+        return elem.tagName === "BUTTON";
+    if (selector === "svg")
+        return elem.tagName === "SVG";
+    if (selector === "path")
+        return elem.tagName === "PATH";
+    if (selector === "[data-autonom-mode-switch]")
+        return elem.dataset.autonomModeSwitch !== undefined;
+    if (selector.startsWith('button[data-autonom-mode="'))
+    {
+        const mode = selector.slice('button[data-autonom-mode="'.length, -2);
+        return elem.tagName === "BUTTON" && elem.dataset.autonomMode === mode;
+    }
+    return false;
+}
+
 function providerElement(providerId: string): any
 {
     const provider = { memoizedProps: { providerId, icon: "native" }, return: null };
@@ -35,17 +174,25 @@ function providerElement(providerId: string): any
     };
 }
 
-function mountDom(elements: any[]): void
+let mockDocument: any;
+
+function mountDom(elements: any[] = []): { body: MockElement; head: MockElement }
 {
-    const styleElement = { textContent: "", remove: () => undefined };
-    (globalThis as any).document = {
-        head: { appendChild: () => undefined },
-        body: {},
-        createElement: () => styleElement,
-        createElementNS: () => ({}),
+    const head = new MockElement("head");
+    const body = new MockElement("body");
+    mockDocument = {
+        head,
+        body,
+        createElement: (tag: string) => new MockElement(tag),
+        createElementNS: (_ns: string, tag: string) => new MockElement(tag),
         querySelectorAll: (selector: string) =>
-            selector === acpIconSelector ? elements.filter((element) => element.isConnected) : [],
+        {
+            if (selector === acpIconSelector)
+                return elements.filter((element) => element.isConnected);
+            return body.querySelectorAll(selector);
+        },
     };
+    (globalThis as any).document = mockDocument;
     (globalThis as any).MutationObserver = class
     {
         observe(): void
@@ -56,6 +203,7 @@ function mountDom(elements: any[]): void
         {
         }
     };
+    return { body, head };
 }
 
 afterEach(() =>
@@ -63,6 +211,7 @@ afterEach(() =>
     const target = globalThis as any;
     target.__autonomShell?.dispose();
     delete target.__autonomShell;
+    delete target.__autonomCenter;
     delete target.document;
     delete target.MutationObserver;
 });
@@ -114,6 +263,169 @@ test("registry icons update, clear, and follow element connectivity", () =>
         assert.equal(element.style.getPropertyValue("mask-image"), "");
         shell.update("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
         assert.equal(element.style.getPropertyValue("mask-image"), first);
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("mode switch toolbar replaces .agent-editor-switch with Autonom, Devin Cloud, and Editor buttons", () =>
+{
+    const { body } = mountDom();
+    const container = new MockElement("div");
+    body.appendChild(container);
+
+    const switchRoot = new MockElement("div");
+    switchRoot.setAttribute("class", "agent-editor-switch");
+    container.appendChild(switchRoot);
+
+    const nativeAgent = new MockElement("button");
+    nativeAgent.setAttribute("aria-label", "Agent");
+    nativeAgent.setAttribute("aria-pressed", "true");
+    switchRoot.appendChild(nativeAgent);
+
+    const nativeEditor = new MockElement("button");
+    nativeEditor.setAttribute("aria-label", "Editor");
+    nativeEditor.setAttribute("aria-pressed", "false");
+    switchRoot.appendChild(nativeEditor);
+
+    const shell = prepareShell();
+    try
+    {
+        assert.equal(switchRoot.style.display, "none");
+        const toolbar = container.querySelector<MockElement>("[data-autonom-mode-switch]");
+        assert.ok(toolbar);
+        assert.equal(toolbar.getAttribute("role"), "group");
+        assert.equal(toolbar.getAttribute("aria-label"), "Workspace mode");
+
+        const buttons = toolbar.querySelectorAll<MockElement>("button");
+        assert.equal(buttons.length, 3);
+
+        const autonomBtn = toolbar.querySelector<MockElement>('button[data-autonom-mode="autonom"]');
+        assert.ok(autonomBtn);
+        assert.equal(autonomBtn.getAttribute("aria-label"), "Autonom");
+        const autonomSvg = autonomBtn.querySelector<MockElement>("svg");
+        assert.ok(autonomSvg);
+        assert.equal(autonomSvg.getAttribute("viewBox"), "0 0 48 48");
+        assert.equal(autonomSvg.getAttribute("stroke"), null);
+        const autonomPath = autonomSvg.querySelector<MockElement>("path");
+        assert.ok(autonomPath);
+        assert.equal(autonomPath.getAttribute("fill-rule"), "evenodd");
+
+        const cloudBtn = toolbar.querySelector<MockElement>('button[data-autonom-mode="devin-cloud"]');
+        assert.ok(cloudBtn);
+        assert.equal(cloudBtn.getAttribute("aria-label"), "Devin Cloud");
+        const cloudSvg = cloudBtn.querySelector<MockElement>("svg");
+        assert.ok(cloudSvg);
+        assert.equal(cloudSvg.getAttribute("viewBox"), "0 0 24 24");
+        assert.equal(cloudSvg.getAttribute("stroke"), "currentColor");
+        assert.equal(cloudSvg.getAttribute("stroke-width"), "2");
+        assert.equal(cloudSvg.getAttribute("stroke-linecap"), "round");
+        assert.equal(cloudSvg.getAttribute("stroke-linejoin"), "round");
+        const cloudPath = cloudSvg.querySelector<MockElement>("path");
+        assert.ok(cloudPath);
+        assert.equal(cloudPath.getAttribute("fill-rule"), null);
+        assert.equal(cloudPath.getAttribute("d"), "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z");
+
+        const editorBtn = toolbar.querySelector<MockElement>('button[data-autonom-mode="editor"]');
+        assert.ok(editorBtn);
+        assert.equal(editorBtn.getAttribute("aria-label"), "Editor");
+        const editorSvg = editorBtn.querySelector<MockElement>("svg");
+        assert.ok(editorSvg);
+        assert.equal(editorSvg.getAttribute("viewBox"), "0 0 24 24");
+        assert.equal(editorSvg.getAttribute("stroke"), "currentColor");
+        assert.equal(editorSvg.getAttribute("stroke-width"), "2");
+        assert.equal(editorSvg.getAttribute("stroke-linecap"), "round");
+        assert.equal(editorSvg.getAttribute("stroke-linejoin"), "round");
+        const editorPath = editorSvg.querySelector<MockElement>("path");
+        assert.ok(editorPath);
+        assert.equal(editorPath.getAttribute("fill-rule"), null);
+        assert.ok(editorPath.getAttribute("d")?.includes("M15 5l4 4"));
+    }
+    finally
+    {
+        shell.dispose();
+    }
+
+    assert.equal(switchRoot.style.display, "");
+    assert.equal(container.querySelector("[data-autonom-mode-switch]"), null);
+});
+
+test("mode switch toolbar swaps active and inactive state attributes (aria-pressed, fill, d)", () =>
+{
+    const { body } = mountDom();
+    const container = new MockElement("div");
+    body.appendChild(container);
+
+    const switchRoot = new MockElement("div");
+    switchRoot.setAttribute("class", "agent-editor-switch");
+    container.appendChild(switchRoot);
+
+    const nativeAgent = new MockElement("button");
+    nativeAgent.setAttribute("aria-label", "Agent");
+    nativeAgent.setAttribute("aria-pressed", "true");
+    switchRoot.appendChild(nativeAgent);
+
+    const nativeEditor = new MockElement("button");
+    nativeEditor.setAttribute("aria-label", "Editor");
+    nativeEditor.setAttribute("aria-pressed", "false");
+    switchRoot.appendChild(nativeEditor);
+
+    const shell = prepareShell();
+    try
+    {
+        const toolbar = container.querySelector<MockElement>("[data-autonom-mode-switch]")!;
+        const autonomBtn = toolbar.querySelector<MockElement>('button[data-autonom-mode="autonom"]')!;
+        const cloudBtn = toolbar.querySelector<MockElement>('button[data-autonom-mode="devin-cloud"]')!;
+        const editorBtn = toolbar.querySelector<MockElement>('button[data-autonom-mode="editor"]')!;
+
+        // Initial state: autonom active
+        assert.equal(autonomBtn.getAttribute("aria-pressed"), "true");
+        assert.equal(cloudBtn.getAttribute("aria-pressed"), "false");
+        assert.equal(editorBtn.getAttribute("aria-pressed"), "false");
+
+        assert.equal(cloudBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
+        assert.equal(editorBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
+        const editorLineD = editorBtn.querySelector<MockElement>("path")?.getAttribute("d")!;
+        assert.ok(editorLineD.includes("M15 5l4 4"));
+
+        // Switch to devin-cloud
+        cloudBtn.click();
+        assert.equal(autonomBtn.getAttribute("aria-pressed"), "false");
+        assert.equal(cloudBtn.getAttribute("aria-pressed"), "true");
+        assert.equal(editorBtn.getAttribute("aria-pressed"), "false");
+
+        assert.equal(cloudBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "currentColor");
+        assert.equal(editorBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
+        assert.equal(editorBtn.querySelector<MockElement>("path")?.getAttribute("d"), editorLineD);
+
+        // Switch to editor via native editor toggle
+        nativeEditor.setAttribute("aria-pressed", "true");
+        nativeAgent.setAttribute("aria-pressed", "false");
+        shell.heartbeat();
+
+        assert.equal(autonomBtn.getAttribute("aria-pressed"), "false");
+        assert.equal(cloudBtn.getAttribute("aria-pressed"), "false");
+        assert.equal(editorBtn.getAttribute("aria-pressed"), "true");
+
+        assert.equal(editorBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "currentColor");
+        assert.equal(cloudBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
+        const editorFillD = editorBtn.querySelector<MockElement>("path")?.getAttribute("d")!;
+        assert.ok(!editorFillD.includes("M15 5l4 4"));
+        assert.notEqual(editorFillD, editorLineD);
+
+        // Switch back to autonom
+        nativeEditor.setAttribute("aria-pressed", "false");
+        nativeAgent.setAttribute("aria-pressed", "true");
+        autonomBtn.click();
+
+        assert.equal(autonomBtn.getAttribute("aria-pressed"), "true");
+        assert.equal(cloudBtn.getAttribute("aria-pressed"), "false");
+        assert.equal(editorBtn.getAttribute("aria-pressed"), "false");
+        assert.equal(editorBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
+        assert.equal(cloudBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
+        assert.equal(editorBtn.querySelector<MockElement>("path")?.getAttribute("d"), editorLineD);
     }
     finally
     {

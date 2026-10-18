@@ -41,6 +41,12 @@
     flex-shrink: 0;
     pointer-events: none;
 }
+[data-autonom-mode-switch] svg[fill="none"] {
+    fill: none;
+}
+[data-autonom-mode-switch] svg[stroke="currentColor"] {
+    stroke: currentColor;
+}
 [data-autonom-section],
 [data-autonom-section-empty] {
     list-style: none;

@@ -10,16 +10,28 @@ const leaseTimeout = 30000;
 
 type Mode = "autonom" | "devin-cloud" | "editor";
 
-function iconSet(lineMarkup: string, fillMarkup: string): { viewBox: string; line: string; fill: string }
+interface ShellIcon
 {
+    viewBox: string;
+    line: string;
+    fill: string;
+    stroked: boolean;
+}
+
+function iconSet(lineMarkup: string, fillMarkup: string): ShellIcon
+{
+    const extractPaths = (markup: string) =>
+        [...markup.matchAll(/[\s]d="([^"]+)"/g)].map((match) => match[1]).join(" ");
+
     return {
-        viewBox: /viewBox="([^"]+)"/.exec(lineMarkup)?.[1] ?? "0 0 16 16",
-        line: /[\s]d="([^"]+)"/.exec(lineMarkup)?.[1] ?? "",
-        fill: /[\s]d="([^"]+)"/.exec(fillMarkup)?.[1] ?? "",
+        viewBox: /viewBox="([^"]+)"/.exec(lineMarkup)?.[1] ?? "0 0 24 24",
+        line: extractPaths(lineMarkup),
+        fill: extractPaths(fillMarkup),
+        stroked: lineMarkup.includes('stroke="currentColor"'),
     };
 }
 
-const shellIcons: Record<Mode, { viewBox: string; line: string; fill: string }> = {
+const shellIcons: Record<Mode, ShellIcon> = {
     autonom: iconSet(autonomLineMarkup, autonomFillMarkup),
     "devin-cloud": iconSet(cloudLineMarkup, cloudFillMarkup),
     editor: iconSet(pencilLineMarkup, pencilFillMarkup),
@@ -125,8 +137,17 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
                     svg.setAttribute("viewBox", icon.viewBox);
                     svg.setAttribute("aria-hidden", "true");
+                    if (icon.stroked)
+                    {
+                        svg.setAttribute("fill", "none");
+                        svg.setAttribute("stroke", "currentColor");
+                        svg.setAttribute("stroke-width", "2");
+                        svg.setAttribute("stroke-linecap", "round");
+                        svg.setAttribute("stroke-linejoin", "round");
+                    }
                     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                    path.setAttribute("fill-rule", "evenodd");
+                    if (!icon.stroked)
+                        path.setAttribute("fill-rule", "evenodd");
                     path.setAttribute("d", icon.line);
                     svg.appendChild(path);
                     button.appendChild(svg);
@@ -176,13 +197,21 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                 const active = button.dataset.autonomMode === mode;
                 button.setAttribute("aria-pressed", String(active));
                 const icon = shellIcons[button.dataset.autonomMode as Mode];
+                const svg = button.querySelector("svg");
                 const path = button.querySelector("path");
-                if (!icon || !path)
+                if (!icon || !path || !svg)
                     continue;
 
                 const d = active ? icon.fill : icon.line;
                 if (path.getAttribute("d") !== d)
                     path.setAttribute("d", d);
+
+                if (icon.stroked)
+                {
+                    const fill = active ? "currentColor" : "none";
+                    if (svg.getAttribute("fill") !== fill)
+                        svg.setAttribute("fill", fill);
+                }
             }
         }
 
