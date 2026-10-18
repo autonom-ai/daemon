@@ -48,9 +48,10 @@ const shellIcons: Record<Mode, ShellIcon> = {
     editor: iconSetFromNode(Pencil, Pencil.slice(0, 1)),
 };
 
-const acpIconSelector = "svg, img, span[style*='mask-image']";
+const acpIconSelector = "svg, img, [style*='mask-image'], [role='img'], div:not(:has(*)), span:not(:has(*))";
 const acpIconStyle: [string, string][] = [
     ["background-color", "currentColor"],
+    ["font-size", "0"],
     ["mask-repeat", "no-repeat"],
     ["-webkit-mask-repeat", "no-repeat"],
     ["mask-position", "center"],
@@ -81,6 +82,7 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
         editor: HTMLButtonElement;
     }>();
     const patchedIcons = new Set<Element>();
+    const resolvedIcons = new Map<string, string | null>();
     let acpIcons = icons ?? {};
     let requested: "autonom" | "devin-cloud" = "autonom";
     let lease: ReturnType<typeof setTimeout> | undefined;
@@ -234,20 +236,98 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
     function acpRegistryIcon(element: Element): string | undefined
     {
         const key = Object.keys(element).find((name) => name.startsWith("__reactFiber$"));
-        let fiber = key ? (element as any)[key] : null;
+        const target = key ? (element as any)[key] : null;
+        let fiber = target;
         for (let index = 0; fiber && index < 16; index++, fiber = fiber.return)
         {
             const props = fiber.memoizedProps;
-            if (typeof props?.providerId === "string" && "icon" in props)
-                return acpIcons[props.providerId];
+            const providerId = acpProviderId(props);
+            if (providerId === undefined)
+                continue;
+
+            return acpIconSlot(element, target, fiber, props) ? acpIcons[providerId] : undefined;
         }
+        return undefined;
+    }
+
+    function acpProviderId(props: any): string | undefined
+    {
+        if (typeof props?.providerId === "string")
+            return props.providerId;
+        if (typeof props?.agent?.id === "string")
+            return props.agent.id;
+        if (typeof props?.agentId === "string")
+            return props.agentId;
+        return undefined;
+    }
+
+    function acpIconSlot(element: Element, target: any, fiber: any, props: any): boolean
+    {
+        const icon = props?.icon;
+        if (icon && typeof icon === "object")
+        {
+            for (let probe = target; probe && probe !== fiber; probe = probe.return)
+            {
+                if (probe.memoizedProps === icon.props)
+                    return true;
+            }
+            return false;
+        }
+        return fiber.stateNode === element || acpFirstHost(fiber) === element;
+    }
+
+    function acpFirstHost(fiber: any): Element | null
+    {
+        let node = fiber.child;
+        while (node)
+        {
+            if (node.tag === 5 && node.stateNode)
+                return node.stateNode;
+            if (node.child)
+            {
+                node = node.child;
+                continue;
+            }
+            while (node !== fiber && !node.sibling)
+                node = node.return;
+            node = node === fiber ? null : node.sibling;
+        }
+        return null;
+    }
+
+    function acpIconUrl(icon: string): string | undefined
+    {
+        if (!/^https?:/i.test(icon))
+            return icon;
+        const cached = resolvedIcons.get(icon);
+        if (cached !== undefined)
+            return cached ?? undefined;
+        resolvedIcons.set(icon, null);
+        void fetch(icon)
+            .then(async (response) =>
+            {
+                if (!response.ok)
+                    return;
+                const type = response.headers.get("content-type")?.split(";")[0] || "image/svg+xml";
+                const bytes = new Uint8Array(await response.arrayBuffer());
+                let binary = "";
+                for (let index = 0; index < bytes.length; index += 8192)
+                    binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
+                resolvedIcons.set(icon, `data:${type};base64,${btoa(binary)}`);
+                render();
+            })
+            .catch(() => {});
         return undefined;
     }
 
     function applyAcpIcon(element: Element, icon: string): void
     {
+        const url = acpIconUrl(icon);
+        if (url === undefined)
+            return;
+
         const style = (element as HTMLElement).style;
-        const mask = `url("${icon.replace(/["\\]/g, "\\$&")}")`;
+        const mask = `url("${url.replace(/["\\]/g, "\\$&")}")`;
         for (const [name, value] of acpIconStyle)
         {
             const next = name.endsWith("mask-image") ? mask : value;

@@ -3,7 +3,7 @@ import { prepareShell } from "../../../launcher/center/shell";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-const acpIconSelector = "svg, img, span[style*='mask-image']";
+const acpIconSelector = "svg, img, [style*='mask-image'], [role='img'], div:not(:has(*)), span:not(:has(*))";
 
 class StubStyle
 {
@@ -164,14 +164,40 @@ function matchesSelector(elem: MockElement, selector: string): boolean
     return false;
 }
 
+function fiberNode(tag: number, memoizedProps: any): any
+{
+    return { tag, memoizedProps, stateNode: null, child: null, sibling: null, return: null };
+}
+
+function hostElement(): any
+{
+    return { isConnected: true, style: new StubStyle() };
+}
+
+function hostFiber(element: any, memoizedProps: any = {}): any
+{
+    const fiber = fiberNode(5, memoizedProps);
+    fiber.stateNode = element;
+    element.__reactFiber$probe = fiber;
+    return fiber;
+}
+
+function fiberChild(parent: any, ...children: any[]): void
+{
+    parent.child = children[0] ?? null;
+    for (let index = 0; index < children.length; index += 1)
+    {
+        children[index].return = parent;
+        children[index].sibling = children[index + 1] ?? null;
+    }
+}
+
 function providerElement(providerId: string): any
 {
-    const provider = { memoizedProps: { providerId, icon: "native" }, return: null };
-    return {
-        isConnected: true,
-        style: new StubStyle(),
-        __reactFiber$probe: { memoizedProps: {}, return: { memoizedProps: {}, return: provider } },
-    };
+    const element = hostElement();
+    const provider = fiberNode(0, { providerId, icon: "native" });
+    fiberChild(provider, hostFiber(element));
+    return element;
 }
 
 let mockDocument: any;
@@ -266,6 +292,123 @@ test("registry icons update, clear, and follow element connectivity", () =>
     }
     finally
     {
+        shell.dispose();
+    }
+});
+
+test("registry icons apply to agent letter-avatar elements", () =>
+{
+    const element = hostElement();
+    element.textContent = "AN";
+    const avatar = fiberNode(0, { agent: { id: "devin-better-antigravity", name: "Antigravity" } });
+    fiberChild(avatar, hostFiber(element));
+    mountDom([element]);
+
+    const mask = `url("data:image/svg+xml;base64,QUJD")`;
+    const shell = prepareShell("", { "devin-better-antigravity": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), mask);
+        assert.equal(element.style.getPropertyValue("font-size"), "0");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+
+    assert.equal(element.style.getPropertyValue("mask-image"), "");
+    assert.equal(element.style.getPropertyValue("font-size"), "");
+});
+
+test("registry icons do not apply to provider elements outside the icon slot", () =>
+{
+    const avatar = hostElement();
+    const label = hostElement();
+    const row = fiberNode(0, { agent: { id: "devin-autonom", name: "Autonom" } });
+    fiberChild(row, hostFiber(avatar), hostFiber(label));
+    mountDom([avatar, label]);
+
+    const mask = `url("data:image/svg+xml;base64,QUJD")`;
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(avatar.style.getPropertyValue("mask-image"), mask);
+        assert.equal(label.style.getPropertyValue("mask-image"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons leave providers without registry icons untouched", () =>
+{
+    const element = providerElement("devin-cli");
+    mountDom([element]);
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), "");
+        assert.equal(element.style.getPropertyValue("background-color"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons apply inside provider icon element props", () =>
+{
+    const element = hostElement();
+    const other = hostElement();
+    const slot = fiberNode(0, { labelledBy: "agent" });
+    fiberChild(slot, hostFiber(element));
+    const provider = fiberNode(0, { providerId: "devin-autonom", icon: { props: slot.memoizedProps } });
+    fiberChild(provider, slot, hostFiber(other));
+    mountDom([element, other]);
+
+    const mask = `url("data:image/svg+xml;base64,QUJD")`;
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), mask);
+        assert.equal(other.style.getPropertyValue("mask-image"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons fetch remote URLs and apply the resolved data", async () =>
+{
+    const element = providerElement("devin-better-antigravity");
+    mountDom([element]);
+    const bytes = new TextEncoder().encode("<svg/>");
+    const requests: string[] = [];
+    const originalFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = async (url: string) =>
+    {
+        requests.push(url);
+        return {
+            ok: true,
+            headers: { get: () => "image/svg+xml" },
+            arrayBuffer: async () => bytes.buffer,
+        };
+    };
+
+    const shell = prepareShell("", { "devin-better-antigravity": "https://cdn.example/icon.svg" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), "");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.equal(requests.length, 1);
+        const mask = element.style.getPropertyValue("mask-image");
+        assert.ok(mask.startsWith('url("data:image/svg+xml;base64,'));
+    }
+    finally
+    {
+        (globalThis as any).fetch = originalFetch;
         shell.dispose();
     }
 });
