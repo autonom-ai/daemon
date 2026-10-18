@@ -205,8 +205,8 @@ export function createSections(): {
         if (query && visible === 0)
         {
             header.empty ??= emptyRow(section);
-            if (header.empty.previousElementSibling !== header.li)
-                header.li.after(header.empty);
+            if (header.empty.parentElement !== header.li)
+                header.li.appendChild(header.empty);
         }
         else
         {
