@@ -3,6 +3,7 @@ module daemon.interop.devin.connection;
 import daemon.exception : InvalidInputException, ConflictException;
 import daemon.http;
 import daemon.interop.devin.bridge : Bridge;
+import daemon.interop.devin.hooks : installHooks;
 import daemon.interop.devin.session : Session;
 static import daemon.api;
 
@@ -204,6 +205,9 @@ void admit(Request request, Output output)
     if ("directory" in data.object &&
         (data["directory"].type != JSONType.string || data["directory"].str.canFind('\0')))
         throw new InvalidInputException("Invalid directory");
+
+    if (!daemon.api.bridge.access.managed(data["session"].str))
+        installHooks();
 
     daemon.api.bridge.admitObserved(data["connection"].str, data["session"].str,
         "directory" in data.object ? data["directory"].str : null);

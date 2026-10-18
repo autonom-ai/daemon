@@ -198,9 +198,6 @@ unittest
 
     installFake(fixture);
     Session session = fixture.bridge.session("session-1");
-    scope(exit)
-        session.stop();
-
     session.resume("fail", fixture.root);
     waitUntil(delegate bool() {
         return session.status == SessionStatus.Failed;

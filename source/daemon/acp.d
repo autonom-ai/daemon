@@ -3,6 +3,7 @@ module daemon.acp;
 import daemon.config : Config;
 import daemon.interop.acp.client : AcpClient;
 import daemon.interop.devin.desktop : Desktop;
+import daemon.interop.devin.hooks : installHooks;
 import daemon.interop.devin.process : cliEnvironment;
 
 import core.atomic : atomicLoad, atomicStore;
@@ -111,6 +112,7 @@ int runAcpHost(string devinCommand = null, string configPath = null)
     catch (Exception)
     { }
 
+    installHooks();
     string[string] child = cliEnvironment();
     if (data.length)
         child["AUTONOM_DATA_DIR"] = data;

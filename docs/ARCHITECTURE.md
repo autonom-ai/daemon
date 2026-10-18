@@ -62,6 +62,12 @@ cancel. Only offered options are valid. Pending requests are bounded to 64 and
 16 MiB in aggregate, expire after 240 seconds, and are invalidated on disconnect.
 API-only sessions wait for an explicit decision until their deadline.
 
+Daemon and ACP host startup reconcile Autonom hooks under `hooks` in the user-level
+Devin CLI `config.json`. New session admission also repairs the registration. The
+installed `devin/hooks.v1.json` template is the sole source; unrelated settings and
+user hook commands are retained, including commands sharing an Autonom matcher.
+Stale Autonom command paths are replaced. Project hooks continue to load separately.
+
 `PreToolUse` continues to enforce policy for automatic and bypassed calls.
 Human approval uses native ACP and HTTP. The authenticated `PermissionRequest`
 hook returns an empty response; it does not maintain a second approval queue.
