@@ -166,8 +166,6 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                     button.appendChild(svg);
                     button.addEventListener("click", () =>
                     {
-                        const restore = switches.get(root)?.display ?? "";
-                        root.style.display = restore;
                         const nativeAgent = root.querySelector<HTMLButtonElement>('button[aria-label="Agent"]');
                         const nativeEditor = root.querySelector<HTMLButtonElement>('button[aria-label="Editor"]');
                         if (mode === "editor")
@@ -175,7 +173,6 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
                             nativeEditor?.click();
                             setTimeout(() =>
                             {
-                                root.style.display = "none";
                                 if (!shell.editorActive())
                                     void target.__autonomCenter?.toggleEditor()
                                         .catch((error: Error) => console.error("[autonom]", error));
@@ -191,7 +188,6 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
 
                         void target.__autonomCenter?.setMode(mode)
                             .catch((error: Error) => console.error("[autonom]", error));
-                        root.style.display = "none";
                         render();
                     });
                     host.appendChild(button);

@@ -575,3 +575,102 @@ test("mode switch toolbar swaps active and inactive state attributes (aria-press
         shell.dispose();
     }
 });
+
+test("editor mode switch keeps the native switch hidden and falls back to toggleEditor", async () =>
+{
+    const { body } = mountDom();
+    const container = new MockElement("div");
+    body.appendChild(container);
+
+    const switchRoot = new MockElement("div");
+    switchRoot.setAttribute("class", "agent-editor-switch");
+    container.appendChild(switchRoot);
+
+    const nativeAgent = new MockElement("button");
+    nativeAgent.setAttribute("aria-label", "Agent");
+    nativeAgent.setAttribute("aria-pressed", "true");
+    switchRoot.appendChild(nativeAgent);
+
+    const nativeEditor = new MockElement("button");
+    nativeEditor.setAttribute("aria-label", "Editor");
+    nativeEditor.setAttribute("aria-pressed", "false");
+    switchRoot.appendChild(nativeEditor);
+
+    let clicked = 0;
+    let toggled = 0;
+    nativeEditor.addEventListener("click", () => clicked += 1);
+    (globalThis as any).__autonomCenter = {
+        status: () => ({ mode: "autonom" }),
+        toggleEditor: async () => toggled += 1,
+    };
+
+    const shell = prepareShell();
+    try
+    {
+        const toolbar = container.querySelector<MockElement>("[data-autonom-mode-switch]")!;
+        const editorBtn = toolbar.querySelector<MockElement>('button[data-autonom-mode="editor"]')!;
+
+        editorBtn.click();
+        assert.equal(clicked, 1);
+        assert.equal(switchRoot.style.display, "none");
+
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.equal(switchRoot.style.display, "none");
+        assert.equal(toggled, 1);
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("editor mode switch does not call toggleEditor when the native click activates the editor", async () =>
+{
+    const { body } = mountDom();
+    const container = new MockElement("div");
+    body.appendChild(container);
+
+    const switchRoot = new MockElement("div");
+    switchRoot.setAttribute("class", "agent-editor-switch");
+    container.appendChild(switchRoot);
+
+    const nativeAgent = new MockElement("button");
+    nativeAgent.setAttribute("aria-label", "Agent");
+    nativeAgent.setAttribute("aria-pressed", "true");
+    switchRoot.appendChild(nativeAgent);
+
+    const nativeEditor = new MockElement("button");
+    nativeEditor.setAttribute("aria-label", "Editor");
+    nativeEditor.setAttribute("aria-pressed", "false");
+    switchRoot.appendChild(nativeEditor);
+
+    nativeEditor.addEventListener("click", () =>
+    {
+        nativeEditor.setAttribute("aria-pressed", "true");
+        nativeAgent.setAttribute("aria-pressed", "false");
+    });
+    let toggled = 0;
+    (globalThis as any).__autonomCenter = {
+        status: () => ({ mode: "autonom" }),
+        toggleEditor: async () => toggled += 1,
+    };
+
+    const shell = prepareShell();
+    try
+    {
+        const toolbar = container.querySelector<MockElement>("[data-autonom-mode-switch]")!;
+        const editorBtn = toolbar.querySelector<MockElement>('button[data-autonom-mode="editor"]')!;
+
+        editorBtn.click();
+        assert.equal(switchRoot.style.display, "none");
+
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.equal(switchRoot.style.display, "none");
+        assert.equal(toggled, 0);
+        assert.equal(editorBtn.getAttribute("aria-pressed"), "true");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
