@@ -137,27 +137,87 @@ test("createIcon parses stroke-based Lucide cog mark and settings alias", () =>
     }
 });
 
-test("createIcon parses filled icons (plus and search) with fill attributes", () =>
+test("createIcon parses stroke-based Lucide plus and search marks", () =>
 {
     const plus = createIcon("plus") as unknown as MockSvgElement;
     assert.ok(plus);
     assert.equal(plus.tagName, "svg");
     assert.equal(plus.getAttribute("viewBox"), "0 0 24 24");
     assert.equal(plus.getAttribute("fill"), "none");
-    assert.equal(plus.children.length, 1);
+    assert.equal(plus.getAttribute("stroke"), "currentColor");
+    assert.equal(plus.getAttribute("stroke-width"), "2");
+    assert.equal(plus.children.length, 2);
     assert.equal(plus.children[0]?.tagName, "path");
-    assert.equal(plus.children[0]?.getAttribute("fill"), "currentColor");
-    assert.equal(plus.children[0]?.getAttribute("fill-rule"), "evenodd");
-    assert.ok(plus.children[0]?.getAttribute("d")?.length! > 0);
+    assert.equal(plus.children[0]?.getAttribute("d"), "M5 12h14");
+    assert.equal(plus.children[1]?.tagName, "path");
+    assert.equal(plus.children[1]?.getAttribute("d"), "M12 5v14");
 
     const search = createIcon("search") as unknown as MockSvgElement;
     assert.ok(search);
     assert.equal(search.tagName, "svg");
     assert.equal(search.getAttribute("viewBox"), "0 0 24 24");
-    assert.equal(search.children.length, 1);
+    assert.equal(search.getAttribute("fill"), "none");
+    assert.equal(search.getAttribute("stroke"), "currentColor");
+    assert.equal(search.getAttribute("stroke-width"), "2");
+    assert.equal(search.children.length, 2);
     assert.equal(search.children[0]?.tagName, "path");
-    assert.equal(search.children[0]?.getAttribute("fill"), "currentColor");
-    assert.equal(search.children[0]?.getAttribute("fill-rule"), "evenodd");
+    assert.equal(search.children[0]?.getAttribute("d"), "m21 21-4.34-4.34");
+    assert.equal(search.children[1]?.tagName, "circle");
+    assert.equal(search.children[1]?.getAttribute("cx"), "11");
+    assert.equal(search.children[1]?.getAttribute("cy"), "11");
+    assert.equal(search.children[1]?.getAttribute("r"), "8");
+});
+
+test("createIcon parses stroke-based Lucide sliders, x, close, cloud, and pencil marks", () =>
+{
+    const sliders = createIcon("sliders") as unknown as MockSvgElement;
+    assert.ok(sliders);
+    assert.equal(sliders.getAttribute("viewBox"), "0 0 24 24");
+    assert.equal(sliders.getAttribute("stroke"), "currentColor");
+    assert.equal(sliders.children.length, 9);
+
+    for (const name of ["x", "close"])
+    {
+        const closeIcon = createIcon(name) as unknown as MockSvgElement;
+        assert.ok(closeIcon);
+        assert.equal(closeIcon.getAttribute("viewBox"), "0 0 24 24");
+        assert.equal(closeIcon.getAttribute("stroke"), "currentColor");
+        assert.equal(closeIcon.children.length, 2);
+        assert.equal(closeIcon.children[0]?.getAttribute("d"), "M18 6 6 18");
+        assert.equal(closeIcon.children[1]?.getAttribute("d"), "m6 6 12 12");
+    }
+
+    const cloud = createIcon("cloud") as unknown as MockSvgElement;
+    assert.ok(cloud);
+    assert.equal(cloud.getAttribute("viewBox"), "0 0 24 24");
+    assert.equal(cloud.getAttribute("stroke"), "currentColor");
+    assert.equal(cloud.children.length, 1);
+    assert.equal(cloud.children[0]?.getAttribute("d"), "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z");
+
+    const pencil = createIcon("pencil") as unknown as MockSvgElement;
+    assert.ok(pencil);
+    assert.equal(pencil.getAttribute("viewBox"), "0 0 24 24");
+    assert.equal(pencil.getAttribute("stroke"), "currentColor");
+    assert.equal(pencil.children.length, 2);
+});
+
+test("createIcon parses custom marks retaining local definitions", () =>
+{
+    const autonom = createIcon("autonom") as unknown as MockSvgElement;
+    assert.ok(autonom);
+    assert.equal(autonom.tagName, "svg");
+    assert.equal(autonom.getAttribute("viewBox"), "0 0 48 48");
+    assert.equal(autonom.children.length, 1);
+    assert.equal(autonom.children[0]?.tagName, "path");
+    assert.equal(autonom.children[0]?.getAttribute("fill-rule"), "evenodd");
+
+    const autonomFill = createIcon("autonom-fill") as unknown as MockSvgElement;
+    assert.ok(autonomFill);
+    assert.equal(autonomFill.tagName, "svg");
+    assert.equal(autonomFill.getAttribute("viewBox"), "0 0 48 48");
+    assert.equal(autonomFill.children.length, 1);
+    assert.equal(autonomFill.children[0]?.tagName, "path");
+    assert.equal(autonomFill.children[0]?.getAttribute("fill-rule"), "evenodd");
 });
 
 test("createIcon returns undefined for unknown icon without fallback", () =>
@@ -175,7 +235,7 @@ test("createIcon and sectionIcon resolve fallback when primary icon is unknown",
 
     const defaultSection = sectionIcon(undefined) as unknown as MockSvgElement;
     assert.ok(defaultSection);
-    assert.equal(defaultSection.children.length, 1);
+    assert.equal(defaultSection.children.length, 2);
     assert.equal(defaultSection.children[0]?.tagName, "path");
 
     const customSection = sectionIcon("cog") as unknown as MockSvgElement;

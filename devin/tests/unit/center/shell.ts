@@ -341,7 +341,7 @@ test("mode switch toolbar replaces .agent-editor-switch with Autonom, Devin Clou
         const editorPath = editorSvg.querySelector<MockElement>("path");
         assert.ok(editorPath);
         assert.equal(editorPath.getAttribute("fill-rule"), null);
-        assert.ok(editorPath.getAttribute("d")?.includes("M15 5l4 4"));
+        assert.ok(editorPath.getAttribute("d")?.includes("m15 5 4 4"));
     }
     finally
     {
@@ -388,7 +388,7 @@ test("mode switch toolbar swaps active and inactive state attributes (aria-press
         assert.equal(cloudBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
         assert.equal(editorBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
         const editorLineD = editorBtn.querySelector<MockElement>("path")?.getAttribute("d")!;
-        assert.ok(editorLineD.includes("M15 5l4 4"));
+        assert.ok(editorLineD.includes("m15 5 4 4"));
 
         // Switch to devin-cloud
         cloudBtn.click();
@@ -412,7 +412,7 @@ test("mode switch toolbar swaps active and inactive state attributes (aria-press
         assert.equal(editorBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "currentColor");
         assert.equal(cloudBtn.querySelector<MockElement>("svg")?.getAttribute("fill"), "none");
         const editorFillD = editorBtn.querySelector<MockElement>("path")?.getAttribute("d")!;
-        assert.ok(!editorFillD.includes("M15 5l4 4"));
+        assert.ok(!editorFillD.includes("m15 5 4 4"));
         assert.notEqual(editorFillD, editorLineD);
 
         // Switch back to autonom

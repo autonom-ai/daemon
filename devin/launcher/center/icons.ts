@@ -1,21 +1,40 @@
-import closeMarkup from "../../../assets/icons/close.svg";
-import cogMarkup from "../../../assets/icons/cog.svg";
-import plusMarkup from "../../../assets/icons/plus.svg";
-import searchMarkup from "../../../assets/icons/search.svg";
-import shieldLockMarkup from "../../../assets/icons/shield-lock.svg";
-import slidersMarkup from "../../../assets/icons/sliders.svg";
-import timerMarkup from "../../../assets/icons/timer.svg";
+import autonomFillMarkup from "../../../assets/icons/autonom-fill.svg";
+import autonomLineMarkup from "../../../assets/icons/autonom.svg";
 
-const markups: Record<string, string> = {
-    search: searchMarkup,
-    plus: plusMarkup,
-    sliders: slidersMarkup,
-    close: closeMarkup,
-    timer: timerMarkup,
-    "shield-lock": shieldLockMarkup,
-    "shield-check": shieldLockMarkup,
-    cog: cogMarkup,
-    settings: cogMarkup,
+import {
+    Cloud,
+    Cog,
+    Pencil,
+    Plus,
+    Search,
+    ShieldCheck,
+    ShieldLock,
+    Sliders,
+    Timer,
+    X,
+    createElement,
+    type IconNode,
+} from "lucide";
+
+const lucideIcons: Record<string, IconNode> = {
+    timer: Timer,
+    "shield-lock": ShieldLock,
+    "shield-check": ShieldLock,
+    shieldCheck: ShieldCheck,
+    cog: Cog,
+    settings: Cog,
+    sliders: Sliders,
+    plus: Plus,
+    search: Search,
+    x: X,
+    close: X,
+    cloud: Cloud,
+    pencil: Pencil,
+};
+
+const customMarkups: Record<string, string> = {
+    autonom: autonomLineMarkup,
+    "autonom-fill": autonomFillMarkup,
 };
 
 function parseSvg(markup: string): SVGSVGElement
@@ -65,11 +84,22 @@ function parseSvg(markup: string): SVGSVGElement
 
 export function createIcon(name: string | undefined, fallback?: string): SVGSVGElement | undefined
 {
-    const markup = (name && markups[name]) || (fallback && markups[fallback]);
-    if (!markup)
+    const resolvedName = (name && (lucideIcons[name] || customMarkups[name])) ? name
+        : (fallback && (lucideIcons[fallback] || customMarkups[fallback])) ? fallback
+        : undefined;
+
+    if (!resolvedName)
         return undefined;
 
-    return parseSvg(markup);
+    const lucideNode = lucideIcons[resolvedName];
+    if (lucideNode)
+        return createElement(lucideNode, { "aria-hidden": "true" }) as SVGSVGElement;
+
+    const markup = customMarkups[resolvedName];
+    if (markup)
+        return parseSvg(markup);
+
+    return undefined;
 }
 
 export function sectionIcon(name: string | undefined, fallback = "plus"): SVGSVGElement

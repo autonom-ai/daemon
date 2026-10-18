@@ -1,10 +1,8 @@
 import autonomFillMarkup from "../../../assets/icons/autonom-fill.svg";
 import autonomLineMarkup from "../../../assets/icons/autonom.svg";
-import cloudFillMarkup from "../../../assets/icons/cloud-fill.svg";
-import cloudLineMarkup from "../../../assets/icons/cloud.svg";
-import pencilFillMarkup from "../../../assets/icons/pencil-fill.svg";
-import pencilLineMarkup from "../../../assets/icons/pencil.svg";
 import uiCss from "../../../assets/ui.css";
+
+import { Cloud, Pencil, type IconNode } from "lucide";
 
 const leaseTimeout = 30000;
 
@@ -31,10 +29,23 @@ function iconSet(lineMarkup: string, fillMarkup: string): ShellIcon
     };
 }
 
+function iconSetFromNode(lineNode: IconNode, fillNode?: IconNode): ShellIcon
+{
+    const extract = (node: IconNode) =>
+        node.map(([, attrs]) => attrs.d).filter(Boolean).join(" ");
+
+    return {
+        viewBox: "0 0 24 24",
+        line: extract(lineNode),
+        fill: fillNode ? extract(fillNode) : extract(lineNode),
+        stroked: true,
+    };
+}
+
 const shellIcons: Record<Mode, ShellIcon> = {
     autonom: iconSet(autonomLineMarkup, autonomFillMarkup),
-    "devin-cloud": iconSet(cloudLineMarkup, cloudFillMarkup),
-    editor: iconSet(pencilLineMarkup, pencilFillMarkup),
+    "devin-cloud": iconSetFromNode(Cloud),
+    editor: iconSetFromNode(Pencil, Pencil.slice(0, 1)),
 };
 
 const acpIconSelector = "svg, img, span[style*='mask-image']";

@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "private": true,
   "license": "AGPL-3.0-only",
-  "engines": { "node": ">=22.0.0" },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
     "build": "node build.mjs",
@@ -13,6 +15,7 @@
     "launch": "npm run build && node ../dist/launcher.js"
   },
   "dependencies": {
+    "lucide": "1.59.0",
     "yaml": "2.9.1"
   },
   "devDependencies": {
