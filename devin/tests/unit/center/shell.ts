@@ -3,7 +3,7 @@ import { prepareShell } from "../../../launcher/center/shell";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-const acpIconSelector = "svg, img, [style*='mask-image'], [role='img'], div:not(:has(*)), span:not(:has(*))";
+const acpIconSelector = "svg, img, [style*='mask-image'], [role='img'], .codicon-devin-logo, div:not(:has(*)), span:not(:has(*))";
 
 class StubStyle
 {
@@ -48,6 +48,11 @@ class MockElement
             setProperty: (name: string, value: string) => { this.style[name] = value; },
             removeProperty: (name: string) => { delete this.style[name]; },
         };
+    }
+
+    get className(): string
+    {
+        return this.getAttribute("class") ?? "";
     }
 
     setAttribute(name: string, value: string): void
@@ -117,6 +122,26 @@ class MockElement
         return { width: 100, height: 24 };
     }
 
+    get classList(): { contains: (name: string) => boolean }
+    {
+        return {
+            contains: (name: string) =>
+                (this.getAttribute("class") ?? "").split(/\s+/).includes(name),
+        };
+    }
+
+    closest(selector: string): MockElement | null
+    {
+        let current: MockElement | null = this;
+        while (current)
+        {
+            if (matchesSelector(current, selector))
+                return current;
+            current = current.parentElement;
+        }
+        return null;
+    }
+
     querySelector<T = MockElement>(selector: string): T | null
     {
         return (this.querySelectorAll<T>(selector)[0] ?? null) as T | null;
@@ -161,6 +186,10 @@ function matchesSelector(elem: MockElement, selector: string): boolean
         const mode = selector.slice('button[data-autonom-mode="'.length, -2);
         return elem.tagName === "BUTTON" && elem.dataset.autonomMode === mode;
     }
+    if (selector === "[data-resource-name]")
+        return elem.getAttribute("data-resource-name") !== null;
+    if (selector.startsWith(".") && !selector.includes(" "))
+        return (elem.getAttribute("class") ?? "").split(/\s+/).includes(selector.slice(1));
     return false;
 }
 
@@ -197,6 +226,16 @@ function providerElement(providerId: string): any
     const element = hostElement();
     const provider = fiberNode(0, { providerId, icon: "native" });
     fiberChild(provider, hostFiber(element));
+    return element;
+}
+
+function sessionElement(providerId: string): any
+{
+    const element = hostElement();
+    const wrapper = hostFiber(hostElement());
+    const session = fiberNode(0, { session: { providerId }, isWaiting: false, size: 14 });
+    fiberChild(session, wrapper);
+    fiberChild(wrapper, hostFiber(element));
     return element;
 }
 
@@ -350,6 +389,260 @@ test("registry icons leave providers without registry icons untouched", () =>
     {
         assert.equal(element.style.getPropertyValue("mask-image"), "");
         assert.equal(element.style.getPropertyValue("background-color"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons apply to session icon glyph elements", () =>
+{
+    const element = sessionElement("devin-better-antigravity");
+    mountDom([element]);
+
+    const mask = `url("data:image/svg+xml;base64,QUJD")`;
+    const shell = prepareShell("", { "devin-better-antigravity": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), mask);
+        assert.equal(element.style.getPropertyValue("background-color"), "currentColor");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+
+    assert.equal(element.style.getPropertyValue("mask-image"), "");
+    assert.equal(element.style.getPropertyValue("background-color"), "");
+});
+
+test("registry icons leave session providers without registry icons untouched", () =>
+{
+    const element = sessionElement("devin-cloud");
+    mountDom([element]);
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), "");
+        assert.equal(element.style.getPropertyValue("background-color"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons do not apply inside session rows lacking icon props", () =>
+{
+    const element = hostElement();
+    const wrapper = hostFiber(hostElement());
+    const row = fiberNode(0, { session: { providerId: "devin-autonom" }, isWaiting: false });
+    fiberChild(row, wrapper);
+    fiberChild(wrapper, hostFiber(element));
+    mountDom([element]);
+
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), "");
+        assert.equal(element.style.getPropertyValue("background-color"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons do not apply inside component-wrapped session subtrees", () =>
+{
+    const element = hostElement();
+    const wrapper = hostFiber(hostElement());
+    const activity = fiberNode(0, { activity: "idle" });
+    const session = fiberNode(0, { session: { providerId: "devin-autonom" }, isWaiting: false, size: 14 });
+    fiberChild(session, activity);
+    fiberChild(activity, wrapper);
+    fiberChild(wrapper, hostFiber(element));
+    mountDom([element]);
+
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), "");
+        assert.equal(element.style.getPropertyValue("background-color"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons do not apply to sibling subtrees of session icons", () =>
+{
+    const element = hostElement();
+    const wrapper = hostFiber(hostElement());
+    const sibling = hostFiber(hostElement());
+    const session = fiberNode(0, { session: { providerId: "devin-autonom" }, isWaiting: false, size: 14 });
+    fiberChild(session, wrapper, sibling);
+    fiberChild(sibling, hostFiber(element));
+    mountDom([element]);
+
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(element.style.getPropertyValue("mask-image"), "");
+        assert.equal(element.style.getPropertyValue("background-color"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons apply to session picker codicon rows", () =>
+{
+    const row = new MockElement("div");
+    row.setAttribute("class", "quick-input-list-row");
+    const leading = new MockElement("span");
+    leading.setAttribute("class", "quick-input-list-leading-icon codicon codicon-devin-logo");
+    row.appendChild(leading);
+    const label = new MockElement("div");
+    label.setAttribute("class", "monaco-icon-label");
+    row.appendChild(label);
+    const icon = new MockElement("div");
+    icon.setAttribute("class", "quick-input-list-icon codicon codicon-devin-logo");
+    label.appendChild(icon);
+    const description = new MockElement("span");
+    description.setAttribute("class", "monaco-icon-description-container");
+    description.textContent = "devin-autonom";
+    label.appendChild(description);
+    mountDom([leading, icon]);
+
+    const mask = `url("data:image/svg+xml;base64,QUJD")`;
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        for (const element of [leading, icon])
+        {
+            assert.equal(element.getAttribute("data-acp-icon"), "");
+            assert.equal(element.style.getPropertyValue("--acp-icon"), mask);
+            assert.equal(element.style.getPropertyValue("mask-image"), "");
+        }
+    }
+    finally
+    {
+        shell.dispose();
+    }
+
+    assert.equal(leading.getAttribute("data-acp-icon"), null);
+    assert.equal(leading.style.getPropertyValue("--acp-icon"), "");
+    assert.equal(icon.getAttribute("data-acp-icon"), null);
+    assert.equal(icon.style.getPropertyValue("--acp-icon"), "");
+});
+
+test("registry icons leave session picker codicons for unregistered providers untouched", () =>
+{
+    const row = new MockElement("div");
+    row.setAttribute("class", "quick-input-list-row");
+    const icon = new MockElement("div");
+    icon.setAttribute("class", "quick-input-list-icon codicon codicon-devin-logo");
+    const label = new MockElement("div");
+    label.setAttribute("class", "monaco-icon-label");
+    label.appendChild(icon);
+    const description = new MockElement("span");
+    description.setAttribute("class", "monaco-icon-description-container");
+    description.textContent = "devin-cli";
+    label.appendChild(description);
+    row.appendChild(label);
+    mountDom([icon]);
+
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(icon.getAttribute("data-acp-icon"), null);
+        assert.equal(icon.style.getPropertyValue("--acp-icon"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons apply to session tab codicons via session fibers", () =>
+{
+    const title = hostElement();
+    const row = fiberNode(0, { session: { sessionId: "acp/devin-autonom/witty-panda", providerId: "devin-autonom" } });
+    fiberChild(row, hostFiber(title));
+
+    const tab = new MockElement("div");
+    tab.setAttribute("class", "tab cascade-tab");
+    tab.setAttribute("data-resource-name", "witty-panda");
+    const label = new MockElement("div");
+    label.setAttribute("class", "monaco-icon-label codicon-devin-logo");
+    tab.appendChild(label);
+    mountDom([title, label]);
+
+    const mask = `url("data:image/svg+xml;base64,QUJD")`;
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(title.style.getPropertyValue("mask-image"), "");
+        assert.equal(label.getAttribute("data-acp-icon"), "");
+        assert.equal(label.style.getPropertyValue("--acp-icon"), mask);
+    }
+    finally
+    {
+        shell.dispose();
+    }
+
+    assert.equal(label.getAttribute("data-acp-icon"), null);
+    assert.equal(label.style.getPropertyValue("--acp-icon"), "");
+});
+
+test("registry icons leave session tab codicons with ambiguous slugs untouched", () =>
+{
+    const first = hostElement();
+    const cli = fiberNode(0, { session: { sessionId: "acp/devin-cli/witty-panda", providerId: "devin-cli" } });
+    fiberChild(cli, hostFiber(first));
+    const second = hostElement();
+    const autonom = fiberNode(0, { session: { sessionId: "acp/devin-autonom/witty-panda", providerId: "devin-autonom" } });
+    fiberChild(autonom, hostFiber(second));
+
+    const tab = new MockElement("div");
+    tab.setAttribute("class", "tab cascade-tab");
+    tab.setAttribute("data-resource-name", "witty-panda");
+    const label = new MockElement("div");
+    label.setAttribute("class", "monaco-icon-label codicon-devin-logo");
+    tab.appendChild(label);
+    mountDom([first, second, label]);
+
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(label.getAttribute("data-acp-icon"), null);
+        assert.equal(label.style.getPropertyValue("--acp-icon"), "");
+    }
+    finally
+    {
+        shell.dispose();
+    }
+});
+
+test("registry icons leave session tab codicons without session context untouched", () =>
+{
+    const tab = new MockElement("div");
+    tab.setAttribute("class", "tab cascade-tab");
+    tab.setAttribute("data-resource-name", "unknown-slug");
+    const label = new MockElement("div");
+    label.setAttribute("class", "monaco-icon-label codicon-devin-logo");
+    tab.appendChild(label);
+    mountDom([label]);
+
+    const shell = prepareShell("", { "devin-autonom": "data:image/svg+xml;base64,QUJD" });
+    try
+    {
+        assert.equal(label.getAttribute("data-acp-icon"), null);
+        assert.equal(label.style.getPropertyValue("--acp-icon"), "");
     }
     finally
     {

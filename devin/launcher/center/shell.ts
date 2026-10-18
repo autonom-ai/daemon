@@ -48,7 +48,22 @@ const shellIcons: Record<Mode, ShellIcon> = {
     editor: iconSetFromNode(Pencil, Pencil.slice(0, 1)),
 };
 
-const acpIconSelector = "svg, img, [style*='mask-image'], [role='img'], div:not(:has(*)), span:not(:has(*))";
+const acpIconSelector = "svg, img, [style*='mask-image'], [role='img'], .codicon-devin-logo, div:not(:has(*)), span:not(:has(*))";
+const acpCodiconSheet = `[data-acp-icon]:before {
+    content: "" !important;
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    background-color: currentColor;
+    mask-image: var(--acp-icon);
+    -webkit-mask-image: var(--acp-icon);
+    mask-size: contain;
+    -webkit-mask-size: contain;
+    mask-repeat: no-repeat;
+    -webkit-mask-repeat: no-repeat;
+    mask-position: left center;
+    -webkit-mask-position: left center;
+}`;
 const acpIconStyle: [string, string][] = [
     ["background-color", "currentColor"],
     ["font-size", "0"],
@@ -75,6 +90,9 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
     const style = document.createElement("style");
     style.textContent = css;
     document.head.appendChild(style);
+    const acpStyle = document.createElement("style");
+    acpStyle.textContent = acpCodiconSheet;
+    document.head.appendChild(acpStyle);
     const switches = new Map<HTMLElement, {
         host: HTMLElement;
         display: string;
@@ -83,6 +101,7 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
     }>();
     const patchedIcons = new Set<Element>();
     const resolvedIcons = new Map<string, string | null>();
+    const acpSessionProviders = new Map<string, string | null>();
     let acpIcons = icons ?? {};
     let requested: "autonom" | "devin-cloud" = "autonom";
     let lease: ReturnType<typeof setTimeout> | undefined;
@@ -237,13 +256,55 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
         for (let index = 0; fiber && index < 16; index++, fiber = fiber.return)
         {
             const props = fiber.memoizedProps;
+            acpRecordSessions(props);
             const providerId = acpProviderId(props);
             if (providerId === undefined)
                 continue;
 
             return acpIconSlot(element, target, fiber, props) ? acpIcons[providerId] : undefined;
         }
-        return undefined;
+        return acpCodiconIcon(element);
+    }
+
+    function acpRecordSessions(props: any): void
+    {
+        for (const value of Object.values(props ?? {}))
+        {
+            if (Array.isArray(value))
+                value.forEach(acpRecordSession);
+            else
+                acpRecordSession(value);
+        }
+    }
+
+    function acpRecordSession(session: unknown): void
+    {
+        if (!session || typeof session !== "object")
+            return;
+        const { sessionId, providerId } = session as { sessionId?: unknown; providerId?: unknown };
+        if (typeof sessionId !== "string" || typeof providerId !== "string")
+            return;
+        const slug = sessionId.split("/").pop();
+        if (!slug)
+            return;
+        const known = acpSessionProviders.get(slug);
+        if (known === undefined)
+            acpSessionProviders.set(slug, providerId);
+        else if (known !== providerId)
+            acpSessionProviders.set(slug, null);
+    }
+
+    function acpCodiconIcon(element: Element): string | undefined
+    {
+        if (!element.classList?.contains("codicon-devin-logo"))
+            return undefined;
+        const scope = element.closest(".monaco-icon-label") ?? element.closest(".quick-input-list-row");
+        const description = scope?.querySelector(".monaco-icon-description-container")?.textContent?.trim();
+        if (description && acpIcons[description])
+            return acpIcons[description];
+        const slug = element.closest("[data-resource-name]")?.getAttribute("data-resource-name");
+        const providerId = slug ? acpSessionProviders.get(slug) : undefined;
+        return providerId ? acpIcons[providerId] : undefined;
     }
 
     function acpProviderId(props: any): string | undefined
@@ -254,11 +315,26 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
             return props.agent.id;
         if (typeof props?.agentId === "string")
             return props.agentId;
+        if (typeof props?.session?.providerId === "string")
+            return props.session.providerId;
         return undefined;
     }
 
     function acpIconSlot(element: Element, target: any, fiber: any, props: any): boolean
     {
+        if (typeof props?.session?.providerId === "string" && acpProviderId(props) === props.session.providerId)
+        {
+            const child = fiber.child;
+            if (!("isWaiting" in props && "size" in props) || !child || child.tag !== 5)
+                return false;
+            for (let probe = target; probe && probe !== fiber; probe = probe.return)
+            {
+                if (probe === child)
+                    return true;
+            }
+            return false;
+        }
+
         const icon = props?.icon;
         if (icon && typeof icon === "object")
         {
@@ -324,6 +400,13 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
 
         const style = (element as HTMLElement).style;
         const mask = `url("${url.replace(/["\\]/g, "\\$&")}")`;
+        const className = typeof element.className === "string" ? element.className : "";
+        if (/\bcodicon-/.test(className))
+        {
+            element.setAttribute("data-acp-icon", "");
+            style.setProperty("--acp-icon", mask);
+            return;
+        }
         for (const [name, value] of acpIconStyle)
         {
             const next = name.endsWith("mask-image") ? mask : value;
@@ -337,6 +420,8 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
         const style = (element as HTMLElement).style;
         for (const [name] of acpIconStyle)
             style.removeProperty(name);
+        style.removeProperty("--acp-icon");
+        element.removeAttribute?.("data-acp-icon");
     }
 
     function renderAcpIcons(): void
@@ -411,14 +496,11 @@ export function prepareShell(css = uiCss, icons?: Record<string, string>): any
             }
 
             for (const element of patchedIcons)
-            {
-                const style = (element as HTMLElement).style;
-                for (const [name] of acpIconStyle)
-                    style.removeProperty(name);
-            }
+                clearAcpIcon(element);
 
             patchedIcons.clear();
             style.remove();
+            acpStyle.remove();
             if (target.__autonomShell === shell)
                 delete target.__autonomShell;
         },
