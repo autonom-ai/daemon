@@ -2,7 +2,6 @@ module daemon.interop.devin.session.transcript;
 
 import daemon.http;
 import daemon.interop.call : Call;
-import daemon.interop.devin.db : readSessionMessages;
 import daemon.interop.devin.history : executionRecord, sessionForExecution;
 import daemon.interop.devin.session : Session;
 import daemon.interop.devin.session.control : logPath;
@@ -64,7 +63,7 @@ private void handleTranscript(string id, Output output)
 
             ret["session"] = found is null ? JSONValue(["id": JSONValue(session)]) : found.toJSON();
             try
-                ret["messages"] = readSessionMessages(daemon.api.bridge.sessionDatabase, session);
+                ret["messages"] = daemon.api.bridge.catalog.messages(session);
             catch (Exception)
                 ret["messages"] = JSONValue.emptyArray;
 

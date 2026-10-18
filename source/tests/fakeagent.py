@@ -10,6 +10,9 @@ import urllib.request
 
 ROOT = os.environ.get("AUTONOM_FAKE_DIR", os.getcwd())
 LOCK_DIR = os.environ.get("AUTONOM_FAKE_LOCKDIR", os.path.join(ROOT, "locks"))
+DATABASE = os.environ.get("CHISEL_SESSION_DB", os.path.join(os.path.dirname(LOCK_DIR), "sessions.db"))
+if os.environ.get("CHISEL_SESSION_DB"):
+    LOCK_DIR = os.path.join(os.path.dirname(DATABASE), "session_locks")
 PORT = os.environ.get("AUTONOM_PORT", "8080")
 
 CONFIG_OPTIONS = [
@@ -49,8 +52,8 @@ def path(name):
 
 
 def save_session(session_id, directory=None, meta=None):
-    database = os.path.join(os.path.dirname(LOCK_DIR), "sessions.db")
-    with sqlite3.connect(database) as connection:
+    os.makedirs(os.path.dirname(DATABASE), exist_ok=True)
+    with sqlite3.connect(DATABASE) as connection:
         connection.execute("create table if not exists sessions (id text primary key, model text default '', "
                            "working_directory text, title text default '', agent_mode text default 'ask', "
                            "backend_type text default 'windsurf', created_at integer default 0, "

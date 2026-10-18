@@ -12,7 +12,13 @@ scheduling. `daemon.interop.devin.bridge.Bridge` owns canonical Devin `Session`
 handles; `interop/devin/session/` owns their controls, HTTP routes, permissions,
 and transcript queries.
 Root `interop/` contains provider-neutral identity, calls, access, and protocols. Session discovery reads the CLI's
-SQLite database read-only; it does not grant control. A foreign session lock
+SQLite databases read-only; it does not grant control. New Autonom CLI children use
+`CHISEL_SESSION_DB=<dataDir>/cli/sessions.db`, with locks beside that database.
+The Command Center merges that catalog with the native Devin catalog, preferring
+Autonom rows for duplicate IDs. Resume, removal, transcript reads, and lock checks
+use the catalog that owns the session. Credentials and other XDG data stay in
+their normal locations. Existing tagged sessions require an offline migration;
+the daemon never moves or writes CLI rows. A foreign session lock
 means loaded elsewhere, not active generation. Profiles retain assignments to
 canonical handles independently of discovery and admission.
 

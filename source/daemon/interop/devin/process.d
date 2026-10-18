@@ -13,14 +13,16 @@ import std.process : Config, environment, Pid, spawnProcess, tryWait;
 import std.stdio : File;
 
 /// Prevent inherited Desktop routing from redirecting the Devin CLI back into ACP.
-string[string] cliEnvironment()
+string[string] cliEnvironment(string database = null)
 {
     string[string] ret = environment.toAA();
     ret.remove("ACP_BACKEND");
+    if (database.length)
+        ret["CHISEL_SESSION_DB"] = database;
     return ret;
 }
 
-CallResult removeSession(string command, Call call)
+CallResult removeSession(string command, Call call, string database = null)
 {
     File output = openFile(call.outputPath, O_RDWR | O_CREAT | O_APPEND);
     File errors = openFile(call.errorPath, O_RDWR | O_CREAT | O_APPEND);
@@ -34,7 +36,7 @@ CallResult removeSession(string command, Call call)
     Config options = Config.newEnv | Config.retainStdin | Config.retainStdout | Config.retainStderr;
     options.preExecFunction = &createProcessGroup;
     Pid process = spawnProcess([command, "rm", "--force", "--", call.sessionId],
-        input, output, errors, cliEnvironment(), options);
+        input, output, errors, cliEnvironment(database), options);
     bool reaped;
     scope(exit)
     {

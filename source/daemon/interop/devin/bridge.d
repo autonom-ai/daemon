@@ -8,7 +8,7 @@ import daemon.interop.devin.acp : runAcp;
 import daemon.interop.devin.calls;
 import daemon.interop.devin.connection;
 import daemon.interop.devin.control : runControl;
-import daemon.interop.devin.db : readSessionCatalog;
+import daemon.interop.devin.catalog : Catalog;
 import daemon.interop.devin.history : loadExecutionIndex, recordExecution;
 import daemon.interop.devin.options : normalizeMode;
 import daemon.interop.devin.process : removeSession;
@@ -37,8 +37,7 @@ package(daemon.interop.devin):
         bool active;
     }
 
-    const string sessionLockDir;
-    const string sessionDatabase;
+    Catalog catalog;
     const string dataDir;
     const string mcpPort;
     Mutex controlMutex;
@@ -67,8 +66,8 @@ public:
     {
         command = configuration.devinCommand;
         logDir = buildPath(configuration.dataDir, "sessions");
-        sessionLockDir = configuration.sessionLockDir;
-        sessionDatabase = configuration.sessionDatabase;
+        catalog = new Catalog(buildPath(configuration.dataDir, "cli", "sessions.db"),
+            configuration.sessionDatabase, configuration.sessionLockDir);
         dataDir = configuration.dataDir;
         mcpPort = environment.get("AUTONOM_PORT", "8080");
         executionTimeout = configuration.executionTimeout;
@@ -131,7 +130,7 @@ public:
                 entry.bindCall(call);
         }
 
-        foreach (data; readSessionCatalog(sessionDatabase))
+        foreach (data; catalog.list())
         {
             Session.validateId(data.id);
             if (data.id in removed)
@@ -237,6 +236,7 @@ package(daemon.interop.devin):
         this.recordExecution(call);
         call._timeout = call.kind == CallKind.Remove ? 10.seconds : executionTimeout;
         call.deadline = MonoTime.currTime + call.timeout;
+        string database = catalog.databaseFor(call.sessionId);
         call.monitor = new Thread({
             CallResult result;
             try
@@ -248,7 +248,7 @@ package(daemon.interop.devin):
                     if (call.stopped)
                         result.cancelled = true;
                     else
-                        result = removeSession(command, call);
+                        result = removeSession(command, call, database);
                 }
                 else if (connection.length)
                 {
@@ -260,7 +260,7 @@ package(daemon.interop.devin):
                 else
                 {
                     result = runAcp(call, command, call.workspace, call.sessionId, prompt,
-                        call.model, call.mode, runToken, mcpPort, dataDir, access, compactFirst);
+                        call.model, call.mode, runToken, mcpPort, dataDir, access, compactFirst, database);
                 }
             }
             catch (Exception error)

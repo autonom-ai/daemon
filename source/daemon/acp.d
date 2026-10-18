@@ -113,7 +113,7 @@ int runAcpHost(string devinCommand = null, string configPath = null)
     { }
 
     installHooks();
-    string[string] child = cliEnvironment();
+    string[string] child = cliEnvironment(data.length ? buildPath(data, "cli", "sessions.db") : null);
     if (data.length)
         child["AUTONOM_DATA_DIR"] = data;
 
