@@ -104,7 +104,7 @@ dub run --compiler=ldc2 --config=unit --build=unittest
 python3 source/mcp/tests.py
 ```
 
-Model simulation establishes protocol and lifecycle behavior; isolated real CLI integration establishes the catalog and metadata contract. Neither proves native Desktop presentation. Follow the [Command Center contract](COMMAND_CENTER.md) before deployment or live validation.
+Model simulation establishes protocol and lifecycle behavior; isolated real CLI integration establishes the catalog and metadata contract. Neither proves native Desktop presentation. Follow the [Command Center contract](launcher/patches/COMMAND_CENTER.md) before deployment or live validation.
 
 ## Reading more
 
