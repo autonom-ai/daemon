@@ -38,7 +38,7 @@ const acpIconStyle: [string, string][] = [
     ["-webkit-mask-image", ""],
 ];
 
-export function prepareShell(css = uiCss, icons: Record<string, string> = {}): any
+export function prepareShell(css = uiCss, icons?: Record<string, string>): any
 {
     const target = globalThis as any;
     if (target.__autonomShell)
@@ -58,7 +58,7 @@ export function prepareShell(css = uiCss, icons: Record<string, string> = {}): a
         editor: HTMLButtonElement;
     }>();
     const patchedIcons = new Set<Element>();
-    let acpIcons = icons;
+    let acpIcons = icons ?? {};
     let requested: "autonom" | "devin-cloud" = "autonom";
     let lease: ReturnType<typeof setTimeout> | undefined;
     let frame: ReturnType<typeof setTimeout> | undefined;
@@ -204,17 +204,38 @@ export function prepareShell(css = uiCss, icons: Record<string, string> = {}): a
         return undefined;
     }
 
+    function applyAcpIcon(element: Element, icon: string): void
+    {
+        const style = (element as HTMLElement).style;
+        const mask = `url("${icon.replace(/["\\]/g, "\\$&")}")`;
+        for (const [name, value] of acpIconStyle)
+        {
+            const next = name.endsWith("mask-image") ? mask : value;
+            if (style.getPropertyValue(name) !== next)
+                style.setProperty(name, next);
+        }
+    }
+
+    function clearAcpIcon(element: Element): void
+    {
+        const style = (element as HTMLElement).style;
+        for (const [name] of acpIconStyle)
+            style.removeProperty(name);
+    }
+
     function renderAcpIcons(): void
     {
         for (const element of patchedIcons)
         {
-            if (element.isConnected && acpRegistryIcon(element) !== undefined)
+            const icon = element.isConnected ? acpRegistryIcon(element) : undefined;
+            if (icon === undefined)
+            {
+                clearAcpIcon(element);
+                patchedIcons.delete(element);
                 continue;
+            }
 
-            const style = (element as HTMLElement).style;
-            for (const [name] of acpIconStyle)
-                style.removeProperty(name);
-            patchedIcons.delete(element);
+            applyAcpIcon(element, icon);
         }
 
         if (!Object.keys(acpIcons).length)
@@ -226,14 +247,7 @@ export function prepareShell(css = uiCss, icons: Record<string, string> = {}): a
             if (icon === undefined)
                 continue;
 
-            const style = (element as HTMLElement).style;
-            const mask = `url("${icon.replace(/["\\]/g, "\\$&")}")`;
-            if (style.getPropertyValue("mask-image") !== mask)
-            {
-                for (const [name, value] of acpIconStyle)
-                    style.setProperty(name, name.endsWith("mask-image") ? mask : value);
-            }
-
+            applyAcpIcon(element, icon);
             patchedIcons.add(element);
         }
     }

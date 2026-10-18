@@ -156,10 +156,14 @@ async function main(): Promise<void>
                 }
 
                 await session.evaluate(`(() => {
-                    if (!globalThis.__autonomShell) {
+                    const shell = globalThis.__autonomShell;
+                    if (!shell) {
                         ${runtimeSource}
                         AutonomRuntime.prepareShell(${JSON.stringify(content.css)}, ${icons});
-                    } else globalThis.__autonomShell.heartbeat();
+                    } else {
+                        shell.update(${JSON.stringify(content.css)}, ${icons});
+                        shell.heartbeat();
+                    }
                 })()`);
                 if (!await runtimeStatus(session))
                     await install(session);
