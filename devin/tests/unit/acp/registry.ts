@@ -33,6 +33,7 @@ test("the agent is registered and enabled when no files exist", async () =>
         assert.equal(registry.agents.length, 1);
         const agent = registry.agents[0];
         assert.equal(agent.id, acpAgentId);
+        assert.equal(Object.hasOwn(agent, "icon"), false);
         const platform = Object.keys(agent.distribution.binary)[0]!;
         assert.equal(agent.distribution.binary[platform].args[0], "--config");
 
@@ -56,8 +57,9 @@ test("a stale Autonom entry is replaced without dropping other agents", async ()
         await writeFile(registryPath, JSON.stringify({
             version: "1.0.0",
             agents: [
-                { id: "devin-cli", name: "Devin Local" },
-                { id: acpAgentId, name: "Stale", distribution: { binary: { "linux-x86_64": { cmd: "/old/acp" } } } },
+                { id: "devin-cli", name: "Devin Local", custom: "untouched" },
+                { id: acpAgentId, name: "Stale", icon: "./custom icon.svg", custom: { preserved: true },
+                    distribution: { binary: { "linux-x86_64": { cmd: "/old/acp" } } } },
             ],
         }));
         await writeFile(settingsPath, JSON.stringify({
@@ -71,6 +73,9 @@ test("a stale Autonom entry is replaced without dropping other agents", async ()
         const registry = JSON.parse(await readFile(registryPath, "utf8"));
         assert.deepEqual(registry.agents.map((agent: { id: string }) => agent.id), ["devin-cli", acpAgentId]);
         assert.equal(registry.agents[1].distribution.binary["linux-x86_64"].cmd, binary);
+        assert.equal(registry.agents[1].icon, "./custom icon.svg");
+        assert.deepEqual(registry.agents[1].custom, { preserved: true });
+        assert.equal(registry.agents[0].custom, "untouched");
 
         const settings = JSON.parse(await readFile(settingsPath, "utf8"));
         assert.equal(settings["devin.acp.enabledAgents"]["devin-cli"], true);
@@ -110,7 +115,7 @@ test("settings comments and trailing commas are tolerated", async () =>
     }
 });
 
-test("an already-correct installation is left untouched", async () =>
+test("an already-correct installation preserves its custom icon, metadata, ordering and bytes", async () =>
 {
     const root = await directory();
     try
@@ -119,11 +124,21 @@ test("an already-correct installation is left untouched", async () =>
         const settingsPath = join(root, "settings.json");
         const binary = await command(root);
         await ensureAcpAgent({ command: binary, registryPath, settingsPath });
+        const registry = JSON.parse(await readFile(registryPath, "utf8"));
+        const icon = "  https://example.com/user-owned.svg?unchanged=yes  ";
+        registry.note = { preserved: true };
+        registry.agents[0].icon = icon;
+        registry.agents[0].custom = { nested: ["metadata"] };
+        registry.agents.unshift({ id: "antigravity", icon: "./antigravity.svg", custom: "preserved" });
+        await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
         const registrySource = await readFile(registryPath);
         const settingsSource = await readFile(settingsPath);
         await ensureAcpAgent({ command: binary, registryPath, settingsPath });
         assert.deepEqual(await readFile(registryPath), registrySource);
         assert.deepEqual(await readFile(settingsPath), settingsSource);
+        const retained = JSON.parse(await readFile(registryPath, "utf8"));
+        assert.deepEqual(retained, registry);
+        assert.equal(retained.agents[1].icon, icon);
     }
     finally
     {

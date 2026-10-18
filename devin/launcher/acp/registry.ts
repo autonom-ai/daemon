@@ -1,4 +1,3 @@
-import autonomFillMarkup from "../../../assets/icons/autonom-fill.svg";
 import { object } from "../parse";
 import { readPrivateFile, writePrivateFile } from "../storage";
 
@@ -13,7 +12,6 @@ const acpAgent = {
     version: "0.1.0",
     description: "Devin Local with daemon-owned Autonom sessions and scheduled wakes.",
     license: "AGPL-3.0-only",
-    icon: `data:image/svg+xml;base64,${Buffer.from(autonomFillMarkup).toString("base64")}`,
 };
 
 const enabledAgentKeys = ["devin.acp.enabledAgents", "windsurf.acp.enabledAgents"];
@@ -127,7 +125,7 @@ export async function acpRegistryIcons(registryPath = acpRegistryPath()): Promis
     {
         const entry = object(agent);
         if (typeof entry?.id === "string" && typeof entry.icon === "string" && entry.icon.trim())
-            icons[entry.id] = entry.icon;
+            Object.defineProperty(icons, entry.id, { value: entry.icon, enumerable: true, configurable: true });
     }
     return icons;
 }
@@ -150,14 +148,17 @@ export async function ensureAcpAgent(options: {
     if (options.env && Object.keys(options.env).length)
         binary.env = options.env;
 
+    const registryPath = options.registryPath ?? acpRegistryPath();
+    const registry = await readJsonFile(registryPath);
+    const existing = (Array.isArray(registry.agents) ? registry.agents : [])
+        .map(object).find((agent) => agent?.id === acpAgentId);
+    // Connector registration preserves user-owned metadata, including its icon.
     const entry = {
+        ...existing,
         id: acpAgentId,
         ...acpAgent,
         distribution: { binary: { [platform]: binary } },
     };
-
-    const registryPath = options.registryPath ?? acpRegistryPath();
-    const registry = await readJsonFile(registryPath);
     const agents = (Array.isArray(registry.agents) ? registry.agents : [])
         .filter((agent) => object(agent)?.id !== acpAgentId);
     const next = [...agents, entry];
