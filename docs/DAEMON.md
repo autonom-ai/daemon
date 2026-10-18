@@ -1,137 +1,113 @@
-# Daemon architecture and source cutover
+# Daemon architecture
 
-The daemon runs one persistent Serverino worker. `daemon.api` owns the
-bridge, profiles, coordination streams, pending events, schedules, and policy.
-HTTP handlers validate inputs and invoke those owners. CLI child work runs in
-monitor threads; human permission waits never occupy the HTTP worker.
+The daemon is one persistent Serverino worker plus a small number of threads. Every mutable registry, stream, profile, and schedule lives on that worker. Threads exist to own child processes and to poke the loopback API; none of them mutate state directly.
 
-## Sessions and calls
+| Thread | Owns |
+| --- | --- |
+| Main process | Process lifetime, argument parsing, and the ACP entrypoint when started as `autonom-acp`. |
+| Worker | The HTTP API and all domain state. |
+| Monitor threads | One per owned child: session, execution, and wake children, plus their call state. |
+| Scheduler | Schedule evaluation and wake delivery. It requests loopback refreshes; it does not write state. |
 
-`daemon.interop.provider.IProvider` is the session boundary used by profiles and
-scheduling. `daemon.interop.devin.bridge.Bridge` owns canonical Devin `Session`
-handles; `interop/devin/session/` owns their controls, HTTP routes, permissions,
-and transcript queries.
-Root `interop/` contains provider-neutral identity, calls, access, and protocols. Session discovery reads the CLI's
-SQLite databases read-only; it does not grant control. New Autonom CLI children use
-`CHISEL_SESSION_DB=<dataDir>/cli/sessions.db`, with locks beside that database.
-The Command Center merges that catalog with the native Devin catalog, preferring
-Autonom rows for duplicate IDs. Resume, removal, transcript reads, and lock checks
-use the catalog that owns the session. Credentials and other XDG data stay in
-their normal locations. Existing tagged sessions require an offline migration;
-the daemon never moves or writes CLI rows. A foreign session lock
-means loaded elsewhere, not active generation. Profiles retain assignments to
-canonical handles independently of discovery and admission.
+`daemon.api` assembles the owners. HTTP handlers validate input and call into them; they do not keep state of their own. Human permission waits and child output never occupy the worker.
 
-`GET /api/sessions` returns session objects from the database plus provisional
-live sessions. Optional `directory` and `acp=autonom` filters select workspace
-and persisted connector metadata. Unmarked sessions have unknown origin;
-explicit adoption grants control without inventing historical provenance.
-New/load requests stamp `_meta["autonom/connector"]` for future discovery.
+## Binaries
 
-`Call` represents current asynchronous child work. Existing `/api/executions`
-routes expose call outcomes while their in-memory tickets remain available.
-Settled tickets expire after five minutes or when the registry exceeds 128
-entries; at most eight calls run concurrently. Call tickets are not durable
-history. Existing configuration, data, CLI sessions, and session/output/error
-logs are preserved. Old execution JSON files are left intact and are not
-loaded as evidence of running work. Uncertain wakes are reconciled without
-blindly replaying prompts.
+| Binary | Role |
+| --- | --- |
+| `autonom-daemon` | The HTTP API and domain owner. |
+| `autonom-acp` | The stdio ACP connector Devin Desktop launches. It starts a daemon if none is listening and shuts down the one it started when ACP ends. |
 
-When compaction is requested, `/compact` completes on the loaded ACP connection
-before the resume prompt is sent. Failure or cancellation prevents delivery of
-that prompt. `compactOnResume` and `offlineCompactAfter` select when to compact;
-`compactionThresholds` has been removed. Remove that obsolete key from a
-configuration before starting this revision. Source development does not edit
-installed configuration automatically.
+Build both with `dub build --compiler=ldc2 --config=daemon` and `--config=relay`.
 
-## ACP and permissions
+## Configuration
 
-`FrameReader` decodes newline-delimited JSON-RPC with a 16 MiB frame budget.
-Unknown members are preserved semantically; whitespace and object key order
-are not preserved. `AcpClient` owns one child stream and one correlation map
-for native and daemon requests, with at most 256 outstanding outgoing requests.
-Routing changes only a copied envelope's ID, retaining the original identity
-for replies. Child stderr stays separate from protocol stdout.
+`~/.config/autonom/config.yml`, or the path in `--config` / `AUTONOM_CONFIG`. Unknown keys, duplicate keys, and wrong types are refused.
 
-`autonom-acp` remains the small stdio entrypoint used by Desktop. `Desktop`
-uses the same connection and a private authenticated Unix socket for daemon
-control. Its HTTP observation heartbeat currently supplies cross-process
-liveness. MCP admission happens before successful new/load replies reach the
-native client. Replacing this topology with daemon-hosted ACP is a separately
-sequenced change tracked in Linear ANM-59.
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `dataDir` | Directory of the config file | Root for profiles, rooms, sessions, executions, and catalogs. |
+| `devinCommand` | Required | The Devin CLI executable or path. |
+| `router` | Required | `type`, `key`, `url`, and `name` (plus optional `referer` and `title`) for policy screening. |
+| `sessionLockDir` | `$XDG_DATA_HOME/devin/cli/session_locks` | Native Devin lock directory. |
+| `executionTimeout` | 30m | Hard limit on one child process. |
+| `compactOnResume` | `false` | Compact a session before resuming it. |
+| `offlineStartAfter` | 1h | When an offline profile's wake is considered stale. |
+| `offlineCompactAfter` | 1h | When an idle session compacts on its next resume. |
+| `maxStreamBytes` | 4 MiB | Active stream size before rotation. |
+| `maxStreamEntries` | 1000 | Active stream entries before rotation. |
+| `callCapacity` | 128 | Settled call tickets held in memory. |
+| `callSettleTimeout` | 5m | Age at which a settled call ticket is evicted. |
+| `maxConcurrentCalls` | 8 | Concurrent child calls. |
+| `pruneExecutionArtifacts` | `false` | Remove call logs after settling. |
+| `allowDestructivePruning` | `false` | Permit pruning outside Autonom's own artifacts. |
 
-Pending permissions belong to the connection. Native Desktop and authorized
-HTTP decisions settle the same request once. `GET /api/sessions/<id>/permissions`
-lists offered options and IDs; adding `?id=<request-id>` retrieves full context.
-`POST` accepts `{"id":123,"optionId":"offered-option"}` or a null option to
-cancel. Only offered options are valid. Pending requests are bounded to 64 and
-16 MiB in aggregate, expire after 240 seconds, and are invalidated on disconnect.
-API-only sessions wait for an explicit decision until their deadline.
+Durations accept forms such as `30m` and `1h`. `sessionDatabase` is derived: it is `sessions.db` beside `sessionLockDir`. The managed catalog is always `<dataDir>/cli/sessions.db`.
 
-Daemon and ACP host startup reconcile Autonom hooks under `hooks` in the user-level
-Devin CLI `config.json`. New session admission also repairs the registration. The
-installed `devin/hooks.v1.json` template is the sole source; unrelated settings and
-user hook commands are retained, including commands sharing an Autonom matcher.
-Stale Autonom command paths are replaced. Project hooks continue to load separately.
+## Capabilities
 
-`PreToolUse` continues to enforce policy for automatic and bypassed calls.
-Human approval uses native ACP and HTTP. The authenticated `PermissionRequest`
-hook returns an empty response; it does not maintain a second approval queue.
+Three credentials, each scoped to one audience. They never appear in pages, webviews, or logs.
 
-## Validation and deployment
+| Header | Capability | Grants |
+| --- | --- | --- |
+| `x-autonom-client` | Operator token in `<dataDir>/client.token` | Full operator access, used by the launcher and the Command Center bridge. |
+| `x-autonom-run` | Per-run token | Exactly one running call. |
+| `x-autonom-mcp` | Per-session MCP token in `<dataDir>/mcp/` | Exactly one session's coordination scope. |
 
-Run the commands in [AGENTS.md](../AGENTS.md). Model simulation establishes
-protocol and lifecycle behavior; isolated real CLI integration establishes the
-tested database/metadata contract. Neither proves native Desktop presentation.
+`GET /api/health` and `/api/hooks/*` are reachable without the operator token; hooks authenticate themselves with a run or MCP credential and fail closed otherwise. Every other route resolves a caller profile from the request and refuses when none applies.
 
-The source cutover was explicitly authorized with live compatibility unverified.
-The pinned build was re-based to the installed Desktop commit without live
-re-validation. Native UI behavior,
-hook/ACP permission coverage, and representative large-history loading remain
-open acceptance gates. Installed registry/configuration cutover has not been
-performed. Follow the [Desktop contract](COMMAND_CENTER.md) and
-[validation procedure](COMMAND_CENTER_VALIDATION.md) before deployment or live
-validation. Do not weaken the pin or integrity checks to close those gates.
+## HTTP surface
 
-## Bounded execution and transcript retention contract
+| Route | Purpose |
+| --- | --- |
+| `GET /api/health` | Liveness, PIDs, config path, and the control token path. |
+| `GET|POST /api/sessions`, `/api/sessions/<id>`, `/api/sessions/remove` | Session listing, start, detail, and removal. |
+| `/api/sessions/<id>/{resume,steer,stop,manage,log,transcript,permissions}` | Session control, transcripts, and permission settlement. |
+| `/api/executions/<id>`, `/api/executions/<id>/{stop,transcript}` | Call outcomes and history. |
+| `GET|POST /api/profiles`, `/api/profiles/<name>`, `/api/profiles/<name>/session` | Profiles and their session assignment. |
+| `GET|POST /api/rooms`, `/api/rooms/<name>`, `/api/rooms/<name>/{membership,admins,messages}` | Rooms, membership, and posting. |
+| `GET|POST /api/messages` | Direct messages and pings. |
+| `GET|POST /api/events` | Unread events per profile. |
+| `GET|POST /api/schedules`, `/api/schedules/<id>`, `POST /api/schedules/refresh` | Schedules and refresh. |
+| `GET /api/policy`, `POST /api/policy/check` | Policy inspection and evaluation. |
+| `POST /api/hooks/*` | The eight hook events. |
+| `POST /api/acp/{admit,observe}`, `GET /api/mcp/session` | ACP admission, liveness observation, and MCP capability binding. |
+| `GET /api/print` | Debug dump of worker state. |
 
-The daemon enforces deterministic bounds on stream storage, in-memory call execution tickets, and durable transcript history while guaranteeing live stream continuity and offline wake survivability.
+## Calls and bounds
 
-### On-disk stream bounding and single-generation rolling archive
+A call is one owned child process. Settled calls are evicted oldest-first; a running call is never evicted, and eviction persists metadata first.
 
-Coordination rooms and DM streams (`daemon.coord.stream.Stream`) enforce a strict on-disk rolling retention contract:
-- When an active JSONL log file reaches `maxStreamBytes` (default: 4 MiB) or the number of logged entries reaches `maxStreamEntries` (default: 1,000), it rotates to a single archive generation (`<path>.1`). Any pre-existing `<path>.1` file is atomically replaced.
-- Total on-disk footprint per stream is strictly bounded to `2 * maxStreamBytes`.
-- In-memory stream `window` is preserved across rotations, guaranteeing that live consumers and reading cursors are never corrupted.
-- On startup/reload, the stream reads the `.1` archive tail and active log to reconstruct the in-memory tail window, ensuring that durable room cursors and client positions remain valid across daemon restarts.
-- Rotation and read paths enforce symlink verification (`isSymlinkSafe`); attempting rotation into a symlinked destination immediately aborts with an exception, preventing symlink traversal attacks.
+| Bound | Value | Effect |
+| --- | --- | --- |
+| Execution index | 10,000 entries | Oldest entries drop out; historical IDs stop resolving. |
+| Stream rotation | 4 MiB or 1,000 entries | One archive generation replaces the previous; the in-memory window survives. |
+| Stream files | 2 per stream | Active plus archive. |
+| Permissions | 64 outstanding, 16 MiB | Further backend requests are refused. |
+| Frames | 16 MiB | A larger frame fails the connection. |
+| Outgoing requests | 256 | Further correlation slots are refused. |
 
-### Deterministic LRU call eviction
+Rotation refuses to follow symlinks. Restart reconstruction reads the archive tail and the active log, so cursors stay valid.
 
-Child execution tickets in `Bridge` (`daemon.interop.devin.bridge`) are collected deterministically:
-- Settled calls (`!call.running`) are sorted by their settlement timestamp (`call.settled` `MonoTime`).
-- When total tracked executions exceed `callCapacity` (default: 128) or when a call has been settled longer than `callSettleTimeout` (default: 300 seconds), oldest settled calls are evicted from memory first.
-- **Invariant**: Running calls (`call.running`) are NEVER evicted under any circumstances, even when capacity is exceeded.
-- Eviction from in-memory tracking automatically persists the execution metadata into the durable index before removal.
+## ACP and Desktop
 
-### Durable transcript resolution and fallback
+`autonom-acp` speaks newline-delimited JSON-RPC over stdio with the Devin CLI. Routing between Desktop and the daemon rewrites the ID of a copied envelope only, preserving the original identity for replies. Inherited `ACP_BACKEND` and related variables are removed from the child environment.
 
-Execution lookups remain durable even after in-memory ticket eviction:
-- `Bridge` persists execution metadata into `executions/index.json` (bounded to 10,000 entries) and maps execution IDs to session IDs.
-- The client transcript endpoint (`GET /api/client/transcript/<id>`) resolves historical execution IDs via the durable index, looking up the associated session and conversation history.
-- If the CLI SQLite database returns empty conversation messages, transcript resolution falls back to inspecting on-disk logs (`executions/<id>.out`, `executions/<id>.err`, and `sessions/<session>.log`), preventing premature 404s or empty transcript views.
+Desktop connections register with `/api/acp/observe` and bind their MCP capability; after a daemon restart, heartbeats restore visibility and rebind the surviving capability without blocking ACP traffic.
 
-### Wake event retention
+## Deployment
 
-In `daemon.events.scheduler`, offline agent pings that lack a recorded sender workspace are no longer silently discarded with an early return. Instead, batch events are surfaced directly into `events.surface(profile, event)`, ensuring that scheduled wakes, reminders, and offline pings are reliably surfaced to agents upon next connection.
+The launcher starts the daemon with the installed configuration and `AUTONOM_PORT` (default 8080). `GET /api/health` reports `stopping` with 503 while the worker winds down. Development runs the same binary against a temporary configuration:
 
-### Retention configuration knobs
+```sh
+dub run --compiler=ldc2 --config=unit --build=unittest
+python3 source/mcp/tests.py
+```
 
-Configuration parameters in `daemon.config.DaemonConfig` support both human-friendly units (e.g. `4 MiB`, `10m`) and raw numbers, with backward-compatible defaults:
-- `maxStreamBytes`: maximum active stream file size before rotation (default: `4194304` = 4 MiB).
-- `maxStreamEntries`: maximum active stream entry count before rotation (default: `1000`).
-- `callCapacity`: maximum in-memory call execution tickets before LRU eviction (default: `128`).
-- `callSettleTimeout`: duration after settlement before call eviction (default: `300s`).
-- `maxConcurrentCalls`: maximum concurrent active calls allowed (default: `8`).
-- `pruneExecutionArtifacts`: whether to prune child execution log artifacts (default: `false`).
-- `allowDestructivePruning`: whether destructive pruning is permitted (default: `false`).
+Model simulation establishes protocol and lifecycle behavior; isolated real CLI integration establishes the catalog and metadata contract. Neither proves native Desktop presentation. Follow the [Command Center contract](COMMAND_CENTER.md) before deployment or live validation.
+
+## Reading more
+
+- [Sessions](SESSIONS.md) — session lifecycle, catalogs, and permissions.
+- [Coordination](COORDINATION.md) — rooms, events, schedules, and the on-disk layout.
+- [Policy and hooks](POLICY.md) — the hook events and policy engine behind `/api/hooks/*`.
