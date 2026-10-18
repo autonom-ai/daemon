@@ -51,6 +51,20 @@ class MockElement
         return child;
     }
 
+    contains(target: MockElement | null | undefined): boolean
+    {
+        if (!target)
+            return false;
+        let current: MockElement | null = target;
+        while (current)
+        {
+            if (current === this)
+                return true;
+            current = current.parentElement;
+        }
+        return false;
+    }
+
     removeChild<T extends MockElement>(child: T): T
     {
         const index = this.children.indexOf(child);
@@ -185,20 +199,22 @@ beforeEach(() =>
 
 afterEach(() =>
 {
+    (globalThis as any).__autonomShell?.dispose();
+    delete (globalThis as any).__autonomShell;
     (globalThis as any).document = originalDocument;
     (globalThis as any).MutationObserver = originalMutationObserver;
 });
 
-function createSidebarTree(items: Array<{ id: string; label: string; hasSlot?: boolean }>): {
+function createSidebarTree(items: Array<{ id: string; label: string; hasSlot?: boolean; siblingSlot?: boolean }>): {
     menu: MockElement;
-    buttons: Map<string, { button: MockElement; slot: MockElement | null; initialSvg: MockElement }>;
+    buttons: Map<string, { button: MockElement; slot: MockElement | null; initialSvg: MockElement; wrapper: MockElement }>;
 }
 {
     const menu = new MockElement("ul");
     menu.setAttribute("aria-label", "Pages");
     mockDocument.body.appendChild(menu);
 
-    const buttons = new Map<string, { button: MockElement; slot: MockElement | null; initialSvg: MockElement }>();
+    const buttons = new Map<string, { button: MockElement; slot: MockElement | null; initialSvg: MockElement; wrapper: MockElement }>();
 
     for (const item of items)
     {
@@ -220,22 +236,34 @@ function createSidebarTree(items: Array<{ id: string; label: string; hasSlot?: b
         const initialSvg = new MockElement("svg");
         initialSvg.setAttribute("class", "native-devin-icon");
 
+        const isSibling = item.siblingSlot ?? false;
         let slot: MockElement | null = null;
         if (item.hasSlot !== false)
         {
             slot = new MockElement("span");
             slot.setAttribute("data-slot", "sidebar-menu-button-icon");
             slot.appendChild(initialSvg);
-            button.appendChild(slot);
+            if (isSibling)
+                menuButtonWrapper.appendChild(slot);
+            else
+                button.appendChild(slot);
         }
         else
-            button.appendChild(initialSvg);
+        {
+            if (isSibling)
+                menuButtonWrapper.appendChild(initialSvg);
+            else
+                button.appendChild(initialSvg);
+        }
 
         const labelSpan = new MockElement("span");
         labelSpan.textContent = item.label;
-        button.appendChild(labelSpan);
+        if (isSibling)
+            menuButtonWrapper.appendChild(labelSpan);
+        else
+            button.appendChild(labelSpan);
 
-        buttons.set(item.id, { button, slot, initialSvg });
+        buttons.set(item.id, { button, slot, initialSvg, wrapper: menuButtonWrapper });
     }
 
     return { menu, buttons };
@@ -436,3 +464,113 @@ test("unbundled and unknown icons leave original native icons untouched", () =>
 
     layout.dispose();
 });
+
+test("renderSections injects bundled Lucide SVGs when slot is sibling to button (Devin Desktop live structure)", () =>
+{
+    const content = makeContent();
+    const items = makeItemsMap(content);
+    const { buttons } = createSidebarTree([
+        { id: "schedules", label: "Schedules", siblingSlot: true },
+        { id: "policy", label: "Policy", siblingSlot: true },
+        { id: "settings", label: "Settings", siblingSlot: true },
+    ]);
+
+    const layout = createLayout({
+        content,
+        items,
+        enabled: true,
+        activate: async () => { return; },
+    });
+
+    layout.render();
+
+    // Verify Schedules (timer) in sibling layout
+    const schedules = buttons.get("schedules")!;
+    assert.equal(schedules.button.dataset.autonomItem, "schedules");
+    assert.equal(schedules.slot!.dataset.autonomIcon, "timer");
+    assert.equal(schedules.button.parentElement, schedules.wrapper);
+    assert.equal(schedules.slot!.parentElement, schedules.wrapper);
+    assert.equal(schedules.button.contains(schedules.slot), false);
+    assert.equal(schedules.wrapper.contains(schedules.slot), true);
+
+    const timerSvg = schedules.slot!.children[0]!;
+    assert.equal(timerSvg.tagName, "SVG");
+    assert.equal(timerSvg.getAttribute("stroke"), "currentColor");
+    assert.equal(timerSvg.getAttribute("viewBox"), "0 0 24 24");
+    assert.equal(timerSvg.getAttribute("width"), "18");
+    assert.equal(timerSvg.getAttribute("height"), "18");
+    assert.equal((timerSvg as any).dataset?.autonomIcon, "timer");
+    assert.notEqual(timerSvg, schedules.initialSvg);
+
+    // Verify Policy (shield-lock) in sibling layout
+    const policy = buttons.get("policy")!;
+    assert.equal(policy.button.dataset.autonomItem, "policy");
+    assert.equal(policy.slot!.dataset.autonomIcon, "shield-lock");
+    assert.equal(policy.button.contains(policy.slot), false);
+    const shieldSvg = policy.slot!.children[0]!;
+    assert.equal(shieldSvg.tagName, "SVG");
+    assert.equal(shieldSvg.getAttribute("stroke"), "currentColor");
+    assert.equal(shieldSvg.getAttribute("width"), "18");
+    assert.equal(shieldSvg.getAttribute("height"), "18");
+    assert.equal((shieldSvg as any).dataset?.autonomIcon, "shield-lock");
+    assert.notEqual(shieldSvg, policy.initialSvg);
+
+    // Verify Settings (cog) in sibling layout
+    const settings = buttons.get("settings")!;
+    assert.equal(settings.button.dataset.autonomItem, "settings");
+    assert.equal(settings.slot!.dataset.autonomIcon, "cog");
+    assert.equal(settings.button.contains(settings.slot), false);
+    const cogSvg = settings.slot!.children[0]!;
+    assert.equal(cogSvg.tagName, "SVG");
+    assert.equal(cogSvg.getAttribute("stroke"), "currentColor");
+    assert.equal(cogSvg.getAttribute("width"), "18");
+    assert.equal(cogSvg.getAttribute("height"), "18");
+    assert.equal((cogSvg as any).dataset?.autonomIcon, "cog");
+    assert.notEqual(cogSvg, settings.initialSvg);
+
+    // Repeated render remains idempotent
+    layout.render();
+    assert.equal(schedules.slot!.children[0], timerSvg);
+    assert.equal(policy.slot!.children[0], shieldSvg);
+    assert.equal(settings.slot!.children[0], cogSvg);
+
+    layout.dispose();
+});
+
+test("fallback replaces direct svg when svg is sibling to button in sidebar-menu-button container", () =>
+{
+    const content = makeContent();
+    const items = makeItemsMap(content);
+    const { buttons } = createSidebarTree([
+        { id: "schedules", label: "Schedules", hasSlot: false, siblingSlot: true },
+    ]);
+
+    const layout = createLayout({
+        content,
+        items,
+        enabled: true,
+        activate: async () => { return; },
+    });
+
+    const schedules = buttons.get("schedules")!;
+    assert.equal(schedules.slot, null);
+    assert.equal(schedules.wrapper.children[1], schedules.initialSvg);
+
+    layout.render();
+
+    const replacedSvg = schedules.wrapper.querySelector<MockElement>("svg")!;
+    assert.ok(replacedSvg);
+    assert.notEqual(replacedSvg, schedules.initialSvg);
+    assert.equal((replacedSvg as any).dataset?.autonomIcon, "timer");
+    assert.equal(replacedSvg.getAttribute("stroke"), "currentColor");
+    assert.equal(replacedSvg.getAttribute("width"), "18");
+    assert.equal(replacedSvg.getAttribute("height"), "18");
+
+    // Repeated render remains idempotent
+    layout.render();
+    const secondSvg = schedules.wrapper.querySelector<MockElement>("svg")!;
+    assert.equal(secondSvg, replacedSvg);
+
+    layout.dispose();
+});
+

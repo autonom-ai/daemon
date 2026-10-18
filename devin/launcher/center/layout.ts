@@ -137,10 +137,18 @@ export function createLayout(context: {
                     const iconSvg = createIcon(item.icon);
                     if (iconSvg)
                     {
-                        const iconSlot = button.querySelector<HTMLElement>('[data-slot="sidebar-menu-button-icon"]');
+                        iconSvg.setAttribute("width", "18");
+                        iconSvg.setAttribute("height", "18");
+                        (iconSvg as any).dataset ??= {};
+                        (iconSvg as any).dataset.autonomIcon = item.icon;
+
+                        const iconSlot = button.parentElement?.querySelector<HTMLElement>('[data-slot="sidebar-menu-button-icon"]')
+                            ?? row.querySelector<HTMLElement>('[data-slot="sidebar-menu-button-icon"]')
+                            ?? button.querySelector<HTMLElement>('[data-slot="sidebar-menu-button-icon"]');
                         if (iconSlot)
                         {
-                            if (iconSlot.dataset.autonomIcon !== item.icon)
+                            const currentSvg = iconSlot.querySelector<SVGElement>("svg");
+                            if (iconSlot.dataset.autonomIcon !== item.icon || (currentSvg as any)?.dataset?.autonomIcon !== item.icon)
                             {
                                 iconSlot.dataset.autonomIcon = item.icon;
                                 if (typeof iconSlot.replaceChildren === "function")
@@ -155,13 +163,11 @@ export function createLayout(context: {
                         }
                         else
                         {
-                            const existing = button.querySelector<SVGElement>("svg");
+                            const existing = button.parentElement?.querySelector<SVGElement>("svg")
+                                ?? row.querySelector<SVGElement>("svg")
+                                ?? button.querySelector<SVGElement>("svg");
                             if (existing && (existing as any).dataset?.autonomIcon !== item.icon)
-                            {
-                                (iconSvg as any).dataset ??= {};
-                                (iconSvg as any).dataset.autonomIcon = item.icon;
                                 existing.replaceWith(iconSvg);
-                            }
                         }
                     }
                 }
