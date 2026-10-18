@@ -2,6 +2,8 @@ import { click, connectWindow } from "../cdp";
 import { DaemonClient } from "../../launcher/daemon/client";
 import { defaultDaemonConfigPath } from "../../launcher/config";
 
+import { Hash, User } from "lucide";
+
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { test } from "node:test";
@@ -30,11 +32,21 @@ test("the live room and profile rows match daemon listings and filter through na
                     icons: row.querySelectorAll('svg').length,
                     actions: row.querySelectorAll('button, a, [role="button"]').length,
                     visible: row.getBoundingClientRect().height > 0,
-                    icon: row.querySelector('svg')?.classList.contains(${JSON.stringify(`lucide-${icon}`)})
+                    paths: [...row.querySelectorAll('svg > *')].map(element => ({
+                        tag: element.tagName,
+                        attributes: Object.fromEntries([...element.attributes].map(attribute => [attribute.name, attribute.value]))
+                    }))
                 }));
-            })()`) as { name: string; icons: number; actions: number; visible: boolean; icon: boolean }[];
+            })()`) as { name: string; icons: number; actions: number; visible: boolean; paths: unknown }[];
             assert.deepEqual(observed.map((entry) => entry.name).sort(), expected.map((entry) => entry.name).sort());
-            assert.ok(observed.every((entry) => entry.visible && entry.icons === 1 && entry.icon && entry.actions === 0));
+            assert.ok(observed.every((entry) => entry.visible && entry.icons === 1 && entry.actions === 0));
+
+            const paths = (icon === "hash" ? Hash : User).map(([tag, attributes]) => ({
+                tag,
+                attributes: Object.fromEntries(Object.entries(attributes).map(([key, value]) => [key, String(value)])),
+            }));
+            for (const entry of observed)
+                assert.deepEqual(entry.paths, paths);
 
             await click(window.session, `[data-autonom-section="${section}"] button[aria-label="Search"]`);
             const input = `[data-autonom-section="${section}"] input`;
