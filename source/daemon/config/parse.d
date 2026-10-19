@@ -1,5 +1,6 @@
 module daemon.config.parse;
 
+import daemon.config.secret : resolveSecret;
 import intuit.router : IRouter, OpenRouter;
 import mir.algebraic_alias.yaml;
 import mir.deser.yaml;
@@ -165,7 +166,7 @@ size_t readByteSize(YamlAlgebraic value, string name)
     return cast(size_t)(val * scale);
 }
 
-IRouter createRouter(YamlAlgebraic settings)
+IRouter createRouter(YamlAlgebraic settings, string directory)
 {
     if (settings.kind != YamlAlgebraic.Kind.object)
         throw new Exception("Router configuration must be a mapping");
@@ -211,7 +212,7 @@ IRouter createRouter(YamlAlgebraic settings)
     if (values["type"] != "openrouter")
         throw new Exception("Unsupported router type");
 
-    OpenRouter ret = new OpenRouter(values["key"], url, values["name"]);
+    OpenRouter ret = new OpenRouter(resolveSecret(values["key"], directory), url, values["name"]);
     ret.referer = values.get("referer", null);
     ret.title = values.get("title", null);
     return ret;
