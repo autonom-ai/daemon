@@ -3,11 +3,14 @@ import argparse
 import hashlib
 import json
 import os
+import pwd
 import shlex
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+ENTRY_NAMES = ("devin-desktop.desktop", "devin-desktop-url-handler.desktop")
 
 
 def read(path):
@@ -103,6 +106,79 @@ def build_line(identity):
     return f"Desktop build {identity['version']} ({identity['commit'][:12]}) matches the verified pin."
 
 
+def applications_for_user():
+    """The user's applications directory, which XDG reads ahead of the packaged one."""
+    data_home = os.environ.get("XDG_DATA_HOME")
+    if data_home and Path(data_home).is_absolute():
+        return Path(data_home) / "applications"
+    claimed = os.environ.get("SUDO_USER")
+    try:
+        home = pwd.getpwnam(claimed).pw_dir if claimed else pwd.getpwuid(os.getuid()).pw_dir
+    except KeyError:
+        raise SystemExit(f"Cannot resolve the applications directory of {'SUDO_USER ' + claimed if claimed else 'uid ' + str(os.getuid())}.")
+    return Path(home) / ".local/share/applications"
+
+
+def rewrite_entry(content, entrypoint):
+    """Point every Exec line at the Autonom entrypoint and leave its arguments alone."""
+    ret = []
+    for line in content.split("\n"):
+        if line.startswith("Exec="):
+            _, separator, arguments = line[5:].partition(" ")
+            line = f"Exec={entrypoint}{separator}{arguments}"
+        ret.append(line)
+    return "\n".join(ret)
+
+
+def execs_at(content, entrypoint):
+    """Whether a desktop entry already execs the Autonom entrypoint."""
+    return any(line.startswith(f"Exec={entrypoint}") for line in content.split("\n"))
+
+
+def launches_desktop(content, binary):
+    """Whether a packaged entry launches this Desktop installation's binary."""
+    for line in content.split("\n"):
+        if line.startswith("Exec="):
+            return Path(line[5:].partition(" ")[0]).resolve() == binary.resolve()
+    return False
+
+
+def shadow_entries(packaged, binary, entrypoint, installation):
+    """Copy the packaged desktop entries into the user's directory, execing the shim."""
+    target = applications_for_user()
+    names = []
+    for name in ENTRY_NAMES:
+        source = packaged / name
+        if source.is_symlink() or not source.is_file():
+            continue
+        content = read(source).decode("utf-8", "replace")
+        if not launches_desktop(content, binary):
+            print(f"Ignoring {name}: it does not launch {binary}.")
+            continue
+        installation.write(target / name, rewrite_entry(content, entrypoint).encode(), 0o644)
+        names.append(name)
+    return target, names
+
+
+def entry_states(target, entrypoint):
+    """Which entry names Autonom shadowed, and which the user owns instead."""
+    shadowed, foreign = [], []
+    for name in ENTRY_NAMES:
+        path = target / name
+        if path.is_symlink() or not path.is_file():
+            continue
+        ours = execs_at(read(path).decode("utf-8", "replace"), entrypoint)
+        (shadowed if ours else foreign).append(name)
+    return shadowed, foreign
+
+
+def unshadow_entries(target, entrypoint):
+    """Remove the shadowing copies Autonom wrote, and leave every other file alone."""
+    shadowed, _ = entry_states(target, entrypoint)
+    for name in shadowed:
+        (target / name).unlink()
+    return shadowed
+
 class Installation:
     def __init__(self, desktop):
         self.desktop = desktop
@@ -189,6 +265,8 @@ class Installation:
 def main():
     parser = argparse.ArgumentParser(description="Install the Autonom launcher as the Devin Desktop CLI entrypoint.")
     parser.add_argument("--app", type=Path, default=Path("/usr/share/devin-desktop/resources/app"))
+    parser.add_argument("--entries", type=Path,
+                        help="the packaged applications directory holding the Devin desktop entries")
     parser.add_argument("--no-build", action="store_true")
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--uninstall", action="store_true")
@@ -210,6 +288,7 @@ def main():
     archive_root = payload / "tracked-builds"
     entrypoint = desktop / "bin/devin-desktop"
     backup = Path(str(entrypoint) + ".autonom.orig")
+    packaged = args.entries.resolve() if args.entries else desktop.parent / "applications"
     verifier = repository / "dist" / "build.js"
 
     node = require_node()
@@ -259,7 +338,18 @@ def main():
             print("An official Desktop update replaced the CLI; run python3 devin/install.py to reinstall.")
         else:
             print("The Devin Desktop CLI changed outside Autonom; refusing to touch it.")
+        entries = applications_for_user()
+        shadowed, foreign = entry_states(entries, entrypoint)
+        if shadowed:
+            print(f"Desktop entries launch the Autonom shim: {', '.join(shadowed)}.")
+        else:
+            print("Autonom desktop entries are not installed; menu and URL launches bypass the launcher.")
+        if foreign:
+            print(f"Desktop entries Autonom did not write are left alone: {', '.join(foreign)}.")
     elif args.uninstall:
+        removed = unshadow_entries(applications_for_user(), entrypoint)
+        if removed:
+            print(f"Removed the Autonom desktop entries: {', '.join(removed)}.")
         if not saved:
             print("Autonom launcher is not installed; nothing to restore.")
         elif foreign:
@@ -350,6 +440,7 @@ def main():
                     and (backup_bytes is None or digest(backup_bytes) != original_hash):
                 os.replace(entrypoint, backup)
             installation.write(entrypoint, stub, 0o755)
+            entries, shadowed = shadow_entries(packaged, desktop / "devin-desktop", entrypoint, installation)
             installation.write(record, json.dumps(next_record, indent=2).encode() + b"\n")
             installation.finish()
         except SystemExit:
@@ -365,6 +456,10 @@ def main():
             installation.rollback()
             raise
         print(f"Installed Autonom launcher in {payload}.")
+        if shadowed:
+            print(f"Desktop entries now launch the Autonom shim from {entries}.")
+        else:
+            print("No packaged Devin desktop entries were found; menu and URL launches bypass the launcher.")
         print("Quit Desktop once, then run devin-desktop. Arguments and terminal output are unchanged from node dist/launcher.js.")
         print("Rollback: python3 devin/install.py --uninstall (use the same --app path and permissions).")
 
