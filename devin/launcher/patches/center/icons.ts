@@ -12,16 +12,15 @@ import {
     ShieldCheck,
     ShieldLock,
     Timer,
-    User,
     X,
     createElement,
     type IconNode,
 } from "lucide";
+import { minidenticon } from "minidenticons";
 
 const lucideIcons: Record<string, IconNode> = {
     timer: Timer,
     hash: Hash,
-    user: User,
     "shield-lock": ShieldLock,
     "shield-check": ShieldLock,
     shieldCheck: ShieldCheck,
@@ -108,4 +107,10 @@ export function createIcon(name: string | undefined, fallback?: string): SVGSVGE
 export function sectionIcon(name: string | undefined, fallback = "plus"): SVGSVGElement
 {
     return createIcon(name, fallback)!;
+}
+
+/** Deterministic profile identicon, seeded from the lowercased profile name. */
+export function identicon(name: string): SVGSVGElement
+{
+    return parseSvg(minidenticon(name.toLowerCase()));
 }

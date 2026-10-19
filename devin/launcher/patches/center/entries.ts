@@ -1,5 +1,11 @@
 import type { DirectoryEntry } from "../../center/directory";
-import { sectionIcon } from "./icons";
+import { createIcon, identicon } from "./icons";
+
+/** Entry rows prefer a declared mark; otherwise the name seeds an identicon. */
+export function entryIcon(entry: DirectoryEntry): SVGSVGElement
+{
+    return (entry.icon ? createIcon(entry.icon) : undefined) ?? identicon(entry.name);
+}
 
 /** Listing rows have no action until room/profile navigation is implemented. */
 export function createEntries()
@@ -51,7 +57,7 @@ export function createEntries()
                     row = document.createElement("li");
                     row.dataset.autonomEntry = entry.name;
                     row.className = "flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-13 text-text-secondary";
-                    const icon = sectionIcon(entry.icon);
+                    const icon = entryIcon(entry);
                     icon.setAttribute("width", "18");
                     icon.setAttribute("height", "18");
                     icon.classList.add("shrink-0");

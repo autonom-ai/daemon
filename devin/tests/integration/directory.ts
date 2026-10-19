@@ -2,7 +2,8 @@ import { click, connectWindow } from "../cdp";
 import { DaemonClient } from "../../launcher/daemon/client";
 import { defaultDaemonConfigPath } from "../../launcher/config";
 
-import { Hash, User } from "lucide";
+import { Hash } from "lucide";
+import { minidenticon } from "minidenticons";
 
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
@@ -21,6 +22,16 @@ function sectionRoot(section: string): HTMLElement
     return roots[0]!;
 }
 
+/** Cells the minidenticons grid carries for a profile name. */
+function identiconPaths(name: string): { tag: string; attributes: Record<string, string> }[]
+{
+    return [...minidenticon(name.toLowerCase()).matchAll(/<rect\b([^>]*)\/>/g)].map((rect) => ({
+        tag: "rect",
+        attributes: Object.fromEntries([...rect[1]!.matchAll(/([a-z]+)="([^"]*)"/g)]
+            .map((attribute) => [attribute[1]!, attribute[2]!])),
+    }));
+}
+
 test("the live room and profile rows match daemon listings and filter through native section search",
     { skip: !target }, async () =>
 {
@@ -32,7 +43,7 @@ test("the live room and profile rows match daemon listings and filter through na
     const window = await connectWindow(target!);
     try
     {
-        for (const [section, icon] of [["rooms", "hash"], ["profiles", "user"]])
+        for (const section of ["rooms", "profiles"])
         {
             const expected = await daemon.request<{ name: string }[]>(`/api/${section}`);
             assert.ok(expected.length > 0, `The actual daemon needs at least one ${section} entry for this live check.`);
@@ -44,21 +55,31 @@ test("the live room and profile rows match daemon listings and filter through na
                     icons: row.querySelectorAll('svg').length,
                     actions: row.querySelectorAll('button, a, [role="button"]').length,
                     visible: row.getBoundingClientRect().height > 0,
+                    mark: (() => {
+                        const svg = row.querySelector('svg');
+                        return svg && { viewBox: svg.getAttribute('viewBox'), fill: svg.getAttribute('fill') };
+                    })(),
                     paths: [...row.querySelectorAll('svg > *')].map(element => ({
                         tag: element.tagName,
                         attributes: Object.fromEntries([...element.attributes].map(attribute => [attribute.name, attribute.value]))
                     }))
                 }));
-            })()`) as { name: string; icons: number; actions: number; visible: boolean; paths: unknown }[];
+            })()`) as { name: string; icons: number; actions: number; visible: boolean; mark: { viewBox: string | null; fill: string | null } | null; paths: unknown }[];
             assert.deepEqual(observed.map((entry) => entry.name).sort(), expected.map((entry) => entry.name).sort());
             assert.ok(observed.every((entry) => entry.visible && entry.icons === 1 && entry.actions === 0));
 
-            const paths = (icon === "hash" ? Hash : User).map(([tag, attributes]) => ({
+            const hashPaths = Hash.map(([tag, attributes]) => ({
                 tag,
                 attributes: Object.fromEntries(Object.entries(attributes).map(([key, value]) => [key, String(value)])),
             }));
             for (const entry of observed)
-                assert.deepEqual(entry.paths, paths);
+                assert.deepEqual(entry.paths, section === "rooms" ? hashPaths : identiconPaths(entry.name));
+            if (section === "rooms")
+                assert.ok(observed.every((entry) => entry.mark
+                    && entry.mark.viewBox === "0 0 24 24" && entry.mark.fill === "none"));
+            else
+                assert.ok(observed.every((entry) => entry.mark
+                    && entry.mark.viewBox === "-1.5 -1.5 8 8" && entry.mark.fill?.startsWith("hsl(")));
 
             await click(window.session, `[data-autonom-section="${section}"] button[aria-label="Search"]`);
             const input = `[data-autonom-section="${section}"] input`;
@@ -73,7 +94,7 @@ test("the live room and profile rows match daemon listings and filter through na
             await window.session.request("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
             assert.equal(await window.session.evaluate(`(() => ${rows}
                 .filter(row => row.getBoundingClientRect().height > 0).length)()`), expected.length);
-            console.log(JSON.stringify({ section, rows: observed.length, icon, search: "passed" }));
+            console.log(JSON.stringify({ section, rows: observed.length, search: "passed" }));
         }
     }
     finally

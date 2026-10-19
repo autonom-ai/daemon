@@ -1,53 +1,10 @@
-import { createIcon, sectionIcon } from "../../../../launcher/patches/center/icons";
+import { createIcon, identicon, sectionIcon } from "../../../../launcher/patches/center/icons";
+import { installSvgDocument, type MockSvgElement } from "../../../svg";
 
 import assert from "node:assert/strict";
-import { after, beforeEach, test } from "node:test";
+import { test } from "node:test";
 
-class MockSvgElement
-{
-    readonly tagName: string;
-    readonly namespaceURI: string;
-    readonly attributes = new Map<string, string>();
-    readonly children: MockSvgElement[] = [];
-    parentElement: MockSvgElement | null = null;
-
-    constructor(namespaceURI: string, tagName: string)
-    {
-        this.namespaceURI = namespaceURI;
-        this.tagName = tagName.toLowerCase();
-    }
-
-    setAttribute(name: string, value: string): void
-    {
-        this.attributes.set(name, value);
-    }
-
-    getAttribute(name: string): string | null
-    {
-        return this.attributes.get(name) ?? null;
-    }
-
-    appendChild<T extends MockSvgElement>(child: T): T
-    {
-        child.parentElement = this;
-        this.children.push(child);
-        return child;
-    }
-}
-
-const originalDocument = (globalThis as any).document;
-
-beforeEach(() =>
-{
-    (globalThis as any).document = {
-        createElementNS: (ns: string, tag: string) => new MockSvgElement(ns, tag),
-    };
-});
-
-after(() =>
-{
-    (globalThis as any).document = originalDocument;
-});
+installSvgDocument();
 
 test("createIcon parses stroke-based Lucide timer mark with lines and circle", () =>
 {
@@ -240,10 +197,44 @@ test("createIcon parses custom marks retaining local definitions", () =>
     assert.equal(autonomFill.children[0]?.getAttribute("fill-rule"), "evenodd");
 });
 
+/** Cells the installed minidenticons renders for the left half of the `ada` 5x5 grid. */
+const adaCells = [["1", "2"], ["1", "4"], ["2", "0"], ["2", "2"], ["2", "3"], ["2", "4"], ["3", "2"], ["3", "4"]];
+
+function cells(icon: MockSvgElement): string[][]
+{
+    return icon.children.map((child) => [child.getAttribute("x")!, child.getAttribute("y")!]);
+}
+
+test("identicon fills the deterministic minidenticons grid for the profile name", () =>
+{
+    const icon = identicon("ada") as unknown as MockSvgElement;
+    assert.equal(icon.tagName, "svg");
+    assert.equal(icon.getAttribute("viewBox"), "-1.5 -1.5 8 8");
+    assert.equal(icon.getAttribute("fill"), "hsl(320 95% 45%)");
+    assert.equal(icon.getAttribute("stroke"), null);
+    assert.equal(icon.getAttribute("aria-hidden"), "true");
+    assert.deepEqual(cells(icon), adaCells);
+    assert.ok(icon.children.every((child) => child.tagName === "rect"
+        && child.getAttribute("width") === "1" && child.getAttribute("height") === "1"));
+});
+
+test("identicon seeds from the lowercased name and varies with the profile", () =>
+{
+    const ada = identicon("ada") as unknown as MockSvgElement;
+    const capital = identicon("Ada") as unknown as MockSvgElement;
+    assert.deepEqual(cells(capital), adaCells);
+    assert.equal(capital.getAttribute("fill"), ada.getAttribute("fill"));
+
+    const other = identicon("bob") as unknown as MockSvgElement;
+    assert.notDeepEqual(cells(other), cells(ada));
+    assert.notEqual(other.getAttribute("fill"), ada.getAttribute("fill"));
+});
+
 test("createIcon returns undefined for unknown icon without fallback", () =>
 {
     assert.equal(createIcon(undefined), undefined);
     assert.equal(createIcon("nonexistent-mark"), undefined);
+    assert.equal(createIcon("user"), undefined);
 });
 
 test("createIcon and sectionIcon resolve fallback when primary icon is unknown", () =>

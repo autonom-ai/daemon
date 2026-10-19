@@ -1,4 +1,4 @@
-export type DirectoryEntry = { name: string; icon: string };
+export type DirectoryEntry = { name: string; icon?: string };
 
 /** Cached daemon listings; refresh never holds up native sidebar attachment. */
 export class Directory
@@ -27,7 +27,7 @@ export class Directory
         this.refreshed = Date.now();
         this.pending = Promise.all([
             this.load("rooms", "getRooms", "hash"),
-            this.load("profiles", "getProfiles", "user"),
+            this.load("profiles", "getProfiles"),
         ]).then(() => undefined).finally(() =>
         {
             this.pending = undefined;
@@ -40,7 +40,7 @@ export class Directory
         this.listings.clear();
     }
 
-    private async load(section: string, action: string, icon: string): Promise<void>
+    private async load(section: string, action: string, icon?: string): Promise<void>
     {
         try
         {
@@ -51,7 +51,9 @@ export class Directory
             if (this.disposed)
                 return;
 
-            const entries: DirectoryEntry[] = response.map((entry) => ({ name: entry.name, icon }));
+            const entries: DirectoryEntry[] = response.map((entry) => icon
+                ? { name: entry.name, icon }
+                : { name: entry.name });
             entries.sort((left, right) => left.name.localeCompare(right.name));
             if (JSON.stringify(entries) === JSON.stringify(this.entries(section)))
                 return;
