@@ -71,7 +71,9 @@ export async function fixture(): Promise<Fixture>
     const binaries = join(root, "fakebin");
     await mkdir(binaries);
     await writeFile(join(binaries, "rpm"), fakeRpm, { mode: 0o755 });
-    const env = { ...process.env, PATH: `${binaries}:${process.env.PATH}`, FAKE_RPM_DB: manifestPath };
+    const env = { ...process.env, PATH: `${binaries}:${process.env.PATH}`, FAKE_RPM_DB: manifestPath,
+        // Keep the desktop entry shadowing inside the temporary tree.
+        XDG_DATA_HOME: join(root, "user") };
     return { root, app, env, manifestPath };
 }
 
