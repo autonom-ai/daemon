@@ -27,7 +27,7 @@ export type SidebarSection = {
 export const spacesSection = "spaces";
 
 /** Bundled icons available to section buttons; see `icons.ts`. */
-export const sectionButtonIcons = ["search", "plus", "sliders"] as const;
+export const sectionButtonIcons = ["search", "plus", "settings-2"] as const;
 
 export type NativeItem = {
     id: string;

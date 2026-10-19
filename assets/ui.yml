@@ -15,7 +15,7 @@ items:
           left_click: pages/policy.html
     - id: settings
       label: Settings
-      icon: cog
+      icon: settings
       actions:
           left_click: pages/settings.html
 
@@ -32,7 +32,7 @@ sections:
                 left_click: actions/new-room.js
           - id: rooms-properties
             label: Properties
-            icon: sliders
+            icon: settings-2
             actions:
                 left_click: actions/open-settings.js
       items: []

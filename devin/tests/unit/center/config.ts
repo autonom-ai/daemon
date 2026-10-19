@@ -7,7 +7,7 @@ import { stringify } from "yaml";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 
 async function center(files: Record<string, string>, config: unknown): Promise<string>
@@ -231,6 +231,34 @@ test("section buttons load validated js actions and resolve through loadAction",
     }
 });
 
+test("section buttons accept only bundled icon names", async () =>
+{
+    const path = await center({ "actions/open-settings.js": "await context.open('settings');" }, {
+        sections: [{ id: "rooms", label: "Rooms", items: [], buttons: [
+            { id: "rooms-properties", label: "Properties", icon: "settings-2",
+                actions: { left_click: "actions/open-settings.js" } },
+        ] }],
+    });
+    try
+    {
+        const content = await loadCenter(path);
+        assert.equal(content.sections[0]?.buttons?.[0]?.icon, "settings-2");
+    }
+    finally
+    {
+        await rm(dirname(path), { recursive: true, force: true });
+    }
+});
+
+test("the shipped definition loads with the sidebar marks in place", async () =>
+{
+    const content = await loadCenter(resolve(__dirname, "../../../../assets/ui.yml"));
+    const properties = content.sections[0]?.buttons?.find((button) => button.id === "rooms-properties");
+    assert.equal(properties?.icon, "settings-2");
+    const settings = content.items?.find((item) => item.id === "settings");
+    assert.equal(settings?.icon, "settings");
+});
+
 test("invalid section buttons reject the entire definition", async () =>
 {
     const action = { left_click: "actions/new.js" };
@@ -242,6 +270,7 @@ test("invalid section buttons reject the entire definition", async () =>
         { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", label: "x".repeat(201), actions: action }] }] },
         { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", icon: "IconPlus", actions: action }] }] },
         { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", icon: "file", actions: action }] }] },
+        { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", icon: "sliders", actions: action }] }] },
         { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", hidden: "yes", actions: action }] }] },
         { sections: [{ id: "group", label: "Group", buttons: [{ id: "find", search: "yes" }] }] },
         { sections: [{ id: "group", label: "Group", buttons: [{ id: "add", actions: action, tab: "old" }] }] },

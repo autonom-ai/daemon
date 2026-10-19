@@ -113,28 +113,54 @@ test("createIcon parses stroke-based Lucide shield-lock mark and shield-check al
     }
 });
 
-test("createIcon parses stroke-based Lucide cog mark and settings alias", () =>
+test("createIcon parses stroke-based Lucide settings mark with its gear circle", () =>
 {
-    for (const name of ["cog", "settings"])
-    {
-        const icon = createIcon(name) as unknown as MockSvgElement;
-        assert.ok(icon);
-        assert.equal(icon.tagName, "svg");
-        assert.equal(icon.getAttribute("viewBox"), "0 0 24 24");
-        assert.equal(icon.getAttribute("fill"), "none");
-        assert.equal(icon.getAttribute("stroke"), "currentColor");
-        assert.equal(icon.getAttribute("stroke-width"), "2");
+    const icon = createIcon("settings") as unknown as MockSvgElement;
+    assert.ok(icon);
+    assert.equal(icon.tagName, "svg");
+    assert.equal(icon.getAttribute("viewBox"), "0 0 24 24");
+    assert.equal(icon.getAttribute("fill"), "none");
+    assert.equal(icon.getAttribute("stroke"), "currentColor");
+    assert.equal(icon.getAttribute("stroke-width"), "2");
 
-        const paths = icon.children.filter((c) => c.tagName === "path");
-        const circles = icon.children.filter((c) => c.tagName === "circle");
+    assert.equal(icon.children.length, 2);
+    const [gear, circle] = icon.children;
+    assert.equal(gear?.tagName, "path");
+    assert.ok(gear?.getAttribute("d")?.startsWith("M9.671 4.136a2.34 2.34 0 0 1 4.659 0"));
+    assert.equal(circle?.tagName, "circle");
+    assert.equal(circle?.getAttribute("cx"), "12");
+    assert.equal(circle?.getAttribute("cy"), "12");
+    assert.equal(circle?.getAttribute("r"), "3");
 
-        assert.equal(paths.length, 12);
-        assert.equal(circles.length, 2);
-        assert.equal(circles[0]?.getAttribute("cx"), "12");
-        assert.equal(circles[0]?.getAttribute("cy"), "12");
-        assert.equal(circles[0]?.getAttribute("r"), "2");
-        assert.equal(circles[1]?.getAttribute("r"), "8");
-    }
+    assert.equal(createIcon("cog"), undefined);
+});
+
+test("createIcon parses stroke-based Lucide settings-2 mark with two knobs", () =>
+{
+    const icon = createIcon("settings-2") as unknown as MockSvgElement;
+    assert.ok(icon);
+    assert.equal(icon.tagName, "svg");
+    assert.equal(icon.getAttribute("viewBox"), "0 0 24 24");
+    assert.equal(icon.getAttribute("fill"), "none");
+    assert.equal(icon.getAttribute("stroke"), "currentColor");
+    assert.equal(icon.getAttribute("stroke-width"), "2");
+
+    assert.equal(icon.children.length, 4);
+    const [bottomLine, topLine, bottomKnob, topKnob] = icon.children;
+    assert.equal(bottomLine?.tagName, "path");
+    assert.equal(bottomLine?.getAttribute("d"), "M14 17H5");
+    assert.equal(topLine?.tagName, "path");
+    assert.equal(topLine?.getAttribute("d"), "M19 7h-9");
+    assert.equal(bottomKnob?.tagName, "circle");
+    assert.equal(bottomKnob?.getAttribute("cx"), "17");
+    assert.equal(bottomKnob?.getAttribute("cy"), "17");
+    assert.equal(bottomKnob?.getAttribute("r"), "3");
+    assert.equal(topKnob?.tagName, "circle");
+    assert.equal(topKnob?.getAttribute("cx"), "7");
+    assert.equal(topKnob?.getAttribute("cy"), "7");
+    assert.equal(topKnob?.getAttribute("r"), "3");
+
+    assert.equal(createIcon("sliders"), undefined);
 });
 
 test("createIcon parses stroke-based Lucide plus and search marks", () =>
@@ -168,14 +194,8 @@ test("createIcon parses stroke-based Lucide plus and search marks", () =>
     assert.equal(search.children[1]?.getAttribute("r"), "8");
 });
 
-test("createIcon parses stroke-based Lucide sliders, x, close, cloud, and pencil marks", () =>
+test("createIcon parses stroke-based Lucide x, close, cloud, and pencil marks", () =>
 {
-    const sliders = createIcon("sliders") as unknown as MockSvgElement;
-    assert.ok(sliders);
-    assert.equal(sliders.getAttribute("viewBox"), "0 0 24 24");
-    assert.equal(sliders.getAttribute("stroke"), "currentColor");
-    assert.equal(sliders.children.length, 9);
-
     for (const name of ["x", "close"])
     {
         const closeIcon = createIcon(name) as unknown as MockSvgElement;
@@ -238,7 +258,7 @@ test("createIcon and sectionIcon resolve fallback when primary icon is unknown",
     assert.equal(defaultSection.children.length, 2);
     assert.equal(defaultSection.children[0]?.tagName, "path");
 
-    const customSection = sectionIcon("cog") as unknown as MockSvgElement;
+    const customSection = sectionIcon("settings-2") as unknown as MockSvgElement;
     assert.ok(customSection);
-    assert.equal(customSection.children.length, 14);
+    assert.equal(customSection.children.length, 4);
 });

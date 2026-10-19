@@ -103,9 +103,9 @@ Sections and items render in YAML order, with top-level `items` ahead of the sec
 
 `active_item` is optional. When set it must identify a visible HTML action, and it opens only in Autonom's Agent view; the shipped definition leaves it unset so Autonom mode opens on the native New session row instead of a page. The default Autonom page is neither opened nor prefetched while Editor is selected.
 
-A labeled section may carry `buttons` rendered on its label row with the native Spaces header styling. Fields are `id` (required), `label` (tooltip/aria-label, at most 200 characters), `icon` (`search`, `plus`, or `sliders`), `hidden`, `search`, and `actions`. A `search: true` button opens a built-in inline field that filters the section's rows and cannot have an action; every other visible button requires `actions.left_click` pointing at a `.js` file inside the assets directory. Button IDs share the item ID namespace and element count.
+A labeled section may carry `buttons` rendered on its label row with the native Spaces header styling. Fields are `id` (required), `label` (tooltip/aria-label, at most 200 characters), `icon` (`search`, `plus`, or `settings-2`), `hidden`, `search`, and `actions`. A `search: true` button opens a built-in inline field that filters the section's rows and cannot have an action; every other visible button requires `actions.left_click` pointing at a `.js` file inside the assets directory. Button IDs share the item ID namespace and element count.
 
-Navigation item icons resolve from the bundled Lucide-derived SVGs in `assets/icons/` (`timer`, `shield-lock`, `cog`, `plus`, `search`, `sliders`), so they render independently of whatever icon set a native Cloud item uses.
+Navigation item icons resolve from the Lucide marks bundled into the runtime (`timer`, `shield-lock`, `settings`, `plus`, `search`, `settings-2`), so they render independently of whatever icon set a native Cloud item uses.
 
 The launcher validates metadata up front, reads HTML and JS only when invoked, and caches by file identity and modification version. Edits to YAML, CSS, HTML, or JS trigger a debounced atomic reload; invalid definitions retain the last working snapshot. Layout-only reloads do not recapture native services or rebuild the runtime. Active HTML loads before a replacement snapshot is committed, and inactive sources stay unloaded.
 
