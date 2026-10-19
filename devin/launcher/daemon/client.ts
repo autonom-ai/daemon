@@ -1,5 +1,5 @@
 import { object, text } from "../parse";
-import { ensureDefaultConfig, readRouterKey } from "./config";
+import { ensureDefaultConfig, hasRouterKey } from "./config";
 
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
@@ -131,9 +131,9 @@ export class DaemonClient
             if (this.settings.configFile)
             {
                 await ensureDefaultConfig(this.settings.configFile);
-                const routerKey = await readRouterKey(this.settings.configFile);
-                if (!routerKey)
-                    throw new Error(`OpenRouter API key is not configured. Set router.key in ${this.settings.configFile}.`);
+                if (!await hasRouterKey(this.settings.configFile))
+                    throw new Error(`OpenRouter API key is not configured. Set router.key in ${this.settings.configFile},`
+                        + " either to the key itself or to the name it is stored under in the .env beside that file.");
             }
             await startDaemon(root, this.settings);
             health = await this.probe();

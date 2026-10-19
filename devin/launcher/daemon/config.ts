@@ -84,18 +84,21 @@ export async function ensureDefaultConfig(configFile: string): Promise<void>
     }
 }
 
-export async function readRouterKey(configFile: string): Promise<string>
+/// Reports whether the router has a usable key, without ever returning the key
+/// itself. A bare uppercase identifier is a credential reference the daemon
+/// resolves from the `.env` beside the configuration file.
+export async function hasRouterKey(configFile: string): Promise<boolean>
 {
     try
     {
         const document = parseYaml(await readPrivateFile(configFile)) as unknown;
         const router = object(object(document)?.router);
         const key = router?.key;
-        return typeof key === "string" ? key : "";
+        return typeof key === "string" && !!key.trim();
     }
     catch
     {
-        return "";
+        return false;
     }
 }
 
@@ -107,7 +110,9 @@ offlineStartAfter: 1h
 offlineCompactAfter: 1h
 router:
   type: openrouter
-  key: ""
+  # Either the key itself, or the name it is stored under in the .env beside
+  # this file. See docs/DAEMON.md.
+  key: "OPENROUTER_API_KEY"
   url: https://openrouter.ai
   name: OpenRouter
   referer: ""

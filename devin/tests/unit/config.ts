@@ -1,5 +1,5 @@
 import { readSettings, saveSettings, validateSettings } from "../../launcher/config";
-import { defaultConfigTemplate, ensureDefaultConfig, readDaemonConfig, readDataDir, readRouterKey, saveDaemon } from "../../launcher/daemon/config";
+import { defaultConfigTemplate, ensureDefaultConfig, hasRouterKey, readDaemonConfig, readDataDir, saveDaemon } from "../../launcher/daemon/config";
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -60,9 +60,39 @@ test("the daemon configuration exposes known fields and a data directory", async
             offlineCompactAfter: "1h",
         });
         assert.equal(await readDataDir(path), join(homedir(), ".local/share/autonom"));
-        assert.equal(await readRouterKey(path), "");
+        // The shipped template names a reference rather than inviting a pasted credential.
+        assert.equal(await hasRouterKey(path), true);
         assert.deepEqual(await readDaemonConfig(join(root, "missing.yml")), {});
         assert.equal(await readDataDir(join(root, "missing.yml")), root);
+    }
+    finally
+    {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("a router key reference is accepted without the launcher reading the credential", async () =>
+{
+    const root = await directory();
+    try
+    {
+        const path = join(root, "config.yml");
+        await writeFile(path, "devinCommand: devin\nrouter:\n  type: openrouter\n"
+            + "  key: OPENROUTER_API_KEY\n  url: https://openrouter.ai\n  name: OpenRouter\n");
+        assert.equal(await hasRouterKey(path), true);
+
+        await writeFile(path, "devinCommand: devin\nrouter:\n  type: openrouter\n"
+            + '  key: "sk-or-v1-literal"\n  url: https://openrouter.ai\n  name: OpenRouter\n');
+        assert.equal(await hasRouterKey(path), true);
+
+        await writeFile(path, "devinCommand: devin\nrouter:\n  type: openrouter\n"
+            + '  key: ""\n  url: https://openrouter.ai\n  name: OpenRouter\n');
+        assert.equal(await hasRouterKey(path), false);
+
+        await writeFile(path, "devinCommand: devin\nrouter:\n  type: openrouter\n"
+            + "  key: 42\n  url: https://openrouter.ai\n  name: OpenRouter\n");
+        assert.equal(await hasRouterKey(path), false);
+        assert.equal(await hasRouterKey(join(root, "missing.yml")), false);
     }
     finally
     {

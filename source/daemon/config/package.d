@@ -1,6 +1,7 @@
 module daemon.config;
 
 public import daemon.config.parse;
+public import daemon.config.secret;
 import daemon.storage;
 
 import intuit.router : IRouter;
@@ -91,7 +92,7 @@ public:
             seen[key] = true;
             if (key == "router")
             {
-                router = createRouter(pair.value);
+                router = createRouter(pair.value, base);
                 continue;
             }
 
