@@ -6,7 +6,7 @@ The daemon is one persistent Serverino worker plus a small number of threads. Ev
 | --- | --- |
 | Main process | Process lifetime, argument parsing, and the ACP entrypoint when started as `autonom-acp`. |
 | Worker | The HTTP API and all domain state. |
-| Monitor threads | One per owned child: session, execution, and wake children, plus their call state. |
+| Monitor threads | One per asynchronous call, owning its child or its request on an existing connection, plus call state. |
 | Scheduler | Schedule evaluation and wake delivery. It requests loopback refreshes; it does not write state. |
 
 `daemon.api` assembles the owners. HTTP handlers validate input and call into them; they do not keep state of their own. Human permission waits and child output never occupy the worker.
@@ -58,7 +58,7 @@ failure names the variable and the file.
 | `devinCommand` | Required | The Devin CLI executable or path. |
 | `router` | Required | `type`, `key`, `url`, and `name` (plus optional `referer` and `title`) for policy screening. See [credentials](#credentials). |
 | `sessionLockDir` | `$XDG_DATA_HOME/devin/cli/session_locks` | Native Devin lock directory. |
-| `executionTimeout` | 30m | Hard limit on one child process. |
+| `executionTimeout` | 30m | Hard limit on one call. |
 | `compactOnResume` | `false` | Compact a session before resuming it. |
 | `offlineStartAfter` | 1h | When an offline profile's wake is considered stale. |
 | `offlineCompactAfter` | 1h | When an idle session compacts on its next resume. |
@@ -66,7 +66,7 @@ failure names the variable and the file.
 | `maxStreamEntries` | 1000 | Active stream entries before rotation. |
 | `callCapacity` | 128 | Settled call tickets held in memory. |
 | `callSettleTimeout` | 5m | Age at which a settled call ticket is evicted. |
-| `maxConcurrentCalls` | 8 | Concurrent child calls. |
+| `maxConcurrentCalls` | 8 | Concurrent calls, including prompts sharing a connection. |
 | `pruneExecutionArtifacts` | `false` | Remove call logs after settling. |
 | `allowDestructivePruning` | `false` | Permit pruning outside Autonom's own artifacts. |
 
@@ -104,7 +104,7 @@ Three credentials, each scoped to one audience. They never appear in pages, webv
 
 ## Calls and bounds
 
-A call is one owned child process. Settled calls are evicted oldest-first; a running call is never evicted, and eviction persists metadata first.
+A call is one bounded asynchronous operation: an owned child process or a prompt on an existing ACP connection. Settled calls are evicted oldest-first; a running call is never evicted, and eviction persists metadata first.
 
 | Bound | Value | Effect |
 | --- | --- | --- |

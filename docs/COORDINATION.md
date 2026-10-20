@@ -7,7 +7,7 @@ Coordination is how profiles talk to each other and to the operator. Everything 
 | **Profile** | A registered identity, named once and reused across sessions. | `agents/` |
 | **Room** | A named workspace with an owner, admins, and an optional membership restriction. | `coord/rooms/<name>/` |
 | **Message** | A room post or a direct message. Ordered per stream, durable, read through cursors. | `coord/rooms/<name>/messages.jsonl`, `coord/inboxes/<profile>/dms.jsonl` |
-| **Ping** | An urgent notice aimed at specific profiles. Interrupts them, or wakes them when offline. | `coord/inboxes/<profile>/pings.jsonl` |
+| **Ping** | An urgent notice aimed at specific profiles. Steers an active turn, waits for a human request, or wakes an idle/offline session. | `coord/inboxes/<profile>/pings.jsonl` |
 | **Event** | Something a profile has not read yet: pings, room and DM activity, clock wakes. | `coord/inboxes/<profile>/events.json` |
 | **Schedule** | A durable instruction that delivers an event later. | `coord/inboxes/<profile>/schedules.json` |
 
@@ -40,14 +40,23 @@ A message carries its author, room, text, a UUID, and a timestamp. Direct messag
 
 ## Pings, events, and delivery
 
-A ping is an event with urgency. Events reach a profile in one of two ways:
+Delivery uses the session's loaded state and its owner's outstanding requests:
 
 | Path | When |
 | --- | --- |
-| Injected context | The next `PostToolUse` or `UserPromptSubmit` hook returns a reminder with up to five summaries and the unread count. |
-| Wake | The scheduler resumes the profile's session with the event text, or starts a fresh session in the sender's workspace when no session exists. |
+| Steer | A running managed turn receives an automatic `session/prompt` on its existing connection. Devin merges it into the turn without cancellation. All scheduled event types use this path. |
+| Idle wake | A loaded idle session receives the prompt on that connection; a held lock does not suppress it. |
+| Offline wake | Load the existing conversation, or start a fresh session in the sender's workspace under the offline-age rule. |
+| Deferred inbox | A pending native question, permission, other client request, unavailable owner, or in-flight wake leaves the event durable with `deferred: true`. The scheduler retries after the condition clears. |
+| Advisory inbox | Definite refusal, failure, interruption, missing recovery information, or lack of a usable workspace leaves readable context without automatic prompt replay. |
 
-If a wake cannot be delivered, the event stays in the inbox. Unread events are advisory: they never block a tool call. Reading them clears them.
+Only managed sessions receive automatic prompts. The connection rechecks outstanding client requests when admitting automatic delivery, under the same mutex as request correlation. A wait appearing after the scheduler's check returns a `deferred` call and queues the event again. Native permissions and questions retain their existing 240-second client-request deadline; wakes introduce no independent human timeout. A foreign held lock remains `unknown` until an owner becomes available or the lock releases. Owned load, compaction, and teardown phases also defer delivery until normal prompt admission is available.
+
+The inbox bounds deferred events to 1,000 per profile. Reading an event or its source stream clears it and cancels any deferred delivery. One wake is in flight per profile, and existing call capacity and ACP request bounds also apply. An event already accepted for a profile is suppressed by durable receipts for the latest 1,000 IDs, including after it is read or delivered. Clock IDs combine schedule ID and due tick, so a retried occurrence has the same identity. This is a bounded deduplication window, not an unlimited exactly-once guarantee.
+
+An attempt is persisted as advisory before launching child work. Restart recovery never replays an uncertain prompt: it binds a late successful session when possible or restores the events to the inbox. Completed wake rows are removed. Corrupt wake files are preserved as `wakes.json.corrupt-<uuid>` while startup continues; malformed rows are skipped. Corrupt receipt files are likewise preserved; the surviving inbox still suppresses its own duplicate IDs.
+
+Unread events remain advisory and never block tools. `PostToolUse` and `UserPromptSubmit` retain their bounded reminders for fallback events; successful prompt delivery removes those events, so the hooks do not repeat them. Policy screening still applies to every tool call, including bypassed calls.
 
 An event has one of four types: `room`, `dm`, `ping`, or `clock`.
 
@@ -91,7 +100,7 @@ The coordination MCP server is a stdio proxy: it authenticates to the daemon ove
 | `add_room_admin` | Make a profile an admin. Original owner only. |
 | `remove_room_admin` | Remove an admin. Original owner only. |
 
-The hook injects the session ID into coordination tool calls, so a model never supplies one. Online status comes from the Devin CLI's local session lock and therefore only reflects this machine.
+The hook injects the session ID into coordination tool calls, so a model never supplies one. Online status describes locally loaded sessions. Activity comes from the owning ACP request map; foreign locks cannot reveal it.
 
 ## On-disk layout
 
@@ -101,8 +110,8 @@ Everything below lives under `dataDir`, default `~/.local/share/autonom`:
 | --- | --- |
 | `agents/` | Profile assignments and bindings. |
 | `coord/rooms/<name>/` | `messages.jsonl` and `profiles.json` (owner, admins, involvement). |
-| `coord/inboxes/<profile>/` | `dms.jsonl`, `pings.jsonl`, `events.json`, `schedules.json`, `cursors.json`. |
-| `coord/wakes.json` | Pending wake state for offline profiles. |
+| `coord/inboxes/<profile>/` | `dms.jsonl`, `pings.jsonl`, `events.json`, `receipts.json`, `schedules.json`, `cursors.json`. |
+| `coord/wakes.json` | In-flight automatic delivery tickets, including loaded sessions. |
 | `sessions/` | Per-session logs. |
 | `executions/` | Call output, error, and the execution index. |
 | `acp/` | Managed ACP connection state. |

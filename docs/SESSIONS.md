@@ -1,6 +1,6 @@
 # Sessions
 
-A session is one Devin CLI conversation with a durable identity: a canonical ID, a workspace, a model, a transcript, and — while it is running — one live ACP connection. Autonom supervises sessions; it does not reimplement them. The model, its tools, and its transcript belong to the Devin CLI.
+A session is one Devin CLI conversation with a durable identity: a canonical ID, a workspace, a model, and a transcript. A live ACP process can keep it loaded between turns. Autonom supervises sessions; the model, tools, and transcript belong to the Devin CLI.
 
 Two kinds exist, and the difference decides what Autonom may do with them:
 
@@ -13,7 +13,7 @@ Two kinds exist, and the difference decides what Autonom may do with them:
 
 Autonom children run the CLI with `CHISEL_SESSION_DB=<dataDir>/cli/sessions.db` and locks in `<dataDir>/cli/session_locks`, so managed sessions never share rows with native Devin state. Both databases are opened read-only.
 
-`sessionDatabase` and `sessionLockDir` in the daemon configuration point at the *native* catalog; the managed catalog is always `<dataDir>/cli/sessions.db`. Listing merges both catalogs and prefers managed rows when an ID appears twice. Resume, removal, transcript reads, and lock checks resolve against the catalog that owns the session.
+`sessionDatabase` and `sessionLockDir` in the daemon configuration point at the *native* catalog; the managed catalog is always `<dataDir>/cli/sessions.db`. A held kernel lock selects a live catalog owner. With no holder, database membership selects the catalog, preferring the managed row for duplicate IDs. Stale lock files never select a catalog. An ID held in both catalogs is an explicit conflict. Listing, metadata, resume, removal, and transcripts use that ownership rule.
 
 Existing tagged sessions are moved by a one-off offline migration. The daemon never moves or writes CLI rows.
 
@@ -35,17 +35,33 @@ A profile is a name a session registers as through the `set_profile` MCP tool. T
 | --- | --- |
 | Names | 1–64 characters, start with a letter or digit, then letters, digits, `_`, or `-`. Lowercased. |
 | `human` | Reserved for the operator. It always exists and cannot be created. |
-| Binding | One session is registered per profile at a time. The mapping is released when the session stops or the profile is reassigned. |
+| Binding | One session is registered per profile at a time. Its durable assignment survives going offline. |
 | Identity | A profile carries no prompt or model of its own. It owns an inbox, events, and schedules. |
 
 Profile-to-session resolution is independent of discovery and admission: a profile keeps its assignment even while the session is offline.
 
 ## Lifecycle
 
+Session responses expose two independent fields:
+
+| Field | Value | Meaning |
+| --- | --- | --- |
+| `status` | `online` | A live process holds this session loaded, including between turns. "Attached" means this loaded lifetime. |
+| | `offline` | No live process holds it. A stale lock file does not change this. |
+| | `starting`, `stopping` | A daemon-owned call is attaching or being stopped. |
+| `activity` | `idle` | No prompt or client request is outstanding on the owning connection, or the session is offline. |
+| | `running` | A prompt response is outstanding. Silent tools remain running. |
+| | `waiting` | A backend request awaits its client: native questions, permissions, or other client requests. |
+| | `unknown` | Autonom cannot safely admit a prompt: a foreign holder, unavailable connector, or owned connection in setup, compaction, or teardown. |
+
+The connection's request map supplies activity; observation heartbeats carry membership only. Desktop activity is read through its authenticated control socket with a 250 ms deadline. An unavailable control channel never grants permission to start a second process. There is no silence timeout and no inference from transcript text or lock-file contents.
+
+A prompt response ends a turn; EOF ends the connection. `stopReason` is retained on its call and execution index: `end_turn` succeeds, `cancelled` stops, and `max_tokens`, `max_turn_requests`, `refusal`, unknown reasons, and RPC errors fail the call. Disconnecting before the response produces `interrupted`. A failed call does not make a loaded session offline, and loading an interrupted conversation does not replay its old turn.
+
 | Operation | Route | Behavior |
 | --- | --- | --- |
 | Start | `POST /api/sessions` | Accepts `prompt` and `directory`, plus optional `model`, `mode`, `profile`, and `trusted`. Returns 202 with the started session. |
-| Resume | `POST /api/sessions/<id>/resume` | Restarts the conversation in the same session with a new prompt. |
+| Resume | `POST /api/sessions/<id>/resume` | Sends a new prompt to the idle owning connection, or loads the offline conversation in a new process. |
 | Steer | `POST /api/sessions/<id>/steer` | Injects text into a running generation without cancelling it. |
 | Stop | `POST /api/sessions/<id>/stop` | Cancels the current generation and settles pending permissions. |
 | Remove | `POST /api/sessions/remove` | Deletes the session from the catalog that owns it. |
@@ -53,6 +69,8 @@ Profile-to-session resolution is independent of discovery and admission: a profi
 Starting a session for a profile that is already active is a conflict: the daemon refuses rather than queueing a second agent for one identity.
 
 Child work is bounded. At most eight calls run concurrently, each with a 30-minute execution timeout. Settled call tickets are evicted after five minutes or when the registry exceeds 128 entries, oldest first; a running call is never evicted. Eviction persists metadata to `executions/index.json` (bounded to 10,000 entries) first, so historical IDs still resolve. Call tickets are not durable history.
+
+An automatic event prompt has its own call ticket on the existing connection. Its result cannot replace the ticket controlling the original headless turn. Internally, `hasActiveCall()` names an owned call, while `activity` describes the actual ACP turn.
 
 ## Supervision
 
