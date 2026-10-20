@@ -2,7 +2,8 @@
 bin/
 .env
 test-workspace
-.agents/
+.agents/*
+!.agents/skills
 .playwright-mcp/
 __pycache__
 
