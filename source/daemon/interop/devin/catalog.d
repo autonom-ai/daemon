@@ -3,11 +3,34 @@ module daemon.interop.devin.catalog;
 import daemon.interop.devin.db : readSessionCatalog, readSessionMessages, readSessionMetadata;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.session : Session;
+import daemon.exception : ConflictException;
+import daemon.storage : openFile;
 
+import core.stdc.errno : errno, EWOULDBLOCK;
+import core.sys.linux.sys.file : flock, LOCK_EX, LOCK_NB;
+import core.sys.posix.fcntl : O_RDONLY;
 import std.algorithm : sort;
+import std.exception : ErrnoException;
 import std.file : exists;
 import std.json : JSONValue;
 import std.path : buildPath, dirName;
+import std.stdio : File;
+
+bool heldLock(string path)
+{
+    if (!exists(path))
+        return false;
+
+    File file = openFile(path, O_RDONLY);
+    scope(exit)
+        file.close();
+
+    int result = flock(file.fileno, LOCK_EX | LOCK_NB);
+    if (result != 0 && errno != EWOULDBLOCK)
+        throw new ErrnoException("Could not inspect session lock");
+
+    return result != 0;
+}
 
 /// Read both CLI catalogs without granting control or moving sessions between them.
 class Catalog
@@ -36,6 +59,14 @@ class Catalog
             {
                 if (entry.id !in seen)
                     ret ~= entry;
+                else if (databaseFor(entry.id) == localDatabase)
+                {
+                    foreach (ref existing; ret)
+                    {
+                        if (existing.id == entry.id)
+                            existing = entry;
+                    }
+                }
             }
         }
 
@@ -48,11 +79,7 @@ class Catalog
     SessionMetadata metadata(string id) const
     {
         Session.validateId(id);
-        SessionMetadata ret = readSessionMetadata(database, id);
-        if (!ret.id.length && localDatabase != database)
-            ret = readSessionMetadata(localDatabase, id);
-
-        return ret;
+        return readSessionMetadata(databaseFor(id), id);
     }
 
     string databaseFor(string id) const
@@ -61,15 +88,19 @@ class Catalog
             return database;
 
         Session.validateId(id);
+        bool managedHeld = heldLock(buildPath(dirName(database), "session_locks", id~".lock"));
+        bool nativeHeld = localDatabase != database && heldLock(buildPath(localLockDirectory, id~".lock"));
+        if (managedHeld && nativeHeld)
+            throw new ConflictException("Session ID is loaded in both catalogs");
+        if (managedHeld)
+            return database;
+        if (nativeHeld)
+            return localDatabase;
+
         if (readSessionMetadata(database, id).id.length)
             return database;
         if (localDatabase != database && readSessionMetadata(localDatabase, id).id.length)
             return localDatabase;
-        if (exists(buildPath(dirName(database), "session_locks", id~".lock")))
-            return database;
-        if (exists(buildPath(localLockDirectory, id~".lock")))
-            return localDatabase;
-
         return database;
     }
 

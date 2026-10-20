@@ -84,12 +84,14 @@ string[] collectCalls(Bridge owner)
                     owner.access.remember(id, execution.trusted);
 
                 Session session = owner.session(id);
-                if (session.execution is null || session.execution.createdAt <= execution.createdAt)
+                if (!execution.automatic &&
+                    (session.execution is null || session.execution.createdAt <= execution.createdAt))
                     session.bindCall(execution);
             }
         }
 
         execution.collected = true;
+        owner.recordExecution(execution);
     }
 
     Call[] settledCalls;

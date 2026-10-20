@@ -28,6 +28,14 @@ class AcpException : Exception
     }
 }
 
+class AcpDisconnectedException : AcpException
+{
+    this(string message)
+    {
+        super(-32000, message);
+    }
+}
+
 package(daemon.interop.acp) class Response
 {
     Frame sent;
@@ -37,6 +45,7 @@ package(daemon.interop.acp) class Response
     JSONValue result;
     int errorCode;
     string error;
+    bool interrupted;
 }
 
 package(daemon.interop.acp) struct Incoming
@@ -157,6 +166,8 @@ public:
                 {
                     Response result = *response;
                     requests.remove(id);
+                    if (result.interrupted)
+                        throw new AcpDisconnectedException(result.error);
                     if (result.error.length)
                         throw new AcpException(result.errorCode, result.error);
                     return result.result;
@@ -177,7 +188,7 @@ public:
     JSONValue request(string method, JSONValue params = JSONValue.emptyObject, Duration timeout = Duration.max)
         => await(send(method, params), timeout);
 
-    bool poll(long id, out JSONValue result, out int code, out string message)
+    bool poll(long id, out JSONValue result, out int code, out string message, bool* interrupted = null)
     {
         this.expire();
         synchronized (stateMutex)
@@ -188,6 +199,8 @@ public:
             result = found.result;
             code = found.errorCode;
             message = found.error;
+            if (interrupted !is null)
+                *interrupted = found.interrupted;
             requests.remove(id);
             return true;
         }
@@ -349,6 +362,7 @@ package(daemon.interop.acp):
                 response.done = true;
                 response.errorCode = -32000;
                 response.error = failure;
+                response.interrupted = true;
             }
             updated.notifyAll();
         }

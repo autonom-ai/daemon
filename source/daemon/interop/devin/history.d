@@ -33,12 +33,15 @@ package(daemon.interop.devin) void loadExecutionIndex(Bridge owner)
 
                 JSONValue record = JSONValue.emptyObject;
                 record["id"] = JSONValue(id.idup);
-                foreach (field; ["sessionId", "createdAt", "finishedAt", "status", "model", "workspace", "mode"])
+                foreach (field; ["sessionId", "createdAt", "finishedAt", "status", "stopReason", "model", "workspace", "mode"])
                 {
                     record[field] = field in item.object && item[field].type == JSONType.string
                         ? JSONValue(item[field].str.idup)
                         : JSONValue(null);
                 }
+
+                if (record["status"] == JSONValue("running") || record["status"] == JSONValue("stopping"))
+                    record["status"] = JSONValue("interrupted");
 
                 owner.executionRecords[id.idup] = record;
                 owner.executionOrder ~= id.idup;
@@ -85,7 +88,7 @@ package(daemon.interop.devin) void recordExecution(Bridge owner, Call call)
 {
     JSONValue data = call.toJSON();
     JSONValue record = JSONValue.emptyObject;
-    foreach (field; ["id", "sessionId", "createdAt", "finishedAt", "status", "model", "workspace", "mode"])
+    foreach (field; ["id", "sessionId", "createdAt", "finishedAt", "status", "stopReason", "model", "workspace", "mode"])
         record[field] = data[field];
 
     if (call.id !in owner.executionRecords)

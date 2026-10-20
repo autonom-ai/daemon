@@ -24,12 +24,6 @@ void dropObserved(Bridge owner, string id)
 bool observedSession(Bridge owner, string id)
     => (id in owner.observed) !is null;
 
-bool observedActive(Bridge owner, string id)
-{
-    Bridge.Observed* found = id in owner.observed;
-    return found !is null && found.active;
-}
-
 string observedConnection(Bridge owner, string id)
 {
     Bridge.Observed* found = id in owner.observed;
@@ -43,7 +37,7 @@ string observedDirectory(Bridge owner, string id)
 }
 
 void observeConnection(Bridge owner, string connection, string[] ids, string[string] directories,
-    bool[string] active, bool closed)
+    bool closed)
 {
     try
         UUID(connection);
@@ -68,8 +62,7 @@ void observeConnection(Bridge owner, string connection, string[] ids, string[str
         Session.validateId(id);
         owner.observed[id.idup] = Bridge.Observed(
             connection.idup,
-            directories.get(id, null),
-            active.get(id, false)
+            directories.get(id, null)
         );
         listed[id.idup] = true;
     }
@@ -89,8 +82,7 @@ void admitObserved(Bridge owner, string connection, string id, string directory)
         connection.idup,
         directory.length
             ? directory
-            : found !is null && found.connection == connection ? found.directory : null,
-        found !is null && found.connection == connection && found.active
+            : found !is null && found.connection == connection ? found.directory : null
     );
 }
 
@@ -148,22 +140,19 @@ void observe(Request request, Output output)
 
     string[] ids;
     string[string] directories;
-    bool[string] active;
     foreach (entry; data["sessions"].array)
     {
         if (entry.type != JSONType.object)
             throw new InvalidInputException("Invalid observed session");
         foreach (name, value; entry.object)
         {
-            if (name != "id" && name != "directory" && name != "active")
+            if (name != "id" && name != "directory")
                 throw new InvalidInputException("Invalid observed session field");
             if ((name == "id" || name == "directory") && value.type != JSONType.string)
                 throw new InvalidInputException("Invalid observed session field");
-            if (name == "active" && value.type != JSONType.true_ && value.type != JSONType.false_)
-                throw new InvalidInputException("Invalid observed session field");
         }
-        if ("id" !in entry.object || "directory" !in entry.object || "active" !in entry.object)
-            throw new InvalidInputException("Bridge.Observed sessions require id, directory, and active");
+        if ("id" !in entry.object || "directory" !in entry.object)
+            throw new InvalidInputException("Observed sessions require id and directory");
 
         Session.validateId(entry["id"].str);
         if (entry["directory"].str.canFind('\0'))
@@ -171,10 +160,9 @@ void observe(Request request, Output output)
 
         ids ~= entry["id"].str.idup;
         directories[entry["id"].str.idup] = entry["directory"].str.idup;
-        active[entry["id"].str.idup] = entry["active"].boolean;
     }
 
-    daemon.api.bridge.observeConnection(data["connection"].str, ids, directories, active, data["closed"].boolean);
+    daemon.api.bridge.observeConnection(data["connection"].str, ids, directories, data["closed"].boolean);
     respond(output, JSONValue(["ok": JSONValue(true)]));
 }
 

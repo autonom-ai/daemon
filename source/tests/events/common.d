@@ -145,6 +145,7 @@ struct WakeFixture
 
     void close()
     {
+        scheduler.stop();
         bridge.close();
         fixture.close();
     }

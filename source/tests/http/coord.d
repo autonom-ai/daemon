@@ -61,16 +61,10 @@ unittest
     request("/api/messages?session=session-2&source=bad", 400);
     request("/api/messages?session=session-2", 404, `{"to":"missing","text":"hi"}`);
 
-    mkdirRecurse(fixture.config.sessionLockDir);
-    File lock = File(buildPath(fixture.config.sessionLockDir, "session-2.lock"), "w+");
-    scope(exit)
-    {
-        if (lock.isOpen)
-            lock.close();
-    }
-
-    flock(lock.fileno, LOCK_EX).should == 0;
-    hookSession(fixture, "session-2");
+    hookSession(fixture, "session-2", null, true, "permission");
+    waitUntil(delegate bool() {
+        return request("/api/sessions/session-2/permissions").array.length == 1;
+    });
     mkdirRecurse(buildPath(fixture.root, ".devin"));
     write(buildPath(fixture.root, ".devin", "policy.yml"), "rules:\n  - action: allow\n");
     JSONValue gate = JSONValue([

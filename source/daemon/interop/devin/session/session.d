@@ -5,8 +5,9 @@ import daemon.interop.call : Call, CallStatus;
 import daemon.interop.devin.bridge : Bridge;
 import daemon.interop.devin.connection;
 import daemon.interop.devin.session.control;
+import daemon.interop.devin.session.activity;
 import daemon.interop.metadata : SessionMetadata;
-import daemon.interop.session : SessionBase = Session, SessionStatus;
+import daemon.interop.session : SessionBase = Session, SessionStatus, TurnStatus;
 
 import std.json : JSONValue;
 import std.typecons : Nullable;
@@ -39,8 +40,14 @@ public:
     override Call execution()
         => _execution;
 
-    override bool isRunning()
+    override bool hasActiveCall()
         => _execution !is null && _execution.running;
+
+    override TurnStatus activity()
+        => daemon.interop.devin.session.activity.activity(bridge, id);
+
+    override Call deliver(string prompt)
+        => daemon.interop.devin.session.activity.deliver(bridge, id, prompt);
 
     override void stop()
     {
@@ -67,6 +74,7 @@ public:
         JSONValue ret = data.toJSON();
         ret["id"] = JSONValue(id);
         ret["status"] = JSONValue(cast(string)status);
+        ret["activity"] = JSONValue(cast(string)activity);
         ret["exitStatus"] = exitStatus.isNull ? JSONValue(null) : JSONValue(exitStatus.get);
         ret["executionId"] = _execution is null ? JSONValue(null) : JSONValue(_execution.id);
         return ret;
@@ -75,18 +83,21 @@ public:
     override SessionMetadata metadata()
     {
         SessionMetadata ret = _metadata;
+        if (_execution !is null)
+        {
+            if (!ret.model.length)
+                ret.model = _execution.model;
+            if (!ret.mode.length)
+                ret.mode = _execution.mode;
+            if (!ret.directory.length)
+                ret.directory = _execution.workspace;
+        }
         if (!ret.id.length)
         {
-            if (_execution !is null)
-            {
-                ret.model = _execution.model;
-                ret.mode = _execution.mode;
-                ret.directory = _execution.workspace;
-            }
-            else
+            if (!ret.directory.length)
                 ret.directory = bridge.observedDirectory(id);
 
-            if (isRunning() || bridge.observedSession(id))
+            if (hasActiveCall() || bridge.observedSession(id))
                 ret.acp = "autonom";
         }
 
@@ -98,16 +109,10 @@ public:
         if (execution !is null && execution.status == CallStatus.Stopping)
             return SessionStatus.Stopping;
 
-        if (isRunning())
+        if (hasActiveCall())
             return bridge.online(id) ? SessionStatus.Online : SessionStatus.Starting;
-        if (bridge.observedActive(id))
-            return SessionStatus.Online;
         if (bridge.online(id))
-            return SessionStatus.Loaded;
-
-        if (execution !is null && (execution.status == CallStatus.Failed ||
-            execution.status == CallStatus.Interrupted))
-            return SessionStatus.Failed;
+            return SessionStatus.Online;
 
         return SessionStatus.Offline;
     }
@@ -121,14 +126,14 @@ public:
     {
         if (bridge.observedSession(id))
         {
-            if (bridge.observedActive(id))
+            if (hasActiveCall() || activity != TurnStatus.Idle)
                 throw new ConflictException("Session is already active");
 
             bridge.resumeObserved(id, prompt, directory, model, mode);
             return;
         }
 
-        if (isRunning() || bridge.online(id))
+        if (hasActiveCall() || bridge.online(id))
             throw new ConflictException("Session is already active");
 
         bridge.resume(id, prompt, directory, model, false, mode);
@@ -139,9 +144,9 @@ public:
 
     override void requestStop()
     {
-        if (isRunning())
+        if (hasActiveCall())
             execution.requestStop();
-        else if (bridge.observedActive(id))
+        else if (bridge.observedSession(id) && activity != TurnStatus.Idle)
             bridge.cancelObserved(id);
         else if (bridge.online(id))
             throw new ConflictException("Cannot stop a session owned by another process");

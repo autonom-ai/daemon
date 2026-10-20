@@ -246,7 +246,7 @@ private:
         => buildPath(directory, "state.json");
 
     bool locked(Profile profile)
-        => profile.session !is null && (profile.session.isRunning() || bridge.online(profile.session.id));
+        => profile.session !is null && (profile.session.hasActiveCall() || bridge.online(profile.session.id));
 
     void load()
     {

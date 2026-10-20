@@ -83,7 +83,7 @@ unittest
     fixture.events.unread(marlow)[0].type.should == EventType.Ping;
     fixture.events.unread(marlow)[0].text.should == "hello";
     fixture.events.unread(marlow)[0].from.should == "wren";
-    fixture.store.get("marlow").session.isRunning().should == false;
+    fixture.store.get("marlow").session.hasActiveCall().should == false;
     invocations(fixture.fixture.root).length.should == 1;
 }
 

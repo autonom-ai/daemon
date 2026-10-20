@@ -24,7 +24,6 @@ private:
     {
         string directory;
         string capability;
-        size_t prompts;
     }
 
     AcpClient agent;
@@ -83,8 +82,7 @@ private:
 
                 listed.array ~= JSONValue([
                     "id": JSONValue(session),
-                    "directory": JSONValue(instance.directory),
-                    "active": JSONValue(instance.prompts != 0)
+                    "directory": JSONValue(instance.directory)
                 ]);
             }
             post("/api/acp/observe", JSONValue([
@@ -128,31 +126,10 @@ private:
             }
             frame.value["params"] = params;
         }
-        else if (method == "session/prompt")
-        {
-            string session = frame.value["params"]["sessionId"].str;
-            synchronized (mutex)
-            {
-                if (session in sessions)
-                    sessions[session].prompts++;
-            }
-            queueObservation();
-        }
     }
 
     void beforeReply(ref Frame frame, Frame sent)
     {
-        if (sent.method == "session/prompt")
-        {
-            string session = sent.value["params"]["sessionId"].str;
-            synchronized (mutex)
-            {
-                if (session in sessions && sessions[session].prompts)
-                    sessions[session].prompts--;
-            }
-            queueObservation();
-            return;
-        }
         if ((sent.method != "session/new" && sent.method != "session/load") || "error" in frame.value.object)
             return;
         JSONValue params = sent.value["params"];
@@ -183,7 +160,7 @@ private:
             }
         }
         synchronized (mutex)
-            sessions[session.idup] = Instance(directory.idup, issued.idup, 0);
+            sessions[session.idup] = Instance(directory.idup, issued.idup);
 
         queueObservation();
     }
@@ -228,6 +205,10 @@ private:
         case "session/prompt":
         case "session/set_config_option":
             return agent.request(method, params, 30 * 60.seconds);
+        case "autonom/activity":
+            return JSONValue(cast(string)agent.activity(session));
+        case "autonom/deliver":
+            return agent.await(agent.deliver(params), 30 * 60.seconds);
         case "autonom/permissions":
             return agent.permissions(session, "id" in params.object ? params["id"].integer : 0);
         case "autonom/permission":

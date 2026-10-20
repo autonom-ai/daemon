@@ -8,7 +8,7 @@ import arsd.sqlite : Sqlite;
 import unit_threaded : Name, should;
 
 import core.sys.linux.sys.file : flock, LOCK_EX;
-import std.file : mkdirRecurse;
+import std.file : mkdirRecurse, write;
 import std.json : JSONValue;
 import std.path : buildPath;
 import std.stdio : File;
@@ -42,6 +42,20 @@ unittest
     catalog.databaseFor("session-one").should == managed;
     catalog.databaseFor("local-only").should == fixture.config.sessionDatabase;
     catalog.databaseFor(null).should == managed;
+
+    mkdirRecurse(buildPath(directory, "session_locks"));
+    write(buildPath(directory, "session_locks", "local-only.lock"), "stale pid");
+    catalog.databaseFor("local-only").should == fixture.config.sessionDatabase;
+
+    mkdirRecurse(fixture.config.sessionLockDir);
+    File lock = File(buildPath(fixture.config.sessionLockDir, "session-one.lock"), "w");
+    scope(exit)
+        lock.close();
+    flock(lock.fileno, LOCK_EX).should == 0;
+    catalog.databaseFor("session-one").should == fixture.config.sessionDatabase;
+    catalog.metadata("session-one").model.should == "swe-2-medium";
+    lock.close();
+    catalog.databaseFor("session-one").should == managed;
 
     string message = JSONValue(["role": JSONValue("assistant"), "content": JSONValue("local history")]).toString();
     local.query("insert into message_nodes values ('local-only', 3, null, ?, 100)", message);
