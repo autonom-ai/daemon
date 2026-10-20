@@ -6,9 +6,11 @@ import daemon.coord.stream : stdTimeTicksPerMillisecond;
 import daemon.storage;
 
 import std.datetime : Clock, UTC;
+import std.algorithm : canFind;
 import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : buildPath;
+import std.stdio : stderr;
 import std.uuid : randomUUID;
 
 enum maxEvents = 1000;
@@ -18,6 +20,7 @@ class EventStore
 {
 private:
     Event[][string] pending;
+    string[][string] receipts;
 
 public:
     const string directory;
@@ -29,7 +32,26 @@ public:
             throw new Exception("Coordination directory must not be a symlink");
 
         foreach (Profile profile; store.list())
+        {
             pending[profile.name] = load(profile.name);
+            string path = buildPath(inboxDir(profile.name), "receipts.json");
+            if (exists(path))
+            {
+                try
+                {
+                    foreach (entry; readJSON(path, 256 * 1024).array)
+                        receipts[profile.name] ~= entry.str.idup;
+                    if (receipts[profile.name].length > maxEvents)
+                        receipts[profile.name] = receipts[profile.name][$-maxEvents..$];
+                }
+                catch (Exception)
+                {
+                    rename(path, path~".corrupt-"~randomUUID().toString());
+                    receipts.remove(profile.name);
+                    stderr.writeln("autonom: preserved corrupt event receipts for ", profile.name);
+                }
+            }
+        }
     }
 
     Event[] unread(Profile profile)
@@ -48,6 +70,44 @@ public:
         *found = null;
         save(profile.name);
         return ret;
+    }
+
+    bool accept(Profile profile, Event event)
+    {
+        if (receipts.get(profile.name, null).canFind(event.id))
+            return false;
+        foreach (pending; unread(profile))
+        {
+            if (pending.id == event.id)
+                return false;
+        }
+
+        surface(profile, event);
+        receipts[profile.name] ~= event.id.idup;
+        if (receipts[profile.name].length > maxEvents)
+            receipts[profile.name] = receipts[profile.name][$-maxEvents..$];
+
+        atomicWrite(buildPath(inboxDir(profile.name), "receipts.json"), JSONValue(receipts[profile.name]).toString());
+        return true;
+    }
+
+    void settle(Profile profile, Event[] batch, bool remove)
+    {
+        Event[] ret;
+        foreach (event; unread(profile))
+        {
+            bool matched;
+            foreach (entry; batch)
+                matched = matched || entry.id == event.id;
+
+            if (matched)
+                event.deferred = false;
+            if (!matched || !remove)
+                ret ~= event;
+        }
+
+        pending[profile.name] = ret;
+        save(profile.name);
     }
 
     void surface(Profile profile, Event event)
@@ -146,6 +206,7 @@ struct Event
     string room;
     string text;
     string schedule;
+    bool deferred;
 
     string summary() const
     {
@@ -195,6 +256,7 @@ struct Event
         ret["room"] = room.length ? JSONValue(room) : JSONValue(null);
         ret["text"] = text.length ? JSONValue(text) : JSONValue(null);
         ret["schedule"] = schedule.length ? JSONValue(schedule) : JSONValue(null);
+        ret["deferred"] = JSONValue(deferred);
         return ret;
     }
 
@@ -209,7 +271,7 @@ struct Event
                 return false;
         }
 
-        if (data["id"].type != JSONType.string || data["type"].type != JSONType.string ||
+        if (data["id"].type != JSONType.string || !data["id"].str.length || data["type"].type != JSONType.string ||
             data["ts"].type != JSONType.integer)
             return false;
 
@@ -228,6 +290,7 @@ struct Event
             event.text = data["text"].str.idup;
         if ("schedule" in data.object && data["schedule"].type == JSONType.string)
             event.schedule = data["schedule"].str.idup;
+        event.deferred = "deferred" in data.object && data["deferred"] == JSONValue(true);
 
         return true;
     }

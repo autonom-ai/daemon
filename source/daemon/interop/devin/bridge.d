@@ -3,6 +3,7 @@ module daemon.interop.devin.bridge;
 import daemon.config : DaemonConfig = Config;
 import daemon.exception;
 import daemon.interop.access : Access;
+import daemon.interop.acp : AcpDisconnectedException;
 import daemon.interop.call;
 import daemon.interop.devin.acp : runAcp;
 import daemon.interop.devin.calls;
@@ -10,10 +11,14 @@ import daemon.interop.devin.connection;
 import daemon.interop.devin.control : runControl;
 import daemon.interop.devin.catalog : Catalog;
 import daemon.interop.devin.history : loadExecutionIndex, recordExecution;
+static import daemon.interop.devin.history;
 import daemon.interop.devin.options : normalizeMode;
 import daemon.interop.devin.process : removeSession;
+import daemon.interop.devin.prompt : DeliveryDeferredException;
 import daemon.interop.devin.session : Session;
 import daemon.interop.devin.session.catalog;
+import daemon.interop.devin.session.control : resumeObserved;
+import daemon.interop.session : TurnStatus;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.provider : IProvider;
 import daemon.interop.session : SessionBase = Session;
@@ -34,7 +39,6 @@ package(daemon.interop.devin):
     {
         string connection;
         string directory;
-        bool active;
     }
 
     Catalog catalog;
@@ -105,7 +109,7 @@ public:
             return resolve(id, data);
         if (Session* found = id in sessions)
         {
-            if ((*found).isRunning())
+            if ((*found).hasActiveCall())
                 return *found;
         }
 
@@ -126,7 +130,7 @@ public:
                 sessions[id] = new Session(id, this);
 
             Session entry = sessions[id];
-            if (entry.execution is null || entry.execution.createdAt <= call.createdAt)
+            if (!call.automatic && (entry.execution is null || entry.execution.createdAt <= call.createdAt))
                 entry.bindCall(call);
         }
 
@@ -152,7 +156,7 @@ public:
             if (id !in listed)
             {
                 entry.updateMetadata(SessionMetadata.init);
-                if (id !in removed && (entry.isRunning() || this.observedSession(id)) &&
+                if (id !in removed && (entry.hasActiveCall() || this.observedSession(id)) &&
                     (!directory.length || entry.workspace == directory) &&
                     (!acp.length || entry.metadata.acp == acp))
                     ret ~= entry;
@@ -164,6 +168,9 @@ public:
 
     override Call execution(string id)
         => findCall(this, id);
+
+    override JSONValue executionRecord(string id)
+        => daemon.interop.devin.history.executionRecord(this, id);
 
     override bool isRemoved(string id)
         => (id in removed) !is null;
@@ -208,6 +215,19 @@ public:
         string mode = null
     )
     {
+        Session bound = session(id);
+        if (bound.hasActiveCall())
+            throw new ConflictException("Session is already active");
+        if (this.observedSession(id))
+        {
+            if (bound.activity != TurnStatus.Idle)
+                throw new ConflictException("Session is not idle");
+
+            return this.resumeObserved(id, prompt, directory, model, mode);
+        }
+        if (online(id))
+            throw new ConflictException("Session is loaded by another process");
+
         Call ret = submit(CallKind.Resume, prompt, directory, model, id, compactFirst, mode);
         session(id).bindCall(ret);
         return ret;
@@ -228,15 +248,16 @@ public:
 
 package(daemon.interop.devin):
     void launch(Call call, string prompt = null, bool compactFirst = false,
-        Call previous = null, string connection = null)
+        Call previous = null, string connection = null, bool automatic = false)
     {
         this.checkCapacity();
+        string database = catalog.databaseFor(call.sessionId);
+        call.automatic = automatic;
         string runToken = access.begin(call);
         executions[call.id] = call;
         this.recordExecution(call);
         call._timeout = call.kind == CallKind.Remove ? 10.seconds : executionTimeout;
         call.deadline = MonoTime.currTime + call.timeout;
-        string database = catalog.databaseFor(call.sessionId);
         call.monitor = new Thread({
             CallResult result;
             try
@@ -253,7 +274,7 @@ package(daemon.interop.devin):
                 else if (connection.length)
                 {
                     result = runControl(call, this.controlSocket(connection), access.clientToken,
-                        call.sessionId, prompt, call.model, normalizeMode(call.mode));
+                        call.sessionId, prompt, call.model, normalizeMode(call.mode), automatic);
                 }
                 else if (call.stopped)
                     result.cancelled = true;
@@ -262,6 +283,13 @@ package(daemon.interop.devin):
                     result = runAcp(call, command, call.workspace, call.sessionId, prompt,
                         call.model, call.mode, runToken, mcpPort, dataDir, access, compactFirst, database);
                 }
+            }
+            catch (DeliveryDeferredException)
+                result.deferred = true;
+            catch (AcpDisconnectedException error)
+            {
+                result.interrupted = true;
+                result.error = error.msg.idup;
             }
             catch (Exception error)
                 result.error = error.msg.idup;

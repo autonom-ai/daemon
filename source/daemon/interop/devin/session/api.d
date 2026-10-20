@@ -49,7 +49,7 @@ void sessions(Request request, Output output)
 
             Profile profile = daemon.api.profileStore.get(profileName);
             if (profile !is null && profile.session !is null &&
-                (profile.session.isRunning() || daemon.api.bridge.online(profile.session.id)))
+                (profile.session.hasActiveCall() || daemon.api.bridge.online(profile.session.id)))
                 throw new ConflictException("Profile is already active");
             foreach (execution; daemon.api.bridge.listCalls())
             {

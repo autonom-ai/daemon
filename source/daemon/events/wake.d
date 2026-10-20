@@ -4,11 +4,14 @@ import daemon.agent;
 import daemon.events.event : Event;
 import daemon.events.scheduler : Scheduler, wakesFile;
 import daemon.interop.call;
+import daemon.interop.session : Session;
 import daemon.storage;
 
 import std.file;
 import std.json : JSONType, JSONValue;
 import std.path : buildNormalizedPath, buildPath;
+import std.stdio : stderr;
+import std.uuid : randomUUID;
 
 bool adopt(Scheduler owner, string session, string directory, string execution = null)
 {
@@ -81,6 +84,18 @@ private bool parseWake(JSONValue data, out PendingWake wake)
     wake.profile = data["profile"].str.idup;
     wake.session = data["session"].isNull ? null : data["session"].str.idup;
     wake.workspace = data["workspace"].str.idup;
+    try
+    {
+        Session.validateId(wake.execution);
+        Session.validateId(wake.profile);
+        if (wake.profile.length > 64)
+            return false;
+        if (wake.session.length)
+            Session.validateId(wake.session);
+    }
+    catch (Exception)
+        return false;
+
     foreach (entry; data["events"].array)
     {
         Event event;
@@ -98,18 +113,30 @@ package(daemon.events) void loadWakes(Scheduler owner)
     if (!exists(owner.wakesPath))
         return;
 
-    JSONValue data = readJSON(owner.wakesPath, 4 * 1024 * 1024);
-    if (data.type != JSONType.object || "version" !in data.object || data["version"] != JSONValue(1) ||
-        "wakes" !in data.object || data["wakes"].type != JSONType.array)
-        throw new Exception("Invalid pending wakes");
-
-    foreach (entry; data["wakes"].array)
+    try
     {
-        PendingWake wake;
-        if (!parseWake(entry, wake))
-            throw new Exception("Invalid pending wake");
+        JSONValue data = readJSON(owner.wakesPath, 4 * 1024 * 1024);
+        if (data.type != JSONType.object || "version" !in data.object || data["version"] != JSONValue(1) ||
+            "wakes" !in data.object || data["wakes"].type != JSONType.array)
+            throw new Exception("Invalid pending wakes");
 
-        owner.pendingWakes ~= wake;
+        foreach (entry; data["wakes"].array)
+        {
+            PendingWake wake;
+            if (!parseWake(entry, wake))
+            {
+                stderr.writeln("autonom: ignored invalid pending wake row");
+                continue;
+            }
+
+            owner.pendingWakes ~= wake;
+        }
+    }
+    catch (Exception error)
+    {
+        // Keep the original bytes for inspection; optional recovery state cannot brick startup.
+        rename(owner.wakesPath, owner.wakesPath~".corrupt-"~randomUUID().toString());
+        stderr.writeln("autonom: preserved corrupt pending wakes: ", error.msg);
     }
 }
 
@@ -152,6 +179,12 @@ package(daemon.events) void recordWake(
     wake.session = session;
     wake.workspace = workspace;
     wake.events = batch;
+    foreach (existing; owner.pendingWakes)
+    {
+        if (existing.execution == execution && existing.profile == profileName)
+            return;
+    }
+
     owner.pendingWakes ~= wake;
     owner.saveWakes();
 }
@@ -196,10 +229,11 @@ package(daemon.events) void reconcile(Scheduler owner)
         }
 
         changed = true;
-        if (execution !is null && execution.status == CallStatus.Succeeded)
+        JSONValue record = execution is null ? owner.bridge.executionRecord(wake.execution) : execution.toJSON();
+        if (!record.isNull && record["status"] == JSONValue("succeeded"))
         {
-            if (execution.kind == CallKind.Start && execution.sessionId.length && !wake.session.length)
-                owner.register(wake.profile, execution.sessionId);
+            if (!wake.session.length && "sessionId" in record.object && record["sessionId"].type == JSONType.string)
+                owner.register(wake.profile, record["sessionId"].str);
         }
         else
         {
@@ -207,7 +241,10 @@ package(daemon.events) void reconcile(Scheduler owner)
             if (profile !is null)
             {
                 foreach (event; wake.events)
+                {
+                    event.deferred = !record.isNull && record["status"] == JSONValue("deferred");
                     owner.events.surface(profile, event);
+                }
             }
         }
     }

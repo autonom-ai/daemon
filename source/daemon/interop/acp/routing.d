@@ -3,6 +3,8 @@ module daemon.interop.acp.routing;
 import daemon.interop.acp.client : AcpClient, AcpException, Response, Incoming;
 import daemon.interop.acp.frames;
 import daemon.interop.acp.permissions;
+import daemon.interop.session : TurnStatus;
+import daemon.interop.acp.activity : turnActivity;
 
 import core.time : MonoTime;
 import std.json : JSONType, JSONValue;
@@ -121,7 +123,7 @@ void dispatch(AcpClient owner, Frame frame)
     }
 }
 
-long submit(AcpClient owner, Frame frame, bool peer)
+long submit(AcpClient owner, Frame frame, bool peer, bool automatic = false)
 {
     Response response = new Response();
     long id;
@@ -131,17 +133,22 @@ long submit(AcpClient owner, Frame frame, bool peer)
             throw new AcpException(-32000, "ACP connection is closed");
         if (owner.requests.length >= requestLimit)
             throw new AcpException(-32000, "Too many outstanding ACP requests");
+        if (automatic && owner.turnActivity(frame.value["params"]["sessionId"].str) == TurnStatus.Waiting)
+            throw new AcpException(-32015, "Session is waiting for a client response");
+
         id = owner.allocate();
         response.peer = peer;
         response.originalId = frame.value["id"];
         frame = frame.withId(JSONValue(id));
+        response.sent = frame;
         owner.requests[id] = response;
     }
     try
     {
         if (owner.outgoing !is null)
             owner.outgoing(frame);
-        response.sent = frame;
+        synchronized (owner.stateMutex)
+            response.sent = frame;
         owner.writeFrame(owner.toAgent, owner.writeMutex, frame);
     }
     catch (Exception error)

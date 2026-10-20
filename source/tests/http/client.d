@@ -22,7 +22,10 @@ unittest
     scope(exit)
         daemon.close();
 
-    hookSession(fixture, "managed-one");
+    hookSession(fixture, "managed-one", null, true, "permission");
+    waitUntil(delegate bool() {
+        return request("/api/sessions/managed-one/permissions").array.length == 1;
+    });
     request("/api/profiles", 201, `{"name":"alpha"}`);
     request("/api/profiles/alpha/session", 200, `{"id":"managed-one"}`);
     request("/api/rooms", 201, `{"name":"team"}`);

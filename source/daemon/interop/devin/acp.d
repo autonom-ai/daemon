@@ -135,6 +135,8 @@ CallResult runAcp(
     MonoTime deadline = execution.expiresAt;
     bool cancelled;
     bool failed;
+    bool interrupted;
+    string stopReason;
     string failure;
     MonoTime cancelDeadline;
     while (pending.length || compacting || accepting)
@@ -186,7 +188,8 @@ CallResult runAcp(
             JSONValue result;
             int code;
             string error;
-            if (!agent.poll(id, result, code, error))
+            bool disconnected;
+            if (!agent.poll(id, result, code, error, &disconnected))
                 continue;
 
             pending = pending[0..i]~pending[i + 1..$];
@@ -197,6 +200,7 @@ CallResult runAcp(
             }
             if (error.length)
             {
+                interrupted = disconnected;
                 if (!failed)
                     failure = error;
                 failed = true;
@@ -206,6 +210,7 @@ CallResult runAcp(
             string reason = "stopReason" in result.object && result["stopReason"].type == JSONType.string
                 ? result["stopReason"].str
                 : null;
+            stopReason = reason;
             if (reason == "cancelled")
                 cancelled = true;
             else if (reason != "end_turn")
@@ -248,6 +253,8 @@ CallResult runAcp(
     execution.markSteerable(false);
     agent.close();
     CallResult ret;
+    ret.interrupted = interrupted;
+    ret.stopReason = stopReason;
     ret.reply = reply;
     ret.exitStatus = JSONValue(agent.exitStatus);
     if (cancelled || execution.stopped)

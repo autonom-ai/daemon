@@ -116,7 +116,8 @@ JSONValue hookSession(
     Fixture fixture,
     string id,
     string profile = null,
-    bool identify = true
+    bool identify = true,
+    string prompt = null
 )
 {
     if (!exists(fixture.config.devinCommand))
@@ -124,7 +125,7 @@ JSONValue hookSession(
 
     write(buildPath(fixture.root, "next-session-id"), id);
     JSONValue ret = request("/api/sessions", 202, JSONValue([
-        "prompt": JSONValue("auth:"~id),
+        "prompt": JSONValue(prompt.length ? prompt : "auth:"~id),
         "directory": JSONValue(fixture.root),
         "profile": JSONValue(profile.length ? profile : "")
     ]).toString());

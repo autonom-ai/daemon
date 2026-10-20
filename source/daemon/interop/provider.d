@@ -5,6 +5,8 @@ import daemon.interop.call : Call;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.session : Session;
 
+import std.json : JSONValue;
+
 /// Worker-owned session provider. Launch methods return immediately with an owned call.
 interface IProvider
 {
@@ -29,6 +31,8 @@ interface IProvider
         bool compactFirst = false, string mode = null);
 
     Call execution(string id);
+
+    JSONValue executionRecord(string id);
 
     Call[] listCalls(string directory = null);
 

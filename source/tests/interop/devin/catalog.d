@@ -56,11 +56,13 @@ unittest
         fixture.close();
 
     fixture.bridge.observeConnection(randomUUID().toString(), ["provisional"],
-        ["provisional": fixture.root], ["provisional": false], false);
+        ["provisional": fixture.root], false);
     Session[] listed = fixture.bridge.list(fixture.root, "autonom");
     listed.length.should == 1;
     listed[0].id.should == "provisional";
     listed[0].workspace.should == fixture.root;
+    listed[0].status.should == SessionStatus.Offline;
+    listed[0].activity.should == TurnStatus.Idle;
     fixture.bridge.list("/elsewhere", "autonom").length.should == 0;
 }
 

@@ -12,7 +12,7 @@ import daemon.events.wake;
 import daemon.interop.call;
 import daemon.interop.metadata : SessionMetadata;
 import daemon.interop.provider : IProvider;
-import daemon.interop.session : Session;
+import daemon.interop.session : Session, SessionStatus, TurnStatus;
 
 import core.atomic : atomicLoad, atomicStore;
 import core.thread : Thread;
@@ -48,7 +48,8 @@ public:
         IProvider bridge,
         ProfileStore store,
         EventStore events,
-        ScheduleStore schedules
+        ScheduleStore schedules,
+        string port = null
     )
     {
         this.config = configuration;
@@ -56,13 +57,17 @@ public:
         this.store = store;
         this.events = events;
         this.schedules = schedules;
-        this.port = environment.get("AUTONOM_PORT", "8080");
+        this.port = port.length ? port.idup : environment.get("AUTONOM_PORT", "8080");
         this.loadWakes();
         publishNextDue();
     }
 
     void start()
     {
+        if (thread !is null)
+            return;
+
+        atomicStore(stopping, false);
         thread = new Thread({
             run();
         });
@@ -84,25 +89,51 @@ public:
         SysTime now = Clock.currTime(UTC());
         foreach (match; schedules.due(now))
         {
-            schedules.advance(match.profile, match.schedule, now);
             Event event = Event.create(
                 EventType.Clock,
-                null,
+                match.schedule.id~":"~match.schedule.next.to!string,
                 null,
                 clockText(match.schedule),
                 null,
                 match.schedule.id
             );
             deliver(match.profile, [event], null);
+            schedules.advance(match.profile, match.schedule, now);
         }
 
         this.reconcile();
+        foreach (profile; store.list())
+        {
+            Event[] batch;
+            foreach (event; events.unread(profile))
+            {
+                if (event.deferred)
+                    batch ~= event;
+            }
+
+            if (batch.length)
+            {
+                Profile from = batch[0].from.length ? store.get(batch[0].from) : null;
+                dispatch(profile, batch, from);
+            }
+        }
+
         publishNextDue();
     }
 
     void publishNextDue()
     {
-        atomicStore(nextDue, schedules.nextClock());
+        long due = schedules.nextClock();
+        foreach (profile; store.list())
+        {
+            foreach (event; events.unread(profile))
+            {
+                if (event.deferred)
+                    due = 0;
+            }
+        }
+
+        atomicStore(nextDue, due);
     }
 
 package(daemon.events):
@@ -123,20 +154,7 @@ package(daemon.events):
     }
 
     SessionMetadata sessionInfo(Session session)
-    {
-        SessionMetadata ret = bridge.sessionMetadata(session.id);
-        if (ret.id.length)
-            return ret;
-
-        Call execution = session.execution;
-        if (execution !is null)
-        {
-            ret.model = execution.model;
-            ret.directory = execution.workspace;
-        }
-
-        return ret;
-    }
+        => bridge.session(session.id).metadata;
 
     string pingerWorkspace(Profile from)
         => from is null || from.session is null ? null : sessionInfo(from.session).directory;
@@ -181,92 +199,71 @@ package(daemon.events):
 
     void deliver(Profile profile, Event[] batch, Profile from)
     {
-        if (!batch.length)
-            return;
-        if (profile.name == humanName)
+        Event[] accepted;
+        foreach (event; batch)
         {
-            foreach (event; batch)
-                events.surface(profile, event);
-
-            return;
+            event.deferred = profile.name != humanName;
+            if (events.accept(profile, event))
+                accepted ~= event;
         }
+
+        if (accepted.length)
+            dispatch(profile, accepted, from);
+
+        publishNextDue();
+    }
+
+    void dispatch(Profile profile, Event[] batch, Profile from)
+    {
+        if (profile.name == humanName || this.wakeInFlight(profile.name))
+            return;
 
         Session session = profile.session;
         if (session !is null && !bridge.access.managed(session.id))
         {
-            foreach (event; batch)
-                events.surface(profile, event);
-
+            events.settle(profile, batch, false);
             return;
         }
 
-        bool profileOnline = session !is null && (session.isRunning() || bridge.online(session.id));
-        bool hasWakeInFlight = this.wakeInFlight(profile.name);
-        bool active = hasWakeInFlight || profileOnline;
-        // TODO: Steer sessions for events or block?
-
-        string profileState;
-        if (profileOnline)
-            profileState = "online";
-        else if (session is null)
-            profileState = "offline duration unknown";
-        else
-        {
-            Duration offlineDuration = offline(session);
-            if (offlineDuration == Duration.max)
-                profileState = "offline duration unknown";
-            else
-                profileState = "offline for "~offlineDuration.to!string;
-        }
-
-        foreach (event; batch)
-        {
-            stderr.writefln(
-                "autonom event_fired at=%s profile=%s type=%s schedule=%s state=\"%s\" wake_in_flight=%s",
-                Clock.currTime(UTC()).toISOExtString(),
-                profile.name,
-                cast(string)event.type,
-                event.schedule.length ? event.schedule : "none",
-                profileState,
-                hasWakeInFlight
-            );
-        }
+        TurnStatus activity = session is null ? TurnStatus.Idle : session.activity;
+        if (activity == TurnStatus.Waiting || activity == TurnStatus.Unknown)
+            return;
 
         bool scheduled = from !is null && from.name == humanName;
         foreach (event; batch)
             scheduled = scheduled || event.schedule.length;
 
-        bool fresh;
-        string workspace;
-        if (!active && !scheduled && (session is null || offline(session) > config.offlineStartAfter))
+        bool loaded = session !is null && session.status == SessionStatus.Online;
+        bool fresh = !loaded && !scheduled && (session is null || offline(session) > config.offlineStartAfter);
+        string workspace = fresh ? pingerWorkspace(from) : null;
+        if (fresh && !workspace.length)
         {
-            workspace = pingerWorkspace(from);
-            if (workspace.length)
-                fresh = true;
-            else
-            {
-                foreach (event; batch)
-                    events.surface(profile, event);
-                return;
-            }
+            events.settle(profile, batch, false);
+            return;
         }
 
-        if (!active)
+        // Persist the attempt before starting child work. A crash leaves advisory inbox
+        // context, never an automatic replay of a prompt whose outcome is uncertain.
+        events.settle(profile, batch, false);
+        bool delivered;
+        if (loaded || activity == TurnStatus.Running)
         {
-            if (fresh)
+            try
             {
-                if (start(profile, from, batch, workspace))
-                    return;
+                Call call = session.deliver(wakePrompt(batch, null));
+                this.recordWake(call.id, profile.name, session.id, null, batch);
+                delivered = true;
             }
-            else if (session !is null)
-            {
-                if (resume(profile, session, batch))
-                    return;
-            }
+            catch (Exception)
+            { }
         }
+        else if (fresh)
+            delivered = start(profile, from, batch, workspace);
+        else if (session !is null)
+            delivered = resume(profile, session, batch);
 
-        foreach (event; batch)
-            events.surface(profile, event);
+        if (delivered)
+            events.settle(profile, batch, true);
     }
 
     void poke()

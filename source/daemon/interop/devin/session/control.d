@@ -8,6 +8,7 @@ import daemon.interop.devin.calls : newCall;
 import daemon.interop.devin.connection;
 import daemon.interop.devin.control : controlRequest;
 import daemon.interop.devin.session : Session;
+import daemon.interop.session : TurnStatus;
 import daemon.storage : readText;
 static import daemon.api;
 
@@ -22,9 +23,9 @@ import std.path : buildPath;
 Call remove(Bridge owner, string id)
 {
     Session session = owner.session(id);
-    if (session.isRunning() && session.execution.kind == CallKind.Remove)
+    if (session.hasActiveCall() && session.execution.kind == CallKind.Remove)
         return session.execution;
-    if (owner.observedSession(id) || (!session.isRunning() && owner.online(id)))
+    if (owner.observedSession(id) || (!session.hasActiveCall() && owner.online(id)))
         throw new ConflictException("Cannot remove a session owned by another process");
 
     Call ret = owner.newCall(CallKind.Remove, null, null, session.id);
@@ -162,10 +163,10 @@ void resumeSession(Request request, Output output)
     Session session = daemon.api.bridge.session(id);
     if (daemon.api.bridge.observedSession(id))
     {
-        if (daemon.api.bridge.observedActive(id))
+        if (session.hasActiveCall() || session.activity != TurnStatus.Idle)
             throw new ConflictException("Session is already active");
     }
-    else if (session.isRunning() || daemon.api.bridge.online(id))
+    else if (session.hasActiveCall() || daemon.api.bridge.online(id))
         throw new ConflictException("Session is already active");
 
     session.resume(

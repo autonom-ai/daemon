@@ -70,7 +70,8 @@ unittest
 
     session.status.should == SessionStatus.Offline;
     flock(lock.fileno, LOCK_EX).should == 0;
-    session.status.should == SessionStatus.Loaded;
+    session.status.should == SessionStatus.Online;
+    session.activity.should == TurnStatus.Unknown;
     session.stop().shouldThrow!Exception();
     fixture.store.register("marlow", "session-2").shouldThrow!ProfileConflictException();
     lock.close();
@@ -186,7 +187,7 @@ unittest
     session.stop();
     session.status.should == SessionStatus.Offline;
     session.resume("hang", fixture.root);
-    session.isRunning().should == true;
+    session.hasActiveCall().should == true;
 }
 
 @Name("Session exposes a failed agent turn independently of online status")
@@ -200,8 +201,9 @@ unittest
     Session session = fixture.bridge.session("session-1");
     session.resume("fail", fixture.root);
     waitUntil(delegate bool() {
-        return session.status == SessionStatus.Failed;
+        return session.execution.status == CallStatus.Failed;
     });
+    session.status.should == SessionStatus.Offline;
     session.exitStatus.get.should == 0;
 }
 

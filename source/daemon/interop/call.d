@@ -34,12 +34,16 @@ enum CallStatus : string
     Succeeded = "succeeded",
     Failed = "failed",
     Stopped = "stopped",
-    Interrupted = "interrupted"
+    Interrupted = "interrupted",
+    Deferred = "deferred"
 }
 
 struct CallResult
 {
     bool cancelled;
+    bool interrupted;
+    bool deferred;
+    string stopReason;
     string error;
     string reply;
     JSONValue exitStatus = JSONValue(null);
@@ -56,6 +60,7 @@ private:
         JSONValue exitStatus = JSONValue(null);
         string error;
         string reply;
+        string stopReason;
     }
 
     const string directory;
@@ -84,6 +89,7 @@ public:
     string profileName;
     string mode;
     bool trusted;
+    bool automatic;
     MonoTime settled;
 
     this(
@@ -294,6 +300,7 @@ private:
             "exitStatus": state.exitStatus,
             "error": state.error.length ? JSONValue(state.error) : JSONValue(null),
             "reply": state.reply.length ? JSONValue(state.reply) : JSONValue(null),
+            "stopReason": state.stopReason.length ? JSONValue(state.stopReason) : JSONValue(null),
             "profile": JSONValue(profileName),
             "mode": JSONValue(mode),
             "trusted": JSONValue(trusted)
@@ -335,8 +342,11 @@ private:
             _state.reply = result.reply;
             _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
             _state.error = result.error;
+            _state.stopReason = result.stopReason;
             _state.status = result.cancelled || stopRequested
                 ? CallStatus.Stopped
+                : result.deferred ? CallStatus.Deferred
+                : result.interrupted ? CallStatus.Interrupted
                 : result.error.length ? CallStatus.Failed : CallStatus.Succeeded;
         }
         appendLog();

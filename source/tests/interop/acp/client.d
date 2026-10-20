@@ -1,6 +1,8 @@
 module tests.interop.acp.client;
 
 import daemon.interop.acp;
+import daemon.interop.devin.options : promptParams;
+import daemon.interop.session : TurnStatus;
 import tests.common;
 import tests.interop.acp.common;
 
@@ -10,6 +12,42 @@ import core.time : msecs, seconds;
 import std.algorithm : canFind;
 import std.json : JSONValue;
 import std.stdio : File;
+
+@Name("Automatic prompt admission refuses a newly pending human request without sending it")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+    AcpClient agent = new AcpClient(agentCommand(), agentEnvironment(fixture), fixture.root);
+    scope(exit)
+        agent.close();
+    agent.request("initialize", JSONValue([
+        "protocolVersion": JSONValue(1), "clientCapabilities": JSONValue.emptyObject
+    ]), 1.seconds);
+    string session = agent.request("session/new", JSONValue([
+        "cwd": JSONValue(fixture.root), "mcpServers": JSONValue.emptyArray
+    ]), 1.seconds)["sessionId"].str;
+    long request = agent.send("session/prompt", promptParams(session, "permission"));
+    waitUntil(delegate bool() {
+        return agent.activity(session) == TurnStatus.Waiting;
+    });
+    bool refused;
+    try
+        agent.deliver(promptParams(session, "must-not-interrupt"));
+    catch (AcpException error)
+    {
+        error.code.should == -32015;
+        refused = true;
+    }
+    refused.should == true;
+    JSONValue pending = agent.permissions(session);
+    pending.array.length.should == 1;
+    agent.decide(session, pending[0]["id"].integer, "approve");
+    agent.await(request, 1.seconds)["stopReason"].str.should == "end_turn";
+    agent.activity(session).should == TurnStatus.Idle;
+    agent.await(agent.deliver(promptParams(session, "after-wait")), 1.seconds)["stopReason"].str.should == "end_turn";
+}
 
 @Name("AcpClient performs initialize, session, prompt, and cancellation")
 unittest

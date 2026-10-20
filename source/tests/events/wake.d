@@ -94,7 +94,7 @@ unittest
     fixture.scheduler.posted(room, postedEntry(quill, "quiet", room.name), quill, null);
     fixture.scheduler.directed(marlow, postedEntry(quill, "psst"), quill, null);
     fixture.events.unread(marlow).length.should == 0;
-    fixture.store.get("marlow").session.isRunning().should == false;
+    fixture.store.get("marlow").session.hasActiveCall().should == false;
     invocations(fixture.fixture.root).length.should == 1;
 
     fixture.scheduler.posted(room, postedEntry(wren, "hello", room.name), wren, null);

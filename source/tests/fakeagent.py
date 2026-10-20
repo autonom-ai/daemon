@@ -135,6 +135,13 @@ def on_prompt(request_id, params):
     text = "\n".join(block.get("text", "") for block in params.get("prompt", []))
     record_prompt(session_id, text)
 
+    if text == "crash-mid-turn":
+        os._exit(9)
+
+    if text.startswith("You were woken by") and os.path.exists(path("hold-wake")):
+        pending[request_id] = session_id
+        return
+
     if text == "exit-after-reply":
         finish(request_id, session_id)
         raise SystemExit(0)
@@ -277,6 +284,8 @@ def acp_main():
             session_id = params.get("sessionId", "")
             save_session(session_id, params.get("cwd"), params.get("_meta"))
             record_call({"method": "session/load", "sessionId": session_id})
+            if os.path.exists(path("slow-load")):
+                time.sleep(0.5)
             if os.path.exists(path("fail-load")) or "locked" in session_id:
                 send_error(request_id, -32015, "session_locked")
                 continue

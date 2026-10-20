@@ -4,6 +4,7 @@ import daemon.exception;
 import daemon.interop.acp;
 import daemon.interop.call : Call, CallResult;
 import daemon.interop.devin.options : optionParams, promptParams;
+import daemon.interop.devin.prompt : promptResult, DeliveryDeferredException;
 
 import core.stdc.errno : errno, EAGAIN, EINTR, EWOULDBLOCK;
 import core.thread : Thread;
@@ -19,7 +20,8 @@ CallResult runControl(
     string sessionId,
     string prompt,
     string model,
-    string mode
+    string mode,
+    bool automatic = false
 )
 {
     if (mode.length)
@@ -33,19 +35,10 @@ CallResult runControl(
             optionParams(sessionId, "model", model), execution);
     }
 
-    JSONValue result = controlRequest(socketPath, token, "session/prompt",
+    JSONValue result = controlRequest(socketPath, token, automatic ? "autonom/deliver" : "session/prompt",
         promptParams(sessionId, prompt), execution);
 
-    string reason = "stopReason" in result.object && result["stopReason"].type == JSONType.string
-        ? result["stopReason"].str
-        : null;
-    CallResult ret;
-    if (reason == "cancelled")
-        ret.cancelled = true;
-    else if (reason != "end_turn")
-        ret.error = "Agent stopped: "~(reason.length ? reason : "unknown");
-
-    return ret;
+    return promptResult(result);
 }
 
 JSONValue controlRequest(
@@ -117,7 +110,7 @@ JSONValue controlRequest(
         }
 
         if (count == 0)
-            throw new BackendException("Relay control connection closed");
+            throw new AcpDisconnectedException("Relay control connection closed");
 
         foreach (byte val; buffer[0..count])
         {
@@ -143,6 +136,10 @@ JSONValue controlRequest(
                             : "Agent request failed";
                         if (code == -32602)
                             throw new InvalidInputException(message);
+                        if (code == -32015 && method == "autonom/deliver")
+                            throw new DeliveryDeferredException(message);
+                        if (code == -32000 && (message == "Agent disconnected" || message == "ACP connection closed"))
+                            throw new AcpDisconnectedException(message);
                         if (code == -32015 || code == -32002)
                             throw new ConflictException(message);
                         throw new BackendException(message);

@@ -226,10 +226,11 @@ unittest
         return request("/api/sessions/session-0")["status"].str == "offline";
     });
     launch["prompt"] = JSONValue("fail");
-    request("/api/sessions/session-0/resume", 200, launch.toString());
+    JSONValue failedResume = request("/api/sessions/session-0/resume", 200, launch.toString());
     waitUntil(delegate bool() {
-        return request("/api/sessions/session-0")["status"].str == "failed";
+        return request("/api/executions/"~failedResume["executionId"].str)["status"].str == "failed";
     });
+    request("/api/sessions/session-0")["status"].str.should == "offline";
     request("/api/profiles/agent-0/session")["exitStatus"].integer.should == 0;
     request("/api/sessions/session-0/log")["log"].str.canFind("fail").should == true;
     JSONValue removedSession = request(
