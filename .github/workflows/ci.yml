@@ -19,6 +19,8 @@ jobs:
         run: dub run --compiler=ldc2 --config=unit --build=unittest
       - name: Run MCP tests
         run: python3 source/mcp/tests.py
+      - name: Run command tests
+        run: python3 tests/command.py
       - name: Run installer tests
         run: python3 tests/install.py
       - name: Check the style

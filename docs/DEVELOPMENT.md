@@ -13,10 +13,11 @@ The configuration produces `bin/autonom`, the single command that dispatches the
 ```sh
 dub run --compiler=ldc2 --config=unit --build=unittest
 python3 source/mcp/tests.py
+python3 tests/command.py
 python3 tests/install.py
 ```
 
-The D unit suite launches the production daemon on loopback port 18080 and must run serially. The MCP suite drives the real daemon over HTTP and the real command over stdio. The installer suite uses only temporary prefixes.
+The D unit suite launches the production daemon on loopback port 18080 and must run serially. The MCP suite drives the real daemon over HTTP and the real command over stdio. The command suite covers the `autonom` surface — help, version, the MCP proxy, the hook, and `daemon --ensure`. The installer suite uses only temporary prefixes.
 
 Real CLI integration establishes the catalog and metadata contract against an installed Devin CLI:
 

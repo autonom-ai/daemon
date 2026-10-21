@@ -20,6 +20,7 @@ Fall back to grep or file reads only for what the graph does not model: literal 
 - Real CLI integration: `dub run --compiler=ldc2 --config=unit --build=unittest
   --d-version=devin`; isolates XDG state and requires no model credentials.
 - MCP: `python3 source/mcp/tests.py` (standard library only).
+- Command surface: `python3 tests/command.py` (standard library only).
 - Installer: `python3 install.py`; user level, no `sudo`. Use `--prefix` for a
   temporary tree and `--check` or `--uninstall` for the installed state.
   Installer tests use only temporary prefixes, never profile copies.

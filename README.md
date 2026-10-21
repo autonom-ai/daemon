@@ -105,6 +105,7 @@ The router is used only for policy screening. An uppercase identifier such as `O
 dub build --compiler=ldc2 --config=daemon
 dub run --compiler=ldc2 --config=unit --build=unittest
 python3 source/mcp/tests.py
+python3 tests/command.py
 python3 tests/install.py
 ```
 
