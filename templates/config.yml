@@ -6,7 +6,9 @@ offlineStartAfter: 1h
 offlineCompactAfter: 1h
 router:
   type: openrouter
-  key: ""
+  # Either the key itself, or the name it is stored under in the .env beside
+  # this file. See docs/ARCHITECTURE.md.
+  key: "OPENROUTER_API_KEY"
   url: https://openrouter.ai
   name: OpenRouter
   referer: ""
