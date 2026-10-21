@@ -6,6 +6,7 @@ test-workspace
 !.agents/skills
 .playwright-mcp/
 __pycache__
+graphify-out/
 
 # Workspace coordination files stay private.
 .devin/*
