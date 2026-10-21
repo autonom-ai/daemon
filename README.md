@@ -1,9 +1,9 @@
-# Autonom
+# Autonom Daemon
 
 [![License](https://img.shields.io/badge/License-AGPL--3-blue)](LICENSE.txt)
-[![CI](https://github.com/cetio/autonom/actions/workflows/ci.yml/badge.svg)](https://github.com/cetio/autonom/actions/workflows/ci.yml)
+[![CI](https://github.com/autonom-ai/daemon/actions/workflows/ci.yml/badge.svg)](https://github.com/autonom-ai/daemon/actions/workflows/ci.yml)
 
-Autonom turns Devin CLI sessions into long-lived agents that can be addressed, scheduled, and governed. A D daemon owns sessions, profiles, rooms, messaging, policy, and schedules; a Node launcher injects a Command Center sidebar into Devin Desktop; a stdio MCP proxy exposes coordination tools to the model itself. Sessions run the real Devin CLI over ACP — Autonom supervises them, it does not replace the model.
+Autonom turns Devin CLI sessions into long-lived agents that can be addressed, scheduled, and governed. This repository owns the daemon: the session and profile store, rooms and messages, policy screening, schedules and wakes, the HTTP API, the ACP host, the MCP proxy, and the Devin CLI hooks. Sessions run the real Devin CLI over ACP — Autonom supervises them, it does not replace the model. The Desktop launcher that renders the Command Center lives in [autonom-ai/devin](https://github.com/autonom-ai/devin) and reaches this daemon through the `autonom` command.
 
 ## Concepts
 
@@ -21,7 +21,6 @@ The domain is small and every noun below is owned by the daemon:
 | **Policy rule** | A workspace-scoped `allow`, `deny`, or `screen` decision evaluated on every tool call, before the tool runs. |
 | **Hook** | A Devin CLI lifecycle callback that the daemon registers globally so policy, context, and session identity reach it. |
 | **Call** | One asynchronous child process the daemon owns. Calls are bounded, tracked in memory, and persisted to an execution index. |
-| **Command Center** | The Autonom sidebar injected into Devin Desktop. It lists rooms, profiles, and pages, and forwards navigation to the native surface controller. |
 
 See [Documentation](docs/README.md) for the contracts behind each concept.
 
@@ -29,44 +28,49 @@ See [Documentation](docs/README.md) for the contracts behind each concept.
 
 | Requirement | Used by |
 | --- | --- |
-| D compiler `ldc2` and DUB | Daemon and relay builds. |
-| Node.js 22+ | Launcher build, tests, and the Command Center bundle. |
-| Python 3 (standard library only) | MCP proxy, hook entrypoint, and installer. |
-| Devin Desktop 1.126.0 | Command Center target. The build is pinned and the launcher refuses any other. |
+| D compiler `ldc2` and DUB | Building the `autonom` command. |
+| Python 3 (standard library only) | The MCP proxy, the hook entrypoint, and the installer. |
+
+The daemon is Linux-focused. macOS and Windows are not validated.
 
 ## Installation
 
-Build and test as your normal user, then install with the permissions required by the Desktop directory:
+Build as your normal user, then install the command for your account:
 
 ```sh
-npm --prefix devin ci
-npm --prefix devin run check
-npm --prefix devin test
-sudo python3 devin/install.py --no-build
+dub build --compiler=ldc2 --config=daemon
+python3 install.py
 ```
 
-The installer replaces only the `bin/devin-desktop` CLI shim, preserving the original byte-for-byte, and copies the launcher bundle, runtime assets, daemon binaries, MCP proxy, and hook entrypoint beside the Desktop installation. The Electron binary, workbench bundles, `product.json`, and profile data are untouched.
+The installer puts the command in `$XDG_DATA_HOME/autonom` (default `~/.local/share/autonom`), exposes it as `~/.local/bin/autonom`, and creates `~/.config/autonom/config.yml` only when it is missing. It never rewrites an existing configuration, `.env`, session, or log, and it needs no `sudo`. When `~/.local/bin` is not on `PATH`, the installer says so and prints the line to add.
 
-Quit Desktop once, then launch it normally:
+Check the installation, or remove it again:
 
 ```sh
-devin-desktop
+python3 install.py --check
+python3 install.py --uninstall
 ```
 
-Your existing profile and login remain in use. `devin-desktop --debug` starts the same launcher with a loopback CDP port for development; the default transport is a private pipe that never listens on a port.
+Uninstalling removes the command and the runtime files it installed. Configuration, `.env`, data, sessions, and logs stay in place.
 
-Check the installation, or roll it back:
+## Commands
 
-```sh
-python3 devin/install.py --check
-sudo python3 devin/install.py --uninstall
-```
+The command surface is the only interface other repositories use:
 
-The installer references this checkout, so keep it in place. Desktop upgrades replace the patch and require reinstallation after rechecking compatibility. Windows and macOS installation have not been validated.
+| Command | Purpose |
+| --- | --- |
+| `autonom daemon` | Run the HTTP daemon in the foreground. |
+| `autonom daemon --ensure` | Ensure the configured daemon is listening, then report its health. |
+| `autonom acp --config PATH [--devin COMMAND]` | Serve ACP over stdio for Devin Desktop. |
+| `autonom mcp` | Run the coordination MCP proxy over stdio. |
+| `autonom hook --event EVENT` | Forward a Devin CLI hook event to the daemon. |
+| `autonom --help`, `autonom --version` | Print the usage or the version. |
+
+See [the command reference](docs/CLI.md) for the options and the environment each command honors.
 
 ## Configuration
 
-The daemon reads `~/.config/autonom/config.yml`. `dataDir`, `devinCommand`, and `router` are required:
+The daemon reads `~/.config/autonom/config.yml`, or the path in `--config` / `AUTONOM_CONFIG`. `dataDir`, `devinCommand`, and `router` are required:
 
 ```yaml
 dataDir: ~/.local/share/autonom
@@ -77,39 +81,35 @@ offlineStartAfter: 1h
 offlineCompactAfter: 1h
 router:
   type: openrouter
-  key: ""
+  key: "OPENROUTER_API_KEY"
   url: https://openrouter.ai
   name: OpenRouter
 ```
 
-The router is used only for policy screening. Keep its key out of version control. Sessions, rooms, inboxes, and execution history live under `dataDir`.
-
-The Command Center reads `~/.config/autonom/launcher.yml` for its port and configuration paths, and the sidebar definition lives in `assets/ui.yml`.
+The router is used only for policy screening. An uppercase identifier such as `OPENROUTER_API_KEY` is a reference: the daemon reads the real value from the `.env` beside the configuration file. Keep it out of version control. Sessions, rooms, inboxes, and execution history live under `dataDir`.
 
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [Daemon architecture](docs/ARCHITECTURE.md)
 - [Sessions](docs/SESSIONS.md)
 - [Coordination](docs/COORDINATION.md)
 - [Policy and hooks](docs/POLICY.md)
-- [Daemon architecture](docs/DAEMON.md)
-- [Launcher and native patches](docs/launcher/README.md)
-- [Command Center](docs/launcher/patches/COMMAND_CENTER.md)
+- [Installation](docs/INSTALLATION.md)
+- [Command reference](docs/CLI.md)
+- [Development](docs/DEVELOPMENT.md)
 
 ## Development
 
 ```sh
 dub build --compiler=ldc2 --config=daemon
-dub build --compiler=ldc2 --config=relay
 dub run --compiler=ldc2 --config=unit --build=unittest
 python3 source/mcp/tests.py
-npm --prefix devin ci
-npm --prefix devin run check
-npm --prefix devin test
+python3 tests/install.py
 ```
 
 Add `--skip-registry=all` to DUB commands when dependencies are cached and network access is unavailable. The unit suite launches the production daemon on loopback port 18080 and must run serially. Real CLI integration adds `--d-version=devin` and needs no model credentials.
 
 ## License
 
-Autonom is licensed under [AGPL-3.0](LICENSE.txt). Bundled icon attributions are recorded in [assets/ATTRIBUTION.md](assets/ATTRIBUTION.md).
+Autonom is licensed under [AGPL-3.0](LICENSE.txt).

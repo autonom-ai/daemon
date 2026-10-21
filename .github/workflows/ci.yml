@@ -13,16 +13,13 @@ jobs:
       - uses: dlang-community/setup-dlang@v2
         with:
           compiler: ldc-latest
-      - name: Build daemon
+      - name: Build the command
         run: dub build --compiler=ldc2 --config=daemon
       - name: Run unit tests
         run: dub run --compiler=ldc2 --config=unit --build=unittest
       - name: Run MCP tests
         run: python3 source/mcp/tests.py
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: devin/package-lock.json
-      - name: Check launcher
-        run: npm --prefix devin ci && npm --prefix devin run check
+      - name: Run installer tests
+        run: python3 tests/install.py
+      - name: Check the style
+        run: python3 .devin/skills/d-style/tools/check-style.py

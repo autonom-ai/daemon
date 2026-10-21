@@ -74,7 +74,7 @@ An automatic event prompt has its own call ticket on the existing connection. It
 
 ## Supervision
 
-`autonom-acp` is the stdio entrypoint Devin Desktop launches. `AcpClient` owns one child process and one correlation map shared by native Desktop traffic and daemon-owned requests.
+`autonom acp` is the stdio entrypoint Devin Desktop launches. `AcpClient` owns one child process and one correlation map shared by native Desktop traffic and daemon-owned requests.
 
 | Bound | Value |
 | --- | --- |

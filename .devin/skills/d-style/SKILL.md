@@ -11,7 +11,7 @@ allowed-tools:
 
 # Autonom Code Style & Architecture Conventions
 
-This skill enforces the working style guide (`research/style-rules-revision.md`), the architectural idioms from `/home/cet/Repos/Libraries/intuit` and `/home/cet/Repos/Libraries/selenium`, and the strict `Interop + DB -> Daemon -> ACP` layer boundaries.
+This skill enforces the working style guide ([docs/DEVELOPMENT.md](../../../docs/DEVELOPMENT.md)), the architectural idioms from `/home/cet/Repos/Libraries/intuit` and `/home/cet/Repos/Libraries/selenium`, and the strict `Interop + DB -> Daemon -> ACP` layer boundaries.
 
 Run the automated checker before committing or completing any phase:
 
@@ -28,9 +28,9 @@ Autonom is structured in three strict layers (`Interop + DB -> Daemon -> ACP`):
 | Layer | Package | Allowed Imports & Ownership | Forbidden |
 |---|---|---|---|
 | **1A. Database** | `daemon.db` | Owns `<dataDir>/autonom.db` (`arsd.sqlite`), schema, transactions, and `client.token` / MCP token auth | Must not import `daemon.agent`, `daemon.coord`, `daemon.events`, `daemon.acp`, or `serverino` |
-| **1B. Interop** | `daemon.interop` | Thin `intuit`-style interactive provider wrapper (`IProvider`, `ISession`, `ProviderRegistry`, `AcpStream`, `DevinProvider`, `DevinSession`, `hooks`, `mcp`) | Must **never** import `daemon.agent`, `daemon.coord`, `daemon.events`, `daemon.acp`, or `serverino` (except `mcp.d` if it hosts a route, or keep routes in `daemon.api`). No `Call` or `Execution` classes. |
+| **1B. Interop** | `daemon.interop` | Thin `intuit`-style interactive provider wrapper (`IProvider`, `ISession`, `ProviderRegistry`, `AcpStream`, `DevinProvider`, `DevinSession`, `hooks`, `mcp`) | Must **never** import `daemon.coord`, `daemon.events`, `daemon.policy`, or `daemon.acp` (except `mcp.d` if it hosts a route, or keep routes in `daemon.api`). The session routes read the profile type from `daemon.agent`. No `Call` or `Execution` classes. |
 | **2. Daemon Domain** | `daemon.agent`, `daemon.coord`, `daemon.events`, `daemon.policy`, `daemon.hooks`, `daemon.api` | Backed directly by `daemon.db` and `daemon.interop` (`ProviderRegistry` / `ISession`) | No JSON/JSONL file streams (`Stream`), no reverse control sockets (`<connection>.sock`), no loopback HTTP pokes |
-| **3. Autonom ACP** | `daemon.acp` | Hosted in-process on `<dataDir>/acp/daemon.sock` atop `daemon.agent` (`ProfileStore`) and `daemon.coord` (`Bus`); `autonom-acp` CLI is a thin stdio ↔ socket relay | Must never spawn `devin acp` directly or poll the daemon over HTTP |
+| **3. Autonom ACP** | `daemon.acp` | Hosted in-process on `<dataDir>/acp/daemon.sock` atop `daemon.agent` (`ProfileStore`) and `daemon.coord` (`Bus`); the `autonom acp` command is a thin stdio ↔ socket relay | Must never spawn `devin acp` directly or poll the daemon over HTTP |
 
 ### Reference Library Idioms (`Intuit` & `Selenium`)
 
@@ -101,5 +101,5 @@ Autonom is structured in three strict layers (`Interop + DB -> Daemon -> ACP`):
 
 ## 3. TypeScript & Python Conventions
 
-- **TypeScript (`devin/`)**: 4-space indentation, Allman braces, double-quoted strings, semicolons, `camelCase` values/functions, `PascalCase` types, `unknown` narrowed at boundaries.
-- **Python (`source/mcp/`, `devin/install.py`, `hook.py`)**: 4-space indentation, `snake_case` functions/variables, `PascalCase` classes, `UPPER_SNAKE_CASE` module constants, standard library only.
+- **TypeScript (the launcher in [autonom-ai/devin](https://github.com/autonom-ai/devin))**: 4-space indentation, Allman braces, double-quoted strings, semicolons, `camelCase` values/functions, `PascalCase` types, `unknown` narrowed at boundaries.
+- **Python (`source/mcp/`, `templates/hook.py`, `install.py`, `tests/install.py`)**: 4-space indentation, `snake_case` functions/variables, `PascalCase` classes, `UPPER_SNAKE_CASE` module constants, standard library only.

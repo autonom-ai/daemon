@@ -5,14 +5,33 @@ import pathlib
 import re
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
+ROOT = pathlib.Path(__file__).resolve().parents[4]
 SOURCE = ROOT / "source"
 
 UPPER_ENUM_RE = re.compile(r"^\s*enum\s+(?:[A-Za-z0-9_]+\s+)?([A-Z][A-Z0-9_]{2,})\s*=")
 WHILE_TRUE_RE = re.compile(r"\b(?:while\s*\(\s*true\s*\)|for\s*\(\s*;\s*;\s*\))")
 SCOPE_SPACE_RE = re.compile(r"\bscope\s+\((?:exit|failure|success)\)")
 LOCAL_IMPORT_RE = re.compile(r"^\s{4,}import\s+[a-zA-Z0-9_.]+\s*[;:]")
-INTEROP_FORBIDDEN_RE = re.compile(r"^\s*import\s+daemon\.(?:agent|coord|events|acp)\b")
+INTEROP_FORBIDDEN_RE = re.compile(r"^\s*import\s+daemon\.(?:coord|events|policy|acp)\b")
+
+
+def version_lines(lines):
+    """The line numbers that belong to a version block."""
+    inside = set()
+    depth = 0
+    pending = False
+    for number, line in enumerate(lines, start=1):
+        if depth == 0 and not pending:
+            if line.strip().startswith("version("):
+                pending = True
+                inside.add(number)
+            continue
+
+        inside.add(number)
+        pending = False
+        depth += line.count("{") - line.count("}")
+
+    return inside
 
 
 def check_d_file(path: pathlib.Path) -> list[str]:
@@ -24,6 +43,7 @@ def check_d_file(path: pathlib.Path) -> list[str]:
         errors.append(f"{rel}: {len(lines)} lines exceeds the 400-line ceiling")
 
     is_interop = "source/daemon/interop/" in str(rel)
+    conditional = version_lines(lines)
     for idx, line in enumerate(lines, start=1):
         if line.endswith(" ") or line.endswith("\t"):
             errors.append(f"{rel}:{idx}: trailing whitespace")
@@ -38,7 +58,7 @@ def check_d_file(path: pathlib.Path) -> list[str]:
         if SCOPE_SPACE_RE.search(line):
             errors.append(f"{rel}:{idx}: space after 'scope' in scope guard (use scope(exit))")
 
-        if LOCAL_IMPORT_RE.match(line):
+        if idx not in conditional and LOCAL_IMPORT_RE.match(line):
             errors.append(f"{rel}:{idx}: local import inside scope (keep imports at module scope)")
 
         if is_interop and INTEROP_FORBIDDEN_RE.match(line):

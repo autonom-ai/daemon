@@ -4,21 +4,24 @@ The daemon is one persistent Serverino worker plus a small number of threads. Ev
 
 | Thread | Owns |
 | --- | --- |
-| Main process | Process lifetime, argument parsing, and the ACP entrypoint when started as `autonom-acp`. |
+| Main process | Process lifetime, argument parsing, and the ACP host when started as `autonom acp`. |
 | Worker | The HTTP API and all domain state. |
 | Monitor threads | One per asynchronous call, owning its child or its request on an existing connection, plus call state. |
 | Scheduler | Schedule evaluation and wake delivery. It requests loopback refreshes; it does not write state. |
 
 `daemon.api` assembles the owners. HTTP handlers validate input and call into them; they do not keep state of their own. Human permission waits and child output never occupy the worker.
 
-## Binaries
+## The command
 
-| Binary | Role |
+| Command | Role |
 | --- | --- |
-| `autonom-daemon` | The HTTP API and domain owner. |
-| `autonom-acp` | The stdio ACP connector Devin Desktop launches. It starts a daemon if none is listening and shuts down the one it started when ACP ends. |
+| `autonom daemon` | The HTTP API and domain owner. |
+| `autonom daemon --ensure` | Ensures the configured daemon is listening, then reports its health. |
+| `autonom acp` | The stdio ACP connector Devin Desktop launches. It starts a daemon if none is listening and shuts down the one it started when ACP ends. |
+| `autonom mcp` | The stdio MCP proxy the Devin CLI starts for a managed session. |
+| `autonom hook` | The Devin CLI hook entrypoint that forwards one event to the daemon. |
 
-Build both with `dub build --compiler=ldc2 --config=daemon` and `--config=relay`.
+Build it with `dub build --compiler=ldc2 --config=daemon`. See [the command reference](CLI.md).
 
 ## Configuration
 
@@ -119,20 +122,20 @@ Rotation refuses to follow symlinks. Restart reconstruction reads the archive ta
 
 ## ACP and Desktop
 
-`autonom-acp` speaks newline-delimited JSON-RPC over stdio with the Devin CLI. Routing between Desktop and the daemon rewrites the ID of a copied envelope only, preserving the original identity for replies. Inherited `ACP_BACKEND` and related variables are removed from the child environment.
+`autonom acp` speaks newline-delimited JSON-RPC over stdio with the Devin CLI. Routing between Desktop and the daemon rewrites the ID of a copied envelope only, preserving the original identity for replies. Inherited `ACP_BACKEND` and related variables are removed from the child environment.
 
 Desktop connections register with `/api/acp/observe` and bind their MCP capability; after a daemon restart, heartbeats restore visibility and rebind the surviving capability without blocking ACP traffic.
 
 ## Deployment
 
-The launcher starts the daemon with the installed configuration and `AUTONOM_PORT` (default 8080). `GET /api/health` reports `stopping` with 503 while the worker winds down. Development runs the same binary against a temporary configuration:
+The launcher starts the daemon with the installed configuration and `AUTONOM_PORT` (default 8080) by running `autonom daemon --ensure`. `GET /api/health` reports `stopping` with 503 while the worker winds down. Development runs the same binary against a temporary configuration:
 
 ```sh
 dub run --compiler=ldc2 --config=unit --build=unittest
 python3 source/mcp/tests.py
 ```
 
-Model simulation establishes protocol and lifecycle behavior; isolated real CLI integration establishes the catalog and metadata contract. Neither proves native Desktop presentation. Follow the [Command Center contract](launcher/patches/COMMAND_CENTER.md) before deployment or live validation.
+Model simulation establishes protocol and lifecycle behavior; isolated real CLI integration establishes the catalog and metadata contract. Neither proves native Desktop presentation. The Desktop launcher lives in [autonom-ai/devin](https://github.com/autonom-ai/devin); follow its [Command Center contract](https://github.com/autonom-ai/devin/blob/main/docs/COMMAND_CENTER.md) before deployment or live validation.
 
 ## Reading more
 

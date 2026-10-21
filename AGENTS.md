@@ -14,43 +14,34 @@ This repository is indexed by Graphify: a code graph over its call, dependency, 
 Fall back to grep or file reads only for what the graph does not model: literal string or comment matches, non-indexed files, or reading a file you have already located. If no Graphify tools are listed, check the MCP server connection.
 <!-- graphify-rules-end -->
 
-To start a controllable Devin Desktop instance, run `devin-desktop --debug` verbatim.
-Do not add a data directory unless required, as this will cause the instance not to be authed.
-Devin Desktop allows for multiple simultaneous instances.
-
-- D: `dub build --compiler=ldc2 --config=daemon` and
-  `dub build --compiler=ldc2 --config=relay`.
+- D: `dub build --compiler=ldc2 --config=daemon` produces `bin/autonom`.
 - Tests: `dub run --compiler=ldc2 --config=unit --build=unittest`.
   These launch the production daemon on loopback port 18080; run serially.
-- Launcher: Node 22+, `npm --prefix devin ci`, then
-  `npm --prefix devin run check` and
-  `npm --prefix devin test`. Output is repository-root `dist/`.
 - Real CLI integration: `dub run --compiler=ldc2 --config=unit --build=unittest
   --d-version=devin`; isolates XDG state and requires no model credentials.
-- Installed Desktop build check: `npm --prefix devin run test:integration`.
-  This reads the actual installation; it does not launch Desktop or validate UI.
 - MCP: `python3 source/mcp/tests.py` (standard library only).
-- Installer: `python3 devin/install.py`; build as the normal user. For a protected
-  installation, build first, then `sudo python3 devin/install.py --no-build`.
-  Installer tests use temporary installation trees, never profile copies.
+- Installer: `python3 install.py`; user level, no `sudo`. Use `--prefix` for a
+  temporary tree and `--check` or `--uninstall` for the installed state.
+  Installer tests use only temporary prefixes, never profile copies.
 - There is no eval configuration. Use `--skip-registry=all` with DUB when
   dependencies are already cached and network access is unavailable.
 
 # Ownership
 
-- `app`: unified daemon and ACP entrypoint with one persistent Serverino
-  worker. `daemon.api` assembles the worker-owned domain objects.
+- `app`: the single command that dispatches the daemon, the ACP host, the MCP
+  proxy, and the hook.
+- `daemon.api` assembles the worker-owned domain objects.
 - `daemon.interop`: CLI processes, canonical sessions, ACP, and capabilities.
   The read-only CLI database supplies session metadata and conversation history.
 - `daemon.agent`: profiles and durable assignments. `daemon.coord`: rooms,
   streams, and cursors. `daemon.events`: pending events, schedules, and wakes.
 - `daemon.policy` / `daemon.hooks`: policy screening and authenticated hooks.
 - `source/mcp/server.py`: stdio JSON-RPC proxy to the daemon.
-- `devin/launcher`: Desktop startup, native runtime, page bridge, and settings.
-  `assets`: configured pages. `devin/install.py`: transactional installation.
+- `templates`: the configuration, policy, and hook assets the daemon installs.
+- `install.py`: the user-level installation of the command and its runtime.
 
-See [daemon architecture and cutover](docs/DAEMON.md) for current lifecycle,
-HTTP, permission, and deployment contracts.
+See [daemon architecture and cutover](docs/ARCHITECTURE.md) for current
+lifecycle, HTTP, permission, and deployment contracts.
 
 # Invariants
 
@@ -62,8 +53,8 @@ HTTP, permission, and deployment contracts.
   output, requests, and deadlines; cancel and reap owned children safely.
 - Discovery does not grant control. Scope capabilities to their session/run;
   never expose operator credentials to pages, children, or logs. Remove inherited
-  `ACP_BACKEND` when invoking Devin CLI; keep Desktop startup environment handling
-  local to the launcher. Keep credential-bearing configuration private.
+  `ACP_BACKEND` when invoking Devin CLI. Keep credential-bearing configuration
+  private.
 - Open the CLI database read-only. A held foreign lock means loaded elsewhere,
   not active generation or permission to control that process.
 - Preserve configuration, data, sessions, and file logs. Reconcile uncertain
@@ -73,7 +64,7 @@ HTTP, permission, and deployment contracts.
 
 # Style and refactor
 
-Use [the adopted style revision](research/style-rules-revision.md). Prefer direct domain ownership,
+Use [the style guide](docs/DEVELOPMENT.md). Prefer direct domain ownership,
 small intentional APIs, and language-native code. D and TypeScript use
 four-space Allman layout, meaningful camelCase names, PascalCase types, and
 `ret` for constructed results. Group project, dependency, then runtime imports.
@@ -85,16 +76,8 @@ model simulation and narrow installer filesystem fixtures are permitted.
 Aim for 200 lines per file; stay under 400, reserving longer files for one
 cohesive owner. Keep tests against installed peers in explicit integration suites. Avoid unrelated formatting and speculative abstractions.
 
-# Desktop safety
+# Cross-repository contract
 
-Read [the Desktop contract and its live validation
-procedure](docs/launcher/patches/COMMAND_CENTER.md) before changes to native integration.
-Respect the pinned build and integrity checks. Only
-patch the installed CLI shim and copy the launcher payload; never rewrite
-vendor bundles, checksums, CSP, or profile data, weaken sandboxing, or hide
-integrity warnings. Runtime patches must restore exact descriptors.
-
-Live tests use a separate window, never the communication window. Tests may
-observe and operate real controls; they may not synthesize the product surface
-they claim to validate. Unit tests do not close live acceptance gates. Record
-raw output and screenshots, and report unverified gates explicitly.
+The Desktop launcher lives in [autonom-ai/devin](https://github.com/autonom-ai/devin).
+It discovers `autonom` on `PATH` and never bundles the daemon. The command
+surface in [docs/CLI.md](docs/CLI.md) is the only interface between them.

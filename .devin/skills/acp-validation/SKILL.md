@@ -26,7 +26,7 @@ Run the installed-bundle wire validator directly in Node (no Electron window req
 node .devin/skills/acp-validation/tools/validate-acp.mjs
 ```
 
-You can also pipe a JSONL file or stream of JSON-RPC frames emitted by `autonom-daemon` / `autonom-acp` into it:
+You can also pipe a JSONL file or stream of JSON-RPC frames emitted by `autonom daemon` / `autonom acp` into it:
 
 ```bash
 node .devin/skills/acp-validation/tools/validate-acp.mjs --file /path/to/frames.jsonl

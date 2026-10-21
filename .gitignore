@@ -2,9 +2,6 @@
 bin/
 .env
 test-workspace
-.agents/*
-!.agents/skills
-.playwright-mcp/
 __pycache__
 graphify-out/
 
@@ -12,8 +9,6 @@ graphify-out/
 .devin/*
 !.devin/skills/
 
-# Launcher build output and dependencies.
-devin/node_modules/
-/dist/
-
-/research/
+# Agent state and local research stay out of the repository.
+.agents/*
+!.agents/skills
