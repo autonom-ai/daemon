@@ -108,7 +108,7 @@ The `PermissionRequest` hook returns an empty response. Approval stays with the 
 | `offlineStartAfter` | 1 hour | How long a profile may be offline before a wake is considered stale. |
 | `offlineCompactAfter` | 1 hour | How long a session may sit idle before its next resume compacts first. |
 
-The former `compactionThresholds` setting was removed. Delete it from a configuration file before starting this revision.
+The `compactionThresholds` setting was removed. Delete it from a configuration file before starting the daemon.
 
 ## Transcripts
 

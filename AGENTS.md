@@ -41,7 +41,7 @@ Fall back to grep or file reads only for what the graph does not model: literal 
 - `templates`: the configuration, policy, and hook assets the daemon installs.
 - `install.py`: the user-level installation of the command and its runtime.
 
-See [daemon architecture and cutover](docs/ARCHITECTURE.md) for current
+See [daemon architecture](docs/ARCHITECTURE.md) for current
 lifecycle, HTTP, permission, and deployment contracts.
 
 # Invariants

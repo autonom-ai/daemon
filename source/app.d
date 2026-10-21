@@ -8,12 +8,11 @@ import serverino;
 
 import core.thread : Thread;
 import core.time : msecs;
-import std.algorithm : canFind;
 import std.base64 : Base64;
 import std.conv : to;
 import std.file : exists, thisExePath;
 import std.getopt : getopt, GetOptException, GetoptResult;
-import std.path : baseName, buildPath, dirName;
+import std.path : buildPath, dirName;
 import std.process : environment, Pid, spawnProcess, wait;
 import std.socket : AddressFamily, InternetAddress, Socket, SocketType;
 import std.stdio : File, stderr, stdout, writeln;
@@ -114,10 +113,6 @@ private int runDaemon(string[] args, string[] options, bool acpMode)
     if (devinCmd.length)
         environment["AUTONOM_DEVIN"] = devinCmd;
 
-    // A binary named after the legacy ACP connector keeps serving ACP.
-    if (thisExePath.baseName.canFind("acp") || environment.get("AUTONOM_ACP") == "1")
-        acpMode = true;
-
     if (acpMode)
         return runAcp(args, devinCmd, configPath);
 
@@ -130,7 +125,6 @@ private int runDaemon(string[] args, string[] options, bool acpMode)
 /// Serve ACP over stdio, starting a daemon when none is listening.
 private int runAcp(string[] args, string devinCmd, string configPath)
 {
-    environment["AUTONOM_ACP"] = "1";
     ushort listenPort = environment.get("AUTONOM_PORT", "8080").to!ushort;
 
     bool portInUse = false;

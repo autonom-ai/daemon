@@ -18,7 +18,7 @@ autonom <command> [options]
 | `autonom --help` | Print the usage. |
 | `autonom --version` | Print the version. |
 
-Running `autonom` without a command starts the daemon, and a binary named after the legacy connector serves ACP. That keeps an installation working while the launcher moves to the new registration.
+Running `autonom` without a command starts the daemon.
 
 ## Options
 

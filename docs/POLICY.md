@@ -62,7 +62,7 @@ The CLI loads hooks from the user-level Devin configuration. On daemon startup a
 | --- | --- |
 | Scope | One registration covers every managed session, regardless of workspace. |
 | Merge | Unrelated settings and user-owned hook commands are preserved, including commands that share a matcher with Autonom. |
-| Repair | Entries pointing at the moved `hook.py` paths are replaced by the command rather than left to fail closed. |
+| Repair | Entries pointing at an Autonom hook script that is no longer installed are replaced by the command rather than left to fail closed. |
 | Project hooks | A workspace's own `.devin/hooks.v1.json` continues to load separately. |
 | Failure | A malformed user configuration is refused without being replaced. |
 

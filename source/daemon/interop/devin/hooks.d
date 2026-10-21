@@ -40,6 +40,8 @@ private bool autonomHook(string command)
     return baseName(parts[0]) == "autonom" && parts[1] == "hook";
 }
 
+/// Whether the hook belongs to Autonom: the current command, or a hook script
+/// from an installation that no longer exists.
 private bool managed(JSONValue hook)
 {
     if (hook.type != JSONType.object || "command" !in hook.object ||
