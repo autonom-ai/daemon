@@ -4,6 +4,7 @@ bin/
 test-workspace
 __pycache__
 graphify-out/
+.codegraph/
 
 # Workspace coordination files stay private.
 .devin/*
