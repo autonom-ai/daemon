@@ -9,7 +9,7 @@
 			"sourcePaths": [
 				"source/daemon"
 			],
-			"targetName": "autonom-daemon",
+			"targetName": "autonom",
 			"targetType": "executable"
 		},
 		{
@@ -23,7 +23,6 @@
 			"name": "unit",
 			"preBuildCommands": [
 				"$DUB build --compiler=$DC --config=daemon",
-				"$DUB build --compiler=$DC --config=relay",
 				"$DUB run unit-threaded@2.2.6 -c gen_ut_main -- -f bin/ut.d source/tests"
 			],
 			"sourcePaths": [
@@ -31,18 +30,6 @@
 				"source/tests"
 			],
 			"targetName": "autonom-unit",
-			"targetType": "executable"
-		},
-		{
-			"excludedSourceFiles": [
-				"source/tests/**"
-			],
-			"mainSourceFile": "source/app.d",
-			"name": "relay",
-			"sourcePaths": [
-				"source/daemon"
-			],
-			"targetName": "autonom-acp",
 			"targetType": "executable"
 		}
 	],

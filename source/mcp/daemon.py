@@ -53,16 +53,16 @@ def running():
 
 
 def spawn():
-    binary = os.path.join(root(), "bin", "autonom-daemon")
+    binary = os.path.join(root(), "bin", "autonom")
     if not os.path.exists(binary):
-        raise ToolError("The autonom daemon is not built: %s is missing" % binary)
+        raise ToolError("The autonom command is not built: %s is missing" % binary)
 
     os.makedirs(state_directory(), exist_ok=True)
     environment = dict(os.environ)
     environment["AUTONOM_PORT"] = port()
     with open(log_path(), "ab") as log:
         return subprocess.Popen(
-            [binary],
+            [binary, "daemon"],
             cwd=root(),
             env=environment,
             stdin=subprocess.DEVNULL,

@@ -14,7 +14,8 @@ import urllib.request
 import daemon
 
 REPOSITORY = Path(__file__).resolve().parents[3]
-HOOK = REPOSITORY / "source/daemon/interop/devin/hook.py"
+COMMAND = REPOSITORY / "bin/autonom"
+HOOK = REPOSITORY / "templates/hook.py"
 SERVER = REPOSITORY / "source/mcp/server.py"
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -46,7 +47,7 @@ class DaemonTestCase(unittest.TestCase):
                         AUTONOM_DATA_DIR=str(self.data), AUTONOM_RUN_TOKEN="", AUTONOM_CLIENT_TOKEN="")
         self.log = tempfile.TemporaryFile()
         self.addCleanup(self.log.close)
-        self.process = subprocess.Popen([str(REPOSITORY / "bin/autonom-daemon")], env=self.env,
+        self.process = subprocess.Popen([str(COMMAND), "daemon"], env=self.env,
                                         stdin=subprocess.DEVNULL, stdout=self.log, stderr=self.log)
         self.addCleanup(self.stop_daemon)
         deadline = time.monotonic() + 10
@@ -98,7 +99,7 @@ class DaemonTestCase(unittest.TestCase):
         if not managed:
             env.pop("AUTONOM_DATA_DIR", None)
             env.pop("AUTONOM_MCP_TOKEN", None)
-        result = subprocess.run([sys.executable, str(HOOK), "--event", event],
+        result = subprocess.run([str(COMMAND), "hook", "--event", event],
                                 input=json.dumps({"hook_event_name": event, "session_id": "managed",
                                                   "tool_name": tool, "tool_input": input or {},
                                                   "cwd": str(self.workspace)}),

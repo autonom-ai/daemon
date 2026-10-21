@@ -16,6 +16,9 @@ unittest
     servers.length.should == 2;
     servers[0]["name"].str.should == "other";
     servers[1]["name"].str.should == mcpServerName;
+    servers[1]["command"].str.should == "autonom";
+    servers[1]["args"].array.length.should == 1;
+    servers[1]["args"][0].str.should == "mcp";
     string[string] env;
     foreach (entry; servers[1]["env"].array)
         env[entry["name"].str] = entry["value"].str;

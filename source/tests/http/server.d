@@ -7,7 +7,7 @@ import unit_threaded : Name, Serial, should;
 
 import core.time : Duration, msecs;
 import std.algorithm : canFind;
-import std.array : replace, replicate;
+import std.array : replicate;
 import std.conv : to;
 import std.file : getcwd, mkdirRecurse, readText, write;
 import std.json : JSONValue, parseJSON;
@@ -30,7 +30,7 @@ unittest
     request("/api/health")["pid"].integer.should == daemon.process.processID;
     request("/api/health", 405, "{}")["error"].str.should == "Method not allowed";
 
-    JSONValue hooks = parseJSON(readText("devin/hooks.v1.json"));
+    JSONValue hooks = parseJSON(readText("templates/hooks.v1.json"));
     hooks.object.length.should == 8;
     foreach (event, path; [
         "PreToolUse": "pre-tool-use",
@@ -98,11 +98,8 @@ unittest
         JSONValue hook = hooks[event][0]["hooks"][0];
         hook["type"].str.should == "command";
         hook["timeout"].integer.should == 20;
-        hook["command"].str.canFind("hook.py").should == true;
-        hooks[event][0]["hooks"][0]["command"] = JSONValue(
-            hook["command"].str.replace("{{AUTONOM_ROOT}}", getcwd())
-        );
-        string command = hooks[event][0]["hooks"][0]["command"].str;
+        hook["command"].str.canFind("autonom hook").should == true;
+        string command = buildPath(getcwd(), "bin", "autonom") ~ " hook --event " ~ event;
         parseJSON(invokeHook(command, payload)).should == parseJSON("{}");
         parseJSON(invokeHook(command, parseJSON("{}"))).should == parseJSON("{}");
     }
@@ -306,7 +303,7 @@ unittest
     wait(daemon.process).should == 0;
     foreach (event, groups; hooks.object)
     {
-        parseJSON(invokeHook(groups[0]["hooks"][0]["command"].str,
+        parseJSON(invokeHook(buildPath(getcwd(), "bin", "autonom") ~ " hook --event " ~ event,
             JSONValue(["hook_event_name": JSONValue(event)]))).should == parseJSON("{}");
     }
 }

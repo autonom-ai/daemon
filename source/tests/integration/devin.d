@@ -46,7 +46,7 @@ version(devin)
         File errors = File.tmpfile();
         scope(exit)
             errors.close();
-        string[] connector = [buildPath("bin", "autonom-acp"), "--devin", command];
+        string[] connector = [buildPath("bin", "autonom"), "acp", "--devin", command];
         // The connector runs from the repository while its real CLI uses isolated XDG state.
         AcpClient agent = new AcpClient(connector, child, null, errors);
         scope(exit)
@@ -158,7 +158,8 @@ version(devin)
         ProcessConfig options = ProcessConfig.newEnv;
         options.preExecFunction = &createProcessGroup;
         ProcessPipes relay = pipeProcess([
-            buildPath("bin", "autonom-acp"),
+            buildPath("bin", "autonom"),
+            "acp",
             "--devin",
             environment.get("AUTONOM_TEST_DEVIN", "devin")
         ], Redirect.stdin | Redirect.stdout, child, options);

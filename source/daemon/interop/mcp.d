@@ -5,21 +5,16 @@ import daemon.http;
 
 import serverino;
 
-import std.file : thisExePath;
 import std.json : JSONType, JSONValue;
-import std.path : buildPath, dirName;
 
 enum mcpServerName = "autonom-coord";
-
-string mcpServerPath()
-    => buildPath(dirName(dirName(thisExePath)), "source", "mcp", "server.py");
 
 JSONValue coordServer(string port, string token)
 {
     return JSONValue([
         "name": JSONValue(mcpServerName),
-        "command": JSONValue("python3"),
-        "args": JSONValue([JSONValue(mcpServerPath())]),
+        "command": JSONValue("autonom"),
+        "args": JSONValue([JSONValue("mcp")]),
         "env": JSONValue([
             JSONValue(["name": JSONValue("AUTONOM_PORT"), "value": JSONValue(port)]),
             JSONValue(["name": JSONValue("AUTONOM_MCP_TOKEN"), "value": JSONValue(token)]),

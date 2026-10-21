@@ -7,10 +7,10 @@ import core.sys.posix.fcntl : O_CREAT, O_RDWR;
 import std.algorithm.searching : canFind;
 import std.file : exists, isFile, isSymlink, mkdirRecurse, thisExePath;
 import std.json : JSONType, JSONValue, parseJSON;
-import std.path : buildPath, dirName, isAbsolute;
+import std.path : baseName, buildPath, dirName, isAbsolute;
 import std.process : environment;
 import std.stdio : File;
-import std.string : replace;
+import std.string : split;
 
 string globalConfigPath()
 {
@@ -30,6 +30,16 @@ string globalConfigPath()
     return buildPath(base, "devin", "config.json");
 }
 
+/// Whether the command invokes the Autonom hook entrypoint.
+private bool autonomHook(string command)
+{
+    string[] parts = command.split;
+    if (parts.length < 2)
+        return false;
+
+    return baseName(parts[0]) == "autonom" && parts[1] == "hook";
+}
+
 private bool managed(JSONValue hook)
 {
     if (hook.type != JSONType.object || "command" !in hook.object ||
@@ -37,7 +47,8 @@ private bool managed(JSONValue hook)
         return false;
 
     string command = hook["command"].str;
-    return command.canFind("/source/daemon/interop/devin/hook.py") ||
+    return autonomHook(command) ||
+        command.canFind("/source/daemon/interop/devin/hook.py") ||
         command.canFind("/source/coord/hook.py");
 }
 
@@ -101,24 +112,11 @@ void installHooks(string root = null, string path = null)
     if (!path.length)
         path = globalConfigPath();
 
-    string script = buildPath(root, "source", "daemon", "interop", "devin", "hook.py");
+    string script = buildPath(root, "templates", "hook.py");
     if (!isFile(script) || isSymlink(script))
         throw new Exception("Autonom hook script is unavailable");
 
-    JSONValue rendered = parseJSON(readText(buildPath(root, "devin", "hooks.v1.json")));
-    // Replace inside each command so quotes and backslashes in paths stay JSON-safe.
-    foreach (event, ref entries; rendered.object)
-    {
-        foreach (ref entry; entries.array)
-        {
-            foreach (ref hook; entry["hooks"].array)
-            {
-                string escaped = root.replace("\\", "\\\\").replace("\"", "\\\"")
-                    .replace("$", "\\$").replace("`", "\\`");
-                hook["command"] = JSONValue(hook["command"].str.replace("{{AUTONOM_ROOT}}", escaped));
-            }
-        }
-    }
+    JSONValue rendered = parseJSON(readText(buildPath(root, "templates", "hooks.v1.json")));
 
     mkdirRecurse(dirName(path));
     File lock = openFile(path~".autonom.lock", O_CREAT | O_RDWR);

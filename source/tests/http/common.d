@@ -62,7 +62,7 @@ RunningDaemon startDaemon(Fixture fixture)
     string path = buildPath(fixture.root, "daemon.log");
     ret.log = File(path, "w");
     ret.process = spawnProcess(
-        ["bin/autonom-daemon"],
+        ["bin/autonom", "daemon"],
         stdin,
         ret.log,
         ret.log,

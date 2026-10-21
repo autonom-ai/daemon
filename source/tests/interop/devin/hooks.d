@@ -35,13 +35,39 @@ unittest
     entries[0]["matcher"].str.should == "exec";
     entries[0]["hooks"].array.length.should == 1;
     entries[0]["hooks"][0]["command"].str.should == "python3 /user/hook.py";
-    entries[1]["hooks"][0]["command"].str.should ==
-        "python3 \""~getcwd()~"/source/daemon/interop/devin/hook.py\" --event PreToolUse";
+    entries[1]["hooks"][0]["command"].str.should == "autonom hook --event PreToolUse";
 
     string installed = readText(path);
     installHooks(getcwd(), path);
     readText(path).should == installed;
     config["hooks"].object.length.should == 8;
+}
+
+@Name("Global hook registration replaces the moved Autonom command and keeps one hook per event")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+
+    string path = buildPath(fixture.root, "devin.json");
+    write(path, `{
+        "hooks": {
+            "PreToolUse": [{"matcher": "", "hooks": [
+                {"type": "command", "command": "python3 /moved/source/daemon/interop/devin/hook.py --event PreToolUse"},
+                {"type": "command", "command": "autonom hook --event PreToolUse"},
+                {"type": "command", "command": "python3 /user/hook.py"}
+            ]}]
+        }
+    }`);
+    installHooks(getcwd(), path);
+    JSONValue config = parseJSON(readText(path));
+    JSONValue entries = config["hooks"]["PreToolUse"];
+    entries.array.length.should == 2;
+    entries[0]["hooks"].array.length.should == 1;
+    entries[0]["hooks"][0]["command"].str.should == "python3 /user/hook.py";
+    entries[1]["hooks"].array.length.should == 1;
+    entries[1]["hooks"][0]["command"].str.should == "autonom hook --event PreToolUse";
 }
 
 @Name("Global hook registration refuses malformed user configuration without replacing it")

@@ -1,10 +1,9 @@
 import json
 import os
 import subprocess
-import sys
 import unittest
 
-from support import SERVER
+from support import COMMAND
 
 
 class ProtocolTests(unittest.TestCase):
@@ -15,7 +14,7 @@ class ProtocolTests(unittest.TestCase):
             json.dumps({"method": "notifications/initialized"}),
             "invalid JSON",
         ]
-        result = subprocess.run([sys.executable, str(SERVER)], input="\n".join(requests) + "\n",
+        result = subprocess.run([str(COMMAND), "mcp"], input="\n".join(requests) + "\n",
                                 text=True, capture_output=True, timeout=10,
                                 env=dict(os.environ, AUTONOM_MCP_TOKEN=""))
         self.assertEqual(result.returncode, 0, result.stderr)

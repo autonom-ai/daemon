@@ -30,7 +30,7 @@ unittest
     string[string] environment = agentEnvironment(fixture);
     environment["AUTONOM_PORT"] = "18080";
     environment["XDG_CONFIG_HOME"] = buildPath(fixture.root, "xdg-config");
-    AcpClient peer = new AcpClient([buildPath(getcwd(), "bin", "autonom-acp"), "--config", fixture.path,
+    AcpClient peer = new AcpClient([buildPath(getcwd(), "bin", "autonom"), "acp", "--config", fixture.path,
         "--devin", fixture.config.devinCommand], environment, fixture.root);
     scope(exit)
         peer.close();
