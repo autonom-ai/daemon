@@ -38,38 +38,7 @@ It isolates the XDG state and needs no model credentials.
 
 ## Style
 
-The conventions below are the working style guide for this repository. They describe how to write and review code; they are not permission to reformat unrelated files. Preserve protocol behavior, ownership, and safety invariants while improving style. Do not create abstractions, compatibility layers, or file splits solely to satisfy a checklist.
-
-### Shared
-
-- Prefer direct, imperative, domain-shaped code. Keep mutable state with its owner. Add a type, helper, layer, or interface only when it names a real operation or boundary, clarifies ownership, or protects an invariant.
-- Make control flow, data flow, and lifetime visible. Keep a temporary when it explains a transition, supports cleanup, or is reused.
-- Use meaningful names that are brief in context. Avoid cryptic abbreviations and names that disguise the real operation.
-- Comments explain non-obvious invariants, protocol constraints, and safety boundaries. Do not narrate ordinary statements.
-- Prefer real domain types and real behavior in tests. A simulated peer is not evidence of compatibility with an installed product.
-
-### D
-
-- Types, classes, structs, interfaces, and exceptions use `PascalCase`. Functions, methods, fields, parameters, locals, and constants use `camelCase`. Enum members use `PascalCase` even when their wire values do not.
-- Name a constructed or accumulated return value `ret`. Return a direct expression directly.
-- Use `struct` for value records, options, and results. Use `class` for identity-bearing services and shared mutable owners.
-- Give ordinary locals explicit types. Use inference only for unnameable results.
-- Group imports as project modules, external dependencies, then runtime modules, separated by one blank line. Within the runtime group, `core.*` comes before `std.*`. Keep imports at module scope.
-- Use four-space indentation and Allman braces. Omit braces for a single-line scoped statement. Write an empty block as `{ }`.
-- Use `scope(exit)` and `scope(failure)` without a space. Do not write `while (true)` or `for (;;)`.
-- Put no spaces around `~`, `..`, or `cast(Type)value`. Aim for lines near or below 120 columns.
-- Use `///` for public API contracts and `//` for implementation rationale.
-- Name tests for behavior and use `@Name`, `@ShouldFailWith`, and scoped cleanup.
-- Aim for roughly 200 lines per file and stay under 400. Split distinct responsibilities before a file approaches the ceiling.
-
-### Python
-
-- Follow Python conventions: four-space indentation, `snake_case` functions and values, `PascalCase` types, and uppercase module constants.
-- Keep subprocesses, output, credentials, environment forwarding, and exception behavior bounded and intentional. Security-sensitive hooks fail closed when authentication or validation fails.
-
-### TypeScript
-
-The launcher lives in [autonom-ai/devin](https://github.com/autonom-ai/devin) and keeps the same conventions: four-space indentation, Allman braces, double-quoted strings, semicolons, `camelCase` values, and `PascalCase` types.
+The canonical shared conventions live in [`core/docs/CONVENTIONS.md`](../core/docs/CONVENTIONS.md) ([GitHub](https://github.com/autonom-ai/core/blob/main/docs/CONVENTIONS.md)). They cover the shared principles, D, TypeScript, and Python. This repository adds the layer boundaries below; [AGENTS.md](../AGENTS.md) adds its ownership and safety invariants.
 
 ## Layer boundaries
 

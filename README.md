@@ -35,6 +35,15 @@ The daemon is Linux-focused. macOS and Windows are not validated.
 
 ## Installation
 
+Clone with the shared assets, or initialize them in an existing checkout:
+
+```sh
+git clone --recurse-submodules git@github.com:autonom-ai/daemon.git
+git submodule update --init --recursive
+```
+
+The `core/` submodule supplies the configuration template and the ACP validation skill. Without it, `templates/config.yml` and `.devin/skills/acp-validation` are dangling symlinks.
+
 Build as your normal user, then install the command for your account:
 
 ```sh

@@ -1,0 +1,14 @@
+{
+  "dCompiler": {
+    "enabled": true,
+    "compiler": "ldc2",
+    "config": "daemon"
+  },
+  "dLanguageServer": {
+    "enabled": true,
+    "engine": "dcd",
+    "compiler": "ldc2",
+    "dubConfig": "daemon",
+    "maxReferences": 2000
+  }
+}

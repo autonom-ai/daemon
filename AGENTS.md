@@ -65,7 +65,8 @@ lifecycle, HTTP, permission, and deployment contracts.
 
 # Style and refactor
 
-Use [the style guide](docs/DEVELOPMENT.md). Prefer direct domain ownership,
+Use [the shared conventions](core/docs/CONVENTIONS.md) and [the development
+guide](docs/DEVELOPMENT.md). Prefer direct domain ownership,
 small intentional APIs, and language-native code. D and TypeScript use
 four-space Allman layout, meaningful camelCase names, PascalCase types, and
 `ret` for constructed results. Group project, dependency, then runtime imports.

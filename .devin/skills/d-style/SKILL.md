@@ -11,7 +11,7 @@ allowed-tools:
 
 # Autonom Code Style & Architecture Conventions
 
-This skill enforces the working style guide ([docs/DEVELOPMENT.md](../../../docs/DEVELOPMENT.md)), the architectural idioms from `/home/cet/Repos/Libraries/intuit` and `/home/cet/Repos/Libraries/selenium`, and the strict `Interop + DB -> Daemon -> ACP` layer boundaries.
+This skill enforces the shared conventions ([core/docs/CONVENTIONS.md](../../../core/docs/CONVENTIONS.md)), the architectural idioms from the Intuit and Selenium reference repositories, and the strict `Interop + DB -> Daemon -> ACP` layer boundaries.
 
 Run the automated checker before committing or completing any phase:
 
@@ -43,63 +43,12 @@ Autonom is structured in three strict layers (`Interop + DB -> Daemon -> ACP`):
 
 ---
 
-## 2. D Language Conventions
+## 2. Shared Language Conventions
 
-### Naming & Casing
+The D, TypeScript, and Python conventions are canonical in
+[core/docs/CONVENTIONS.md](../../../core/docs/CONVENTIONS.md). Read that guide
+before writing or reviewing code. It covers naming, types and inference, module
+layout, imports, braces, whitespace, accessors, comments, errors, and tests.
 
-- **Types (`class`, `struct`, `interface`, `enum`, `Exception`)**: `PascalCase`.
-- **Functions, methods, fields, parameters, locals, constants**: `camelCase`.
-- **Enum members**: `PascalCase`, even when wire values are lowercase/snake_case:
-  ```d
-  enum TurnStatus : string
-  {
-      Idle = "idle",
-      Running = "running",
-      Waiting = "waiting",
-      Unknown = "unknown"
-  }
-  ```
-- **Constants**: `enum frameLimit = 16 * 1024 * 1024;` — **never** `UPPER_SNAKE_CASE` (except external C/SQLite symbols like `SQLITE_OPEN_READWRITE` or `LOCK_EX`).
-- **Constructed return value**: Always name an accumulated return variable `ret`. Return a single expression directly without a temporary.
-- **Module names**: lowercase without underscores (`package.d`, `stream.d`, `provider.d`).
-
-### Types & Inference
-
-- **Explicit local types**: Write `Profile profile = store.get(name);` or `Session* found = id in sessions;`. Do **not** use `auto` for routine nameable types.
-- **`struct` vs `class`**: Use `struct` for value records, options, and results (`Frame`, `SessionConfig`, `PromptResult`, `Permission`, `Event`, `Schedule`). Use `class` for identity-bearing services and shared mutable owners (`Database`, `AcpStream`, `DevinProvider`, `DevinSession`, `Profile`, `ProfileStore`, `Room`, `Bus`).
-
-### Module Layout & Imports
-
-1. `module ...;` declaration first.
-2. **Three import groups** separated by one blank line:
-   - Project imports (`daemon.*`, `tests.*`)
-   - External dependency imports (`arsd.sqlite`, `intuit.*`, `mir.*`, `serverino`, `unit_threaded`)
-   - Runtime/standard library imports (`core.*` before `std.*`)
-3. Keep imports at module scope (never inside ordinary functions).
-4. Group class members by access section (`private:`, `package(...):`, `protected:`, `public:`) rather than switching repeatedly. Put fields before constructors, and constructors before methods.
-
-### Braces, Expressions & Whitespace
-
-- **4-space indentation, Allman braces**.
-- **Single-line bodies**: Omit braces when a scoped control statement (`if`, `else`, `foreach`, `while`) has one non-nested statement on one physical line. If any branch or outer block uses braces, keep braces on the enclosing block.
-- **Empty blocks**: Write `{ }` on one line.
-- **Short methods**: Use `=> expr;` only when the entire expression fits on one physical line.
-- **Delegate literals**: Put `{` on the same line as the delegate introducer:
-  ```d
-  database.transaction({
-      database.exec("DELETE FROM autonom_events WHERE profile = ?", name);
-  });
-  ```
-- **String concatenation & slices**: No spaces around `~`, `..`, `cast(Type)val`, or `$-1`:
-  ```d
-  string path = directory~"/"~items[0..$-1];
-  ```
-- **Loops**: No `while (true)` or `for (;;)` sentinel loops; use a meaningful loop predicate.
-- **Scope guards**: Write `scope(exit)` and `scope(failure)` with no space before `(`.
-
----
-
-## 3. TypeScript & Python Conventions
-
-- **TypeScript (the launcher in [autonom-ai/devin](https://github.com/autonom-ai/devin))**: 4-space indentation, Allman braces, double-quoted strings, semicolons, `camelCase` values/functions, `PascalCase` types, `unknown` narrowed at boundaries.
-- **Python (`source/mcp/`, `templates/hook.py`, `install.py`, `tests/install.py`)**: 4-space indentation, `snake_case` functions/variables, `PascalCase` classes, `UPPER_SNAKE_CASE` module constants, standard library only.
+This skill keeps only the repository-specific layer boundaries above and the
+checker below. Do not duplicate the shared rules here.
