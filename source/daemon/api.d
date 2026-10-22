@@ -1,3 +1,4 @@
+/// Single-worker assembly of the Autonom HTTP API, domain stores, scheduler, bridge, and policy engine.
 module daemon.api;
 
 import daemon.agent.api;

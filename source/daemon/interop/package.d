@@ -1,3 +1,4 @@
+/// Devin CLI process supervision, ACP client framing, read-only session database access, and capability tokens.
 module daemon.interop;
 
 public import daemon.interop.call : Call, CallKind, CallStatus;

@@ -1,3 +1,4 @@
+/// Stdio ACP host bridging Devin Desktop to daemon-supervised sessions.
 module daemon.acp;
 
 import daemon.config : Config;

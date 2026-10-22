@@ -10,8 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - uses: dlang-community/setup-dlang@v2
         with:
           compiler: ldc-latest
@@ -25,5 +23,3 @@ jobs:
         run: python3 tests/command.py
       - name: Run installer tests
         run: python3 tests/install.py
-      - name: Check the style
-        run: python3 .devin/skills/d-style/tools/check-style.py

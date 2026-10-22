@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Forward Devin CLI lifecycle hook events to the loopback Autonom daemon."""
+
 import json
 import os
 import sys

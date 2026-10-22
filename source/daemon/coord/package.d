@@ -1,3 +1,4 @@
+/// Multi-profile rooms, message streams, and cursor-tracked coordination bus.
 module daemon.coord;
 
 public import daemon.coord.bus : Bus;

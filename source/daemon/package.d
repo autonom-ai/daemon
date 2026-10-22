@@ -1,3 +1,4 @@
+/// Public facade for the Autonom daemon domain, configuration, interop, and policy modules.
 module daemon;
 
 public import daemon.agent : Profile, ProfileStore;

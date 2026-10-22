@@ -81,20 +81,23 @@ class CommandTests(unittest.TestCase):
     def test_daemon_ensure_starts_and_reports_the_daemon(self):
         port = free_port()
         config = self.root / "config.yml"
-        config.write_text(f"dataDir: {self.root / 'data'}\ndevinCommand: devin\nrouter:\n"
-                          '  type: openrouter\n  key: "command-test-key"\n'
-                          "  url: https://openrouter.ai\n  name: OpenRouter\n")
-        environment = dict(os.environ, AUTONOM_CONFIG=str(config), AUTONOM_PORT=str(port),
+        (self.root / ".env").write_text("OPENROUTER_API_KEY=command-test-key\n")
+        os.chmod(self.root / ".env", 0o600)
+        environment = dict(os.environ, HOME=str(self.root), AUTONOM_CONFIG=str(config),
+                           AUTONOM_PORT=str(port),
+                           XDG_DATA_HOME=str(self.root / "xdg-data"),
                            XDG_CONFIG_HOME=str(self.root / "xdg-config"),
                            XDG_CACHE_HOME=str(self.root / "xdg-cache"))
         result = subprocess.run([str(COMMAND), "daemon", "--ensure"], capture_output=True, text=True,
                                 timeout=60, env=environment)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(config.is_file())
+        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
         health = json.loads(result.stdout)
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["configFile"], str(config))
 
-        capability = (self.root / "data" / "client.token").read_text().strip()
+        capability = Path(health["controlFile"]).read_text().strip()
         request = urllib.request.Request(f"http://127.0.0.1:{port}/api/stop", method="POST",
                                          data=b"{}", headers={"x-autonom-client": capability,
                                                              "content-type": "application/json"})

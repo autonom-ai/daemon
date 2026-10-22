@@ -2,14 +2,13 @@
 bin/
 .env
 test-workspace
-__pycache__
+__pycache__/
+*.pyc
 graphify-out/
 .codegraph/
-
-# Workspace coordination files stay private.
-.devin/*
-!.devin/skills/
-
-# Agent state and local research stay out of the repository.
-.agents/*
-!.agents/skills
+.devin/
+.agents/
+.windsurfrules
+opencode.json
+.scratch/
+.archive/

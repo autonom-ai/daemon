@@ -40,6 +40,35 @@ def state_directory():
     return os.path.join(base, "autonom")
 
 
+def config_path():
+    configured = os.environ.get("AUTONOM_CONFIG", "").strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "autonom", "config.yml")
+
+
+def ensure_config():
+    path = config_path()
+    if os.path.lexists(path):
+        return path
+
+    template = os.path.join(root(), "templates", "config.yml")
+    if not os.path.isfile(template) or os.path.islink(template):
+        return path
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with open(template, "rb") as source:
+            os.write(descriptor, source.read())
+    finally:
+        os.close(descriptor)
+
+    return path
+
+
 def log_path():
     return os.path.join(state_directory(), "daemon-" + port() + ".log")
 
@@ -58,6 +87,7 @@ def spawn():
         raise ToolError("The autonom command is not built: %s is missing" % binary)
 
     os.makedirs(state_directory(), exist_ok=True)
+    ensure_config()
     environment = dict(os.environ)
     environment["AUTONOM_PORT"] = port()
     with open(log_path(), "ab") as log:

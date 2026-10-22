@@ -1,3 +1,4 @@
+/// Profile event queues, recurring and one-shot schedules, and wake delivery.
 module daemon.events;
 
 public import daemon.events.delivery : posted, directed;
