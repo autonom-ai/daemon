@@ -15,21 +15,100 @@ version(devin)
 
     import unit_threaded;
 
+    import core.stdc.errno : errno, ESRCH;
+    import core.sys.posix.signal : kill;
     import core.sync.mutex : Mutex;
     import core.thread : Thread;
-    import core.time : seconds;
+    import core.time : msecs, seconds;
+    import std.algorithm.searching : endsWith;
     import std.array : replicate;
-    import std.file : exists, mkdirRecurse, rmdirRecurse, tempDir, write;
+    import std.conv : to;
+    import std.file : dirEntries, exists, mkdirRecurse, rmdirRecurse, SpanMode, tempDir, write;
     import std.json : JSONValue, parseJSON;
-    import std.path : buildPath;
-    import std.process : ProcessConfig = Config, environment, pipeProcess, Pid, ProcessPipes, Redirect, tryWait;
+    import std.net.curl : HTTP;
+    import std.path : baseName, buildPath;
+    import std.process : ProcessConfig = Config, environment, pipeProcess, Pid, ProcessPipes, Redirect, spawnProcess, tryWait;
+    import std.socket : AddressFamily, InternetAddress, Socket, SocketType;
     import std.stdio : File;
     import std.uuid : randomUUID;
+
+    // Fixture-owned daemon supervisor plus its captured process group; tryWait replaces
+    // Pid.processID with a sentinel after reaping, so the group must be kept separately.
+    private struct ConnectorDaemon
+    {
+        Pid process;
+        int group;
+    }
+
+    // Launch a fixture-owned daemon on a reserved port so the connector exercises the managed
+    // daemon API; coverage of autonom acp bootstrapping its own daemon stays outside these tests.
+    private ConnectorDaemon startConnectorDaemon(string root, ref string[string] child, File errors)
+    {
+        Socket reservation = new Socket(AddressFamily.INET, SocketType.STREAM);
+        reservation.bind(new InternetAddress("127.0.0.1", 0));
+        string port = to!string((cast(InternetAddress)reservation.localAddress).port);
+        reservation.close();
+
+        string config = buildPath(root, "connector.yml");
+        write(config, "devinCommand: "~JSONValue(environment.get("AUTONOM_TEST_DEVIN", "devin")).toString()~"\n"~
+            "dataDir: "~JSONValue(buildPath(root, "data", "devin")).toString()~"\n"~
+            "sessionLockDir: "~JSONValue(buildPath(root, "data", "devin", "cli", "session_locks")).toString()~"\n"~
+            "router:\n  type: openrouter\n  key: unused\n  url: https://openrouter.ai\n  name: OpenRouter\n");
+        child["AUTONOM_CONFIG"] = config;
+        child["AUTONOM_PORT"] = port;
+
+        ProcessConfig options = ProcessConfig.newEnv | ProcessConfig.retainStdin |
+            ProcessConfig.retainStdout | ProcessConfig.retainStderr;
+        options.preExecFunction = &createProcessGroup;
+        File input = File("/dev/null", "r");
+        scope(exit)
+            input.close();
+        ConnectorDaemon ret;
+        ret.process = spawnProcess([buildPath("bin", "autonom"), "daemon"], input, errors, errors, child, options);
+        ret.group = ret.process.processID;
+        scope(failure)
+            stopConnectorDaemon(ret);
+
+        waitUntil(delegate bool() {
+            if (tryWait(ret.process).terminated)
+                throw new Exception("Fixture daemon exited before readiness");
+
+            try
+            {
+                string reply;
+                HTTP client = HTTP("http://127.0.0.1:"~port~"/api/health");
+                client.proxy = "";
+                client.connectTimeout = 100.msecs;
+                client.operationTimeout = 500.msecs;
+                client.onReceive = (ubyte[] bytes) { reply ~= cast(string)bytes; return bytes.length; };
+                client.perform();
+                return client.statusLine.code == 200 && parseJSON(reply)["pid"].integer == ret.group;
+            }
+            catch (Exception)
+                return false;
+        }, 10.seconds);
+        return ret;
+    }
+
+    private void stopConnectorDaemon(ConnectorDaemon daemon)
+    {
+        // Never signal an unknown group; the id was captured before any wait could reap it.
+        if (daemon.group <= 0)
+            return;
+
+        terminate(daemon.process, 2.seconds);
+        // Assert the owned group is gone before fixture deletion; bound the wait for worker exit and reaping.
+        waitUntil(delegate bool() {
+            return kill(-daemon.group, 0) == -1 && errno == ESRCH;
+        }, 5.seconds);
+    }
 
     @Name("Devin accepts the frame boundary and reloads large history through the production connector") @Serial
     unittest
     {
-        string root = buildPath(tempDir(), "autonom-devin-"~randomUUID().toString());
+        // A short fixture root keeps the connector control socket inside the unix socket path limit.
+        string root = buildPath(tempDir(), "ad-"~randomUUID().toString()[0..8]);
+        exists(root).should == false;
         mkdirRecurse(root);
         scope(exit)
             rmdirRecurse(root);
@@ -46,6 +125,10 @@ version(devin)
         File errors = File.tmpfile();
         scope(exit)
             errors.close();
+        ConnectorDaemon daemon = startConnectorDaemon(root, child, errors);
+        scope(exit)
+            stopConnectorDaemon(daemon);
+
         string[] connector = [buildPath("bin", "autonom"), "acp", "--devin", command];
         // The connector runs from the repository while its real CLI uses isolated XDG state.
         AcpClient agent = new AcpClient(connector, child, null, errors);
@@ -67,6 +150,14 @@ version(devin)
         initialize["_meta"]["padding"] = JSONValue("x".replicate(frameLimit + 1 - boundary.encode().length));
         boundary.encode().length.should == frameLimit + 1; // Includes the newline delimiter.
         agent.request("initialize", initialize, 30.seconds)["protocolVersion"].integer.should == 1;
+        // The configured connector generated its daemon-facing control socket under the managed data directory.
+        bool generated;
+        foreach (entry; dirEntries(buildPath(data, "devin", "acp"), SpanMode.shallow))
+        {
+            if (entry.name.baseName.endsWith(".sock"))
+                generated = true;
+        }
+        generated.should == true;
 
         initialize["_meta"]["padding"] = JSONValue(initialize["_meta"]["padding"].str~"x");
         agent.request("initialize", initialize, 30.seconds).shouldThrow!Exception;
@@ -144,7 +235,9 @@ version(devin)
     @Name("Installed CLI forwarding handles fragmented and coalesced requests and rejects malformed input") @Serial
     unittest
     {
-        string root = buildPath(tempDir(), "autonom-devin-"~randomUUID().toString());
+        // A short fixture root keeps the connector control socket inside the unix socket path limit.
+        string root = buildPath(tempDir(), "ad-"~randomUUID().toString()[0..8]);
+        exists(root).should == false;
         mkdirRecurse(root);
         scope(exit)
             rmdirRecurse(root);
@@ -155,6 +248,13 @@ version(devin)
             "XDG_DATA_HOME": buildPath(root, "data"),
             "XDG_CACHE_HOME": buildPath(root, "cache")
         ];
+        File errors = File.tmpfile();
+        scope(exit)
+            errors.close();
+        ConnectorDaemon daemon = startConnectorDaemon(root, child, errors);
+        scope(exit)
+            stopConnectorDaemon(daemon);
+
         ProcessConfig options = ProcessConfig.newEnv;
         options.preExecFunction = &createProcessGroup;
         ProcessPipes relay = pipeProcess([
