@@ -3,6 +3,7 @@ module daemon.events.wake;
 import daemon.agent;
 import daemon.events.event : Event;
 import daemon.events.scheduler : Scheduler, wakesFile;
+import daemon.exception : InvalidInputException;
 import daemon.interop.call;
 import daemon.interop.session : Session;
 import daemon.storage;
@@ -31,7 +32,7 @@ bool adopt(Scheduler owner, string session, string directory, string execution =
     size_t candidate = size_t.max;
     foreach (i, ref wake; owner.pendingWakes)
     {
-        if (wake.session.length || !wake.workspace.length)
+        if (wake.session.length || !wake.workspace.length || wake.profileScoped)
             continue;
         if (execution.length && wake.execution != execution)
             continue;
@@ -79,6 +80,12 @@ private bool parseWake(JSONValue data, out PendingWake wake)
         return false;
     if (!data["session"].isNull && data["session"].type != JSONType.string)
         return false;
+    if ("profileScoped" in data.object)
+    {
+        if (data["profileScoped"].type != JSONType.true_ && data["profileScoped"].type != JSONType.false_)
+            return false;
+        wake.profileScoped = data["profileScoped"].boolean;
+    }
 
     wake.execution = data["execution"].str.idup;
     wake.profile = data["profile"].str.idup;
@@ -156,6 +163,7 @@ private void saveWakes(Scheduler owner)
             "profile": JSONValue(wake.profile),
             "session": wake.session.length ? JSONValue(wake.session) : JSONValue(null),
             "workspace": JSONValue(wake.workspace),
+            "profileScoped": JSONValue(wake.profileScoped),
             "events": eventsJSON
         ]);
     }
@@ -166,22 +174,26 @@ private void saveWakes(Scheduler owner)
 
 package(daemon.events) void recordWake(
     Scheduler owner,
-    string execution,
+    Call execution,
     string profileName,
     string session,
     string workspace,
     Event[] batch
 )
 {
+    if (execution.profileName.length && execution.profileName != profileName)
+        throw new InvalidInputException("Wake profile does not match its accepted call");
+
     PendingWake wake;
-    wake.execution = execution;
+    wake.execution = execution.id;
     wake.profile = profileName;
     wake.session = session;
     wake.workspace = workspace;
+    wake.profileScoped = execution.profileName.length != 0;
     wake.events = batch;
     foreach (existing; owner.pendingWakes)
     {
-        if (existing.execution == execution && existing.profile == profileName)
+        if (existing.execution == wake.execution && existing.profile == profileName)
             return;
     }
 
@@ -232,7 +244,8 @@ package(daemon.events) void reconcile(Scheduler owner)
         JSONValue record = execution is null ? owner.bridge.executionRecord(wake.execution) : execution.toJSON();
         if (!record.isNull && record["status"] == JSONValue("succeeded"))
         {
-            if (!wake.session.length && "sessionId" in record.object && record["sessionId"].type == JSONType.string)
+            if (!wake.session.length && !wake.profileScoped &&
+                "sessionId" in record.object && record["sessionId"].type == JSONType.string)
                 owner.register(wake.profile, record["sessionId"].str);
         }
         else
@@ -262,5 +275,6 @@ package(daemon.events) struct PendingWake
     string profile;
     string session;
     string workspace;
+    bool profileScoped;
     Event[] events;
 }

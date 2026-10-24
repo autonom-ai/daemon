@@ -1,7 +1,6 @@
 module daemon.interop.devin.session.api;
 
-import daemon.agent : Profile, validName;
-import daemon.exception : InvalidInputException, ConflictException;
+import daemon.exception : InvalidInputException;
 import daemon.http;
 import daemon.interop.call : Call;
 import daemon.interop.devin.session : Session;
@@ -13,7 +12,6 @@ import serverino;
 
 import std.conv : to;
 import std.json : JSONType, JSONValue;
-import std.string : toLower;
 
 private Session lookupSession(string pattern)(Request request, Output output)
 {
@@ -41,31 +39,12 @@ void sessions(Request request, Output output)
     else
     {
         Launch launch = readLaunch(request);
-        string profileName = launch.profile.toLower;
-        if (profileName.length)
-        {
-            if (!validName(profileName) || profileName == "human")
-                throw new InvalidInputException("Invalid profile name");
-
-            Profile profile = daemon.api.profileStore.get(profileName);
-            if (profile !is null && profile.session !is null &&
-                (profile.session.hasActiveCall() || daemon.api.bridge.online(profile.session.id)))
-                throw new ConflictException("Profile is already active");
-            foreach (execution; daemon.api.bridge.listCalls())
-            {
-                if (execution.running && execution.profileName == profileName)
-                    throw new ConflictException("Profile already has a starting session");
-            }
-        }
-
-        respond(output, daemon.api.bridge.start(
-            launch.prompt,
-            launch.directory,
-            launch.model,
-            launch.mode,
-            launch.trusted,
-            profileName
-        ).toJSON(), 202);
+        Call execution = launch.profile.length ?
+            daemon.api.profileStarts.start(launch.profile, launch.prompt, launch.directory,
+                launch.model, launch.mode, launch.trusted) :
+            daemon.api.bridge.start(launch.prompt, launch.directory, launch.model,
+                launch.mode, launch.trusted);
+        respond(output, execution.toJSON(), 202);
     }
 }
 

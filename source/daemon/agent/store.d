@@ -16,7 +16,7 @@ import std.json : JSONType, JSONValue;
 import std.path : baseName, buildPath;
 import std.string : toLower;
 
-private string canonicalName(string name)
+package(daemon.agent) string canonicalName(string name)
 {
     if (!validName(name))
         throw new InvalidInputException("Invalid profile name");

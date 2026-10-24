@@ -161,7 +161,7 @@ def on_prompt(request_id, params):
         finish(request_id, session_id)
         raise SystemExit(0)
 
-    if text == "barrier":
+    if text == "barrier" or (text.startswith("You were woken by") and os.path.exists(path("barrier-wake"))):
         with open(path("barrier-" + session_id), "w") as handle:
             handle.write(session_id)
         threading.Thread(target=barrier_wait, args=(request_id, session_id), daemon=True).start()

@@ -1,6 +1,7 @@
 module tests.common;
 
 import daemon.agent;
+import daemon.agent.starts : ProfileStarts;
 import daemon.config;
 import daemon.interop.devin.bridge : Bridge;
 
@@ -82,26 +83,32 @@ struct Fixture
     Config config;
     Bridge bridge;
     ProfileStore store;
+    ProfileStarts starts;
 
-    static Fixture create(string command = "./devin")
+    static Fixture create(string command = "./devin", string extra = null)
     {
         Fixture ret;
-        ret.root = buildPath(tempDir(), "autonom-"~randomUUID().toString());
+        // Leave room for the ACP connection ID within Unix socket path limits,
+        // including when TMPDIR is the workspace's persistent scratch tree.
+        ret.root = buildPath(tempDir(), "a-"~randomUUID().toString()[0..12]);
         mkdirRecurse(ret.root);
         scope(failure)
             rmdirRecurse(ret.root);
 
         ret.path = buildPath(ret.root, "config.yml");
         write(ret.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: "~
-            JSONValue(command).toString()~"\n"~routerConfig);
+            JSONValue(command).toString()~"\n"~(extra is null ? "" : extra)~routerConfig);
         ret.config = new Config(ret.path);
         ret.bridge = new Bridge(ret.config);
         ret.store = new ProfileStore(ret.config, ret.bridge);
+        ret.starts = new ProfileStarts(ret.store, ret.bridge);
         return ret;
     }
 
     void close()
     {
+        if (starts !is null)
+            starts.close();
         bridge.close();
         rmdirRecurse(root);
     }

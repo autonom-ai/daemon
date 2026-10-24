@@ -3,6 +3,7 @@ module daemon.api;
 
 import daemon.agent.api;
 import daemon.agent.store;
+import daemon.agent.starts : ProfileStarts;
 import daemon.agent;
 import daemon.config;
 import daemon.coord.messages;
@@ -17,7 +18,6 @@ import daemon.hooks;
 import daemon.http;
 import daemon.interop.api;
 import daemon.interop.access : Access;
-import daemon.interop.call : Call;
 import daemon.interop.devin.bridge : Bridge;
 import daemon.interop.devin.calls;
 import daemon.interop.devin.connection;
@@ -50,6 +50,7 @@ private bool stopping;
 Config configuration;
 Bridge bridge;
 ProfileStore profileStore;
+ProfileStarts profileStarts;
 Policy policy;
 Bus bus;
 EventStore events;
@@ -65,10 +66,11 @@ void setupDomain()
     workerWake = new WorkerWake(environment.get("AUTONOM_PORT", "8080"), access.clientToken);
     bridge = new Bridge(configuration, access, &workerWake.notify);
     profileStore = new ProfileStore(configuration, bridge);
+    profileStarts = new ProfileStarts(profileStore, bridge);
     events = new EventStore(configuration, profileStore);
     bus = new Bus(configuration, profileStore);
     scheduleStore = new ScheduleStore(configuration, profileStore);
-    scheduler = new Scheduler(configuration, bridge, profileStore, events, scheduleStore);
+    scheduler = new Scheduler(configuration, bridge, profileStore, events, scheduleStore, profileStarts);
     policy = new Policy(configuration);
 
     Bus.set(bus);
@@ -82,6 +84,8 @@ void closeDomain()
         scheduler.stop();
     if (workerWake !is null)
         workerWake.stop();
+    if (profileStarts !is null)
+        profileStarts.close();
     if (bridge !is null)
         bridge.close();
 }
@@ -223,16 +227,8 @@ void refresh(Request request)
 {
     foreach (id; bridge.collect())
         profileStore.unlinkSession(id);
-    foreach (session; bridge.retainedSessions())
-    {
-        Call execution = session.execution;
-        if (execution is null || !execution.profileName.length || !bridge.access.managed(session.id))
-            continue;
-        if (profileStore.assigned(session.id))
-            continue;
-
-        profileStore.register(execution.profileName, session.id);
-    }
+    if (profileStarts.refresh())
+        workerWake.notify();
 
     if (scheduler !is null)
         scheduler.refresh();

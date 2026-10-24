@@ -54,8 +54,12 @@ private bool acceptHook(Request request, Output output, string event, out JSONVa
         return false;
     }
 
-    if (execution.profileName.length && profileStore.profileFor(session) is null)
-        profileStore.register(execution.profileName, session);
+    if (execution.profileName.length && !profileStarts.bind(execution))
+    {
+        respond(output, event == "PreToolUse" ?
+            block("The profile start is no longer current") : hookResponse());
+        return false;
+    }
 
     scheduler.adopt(session, execution.workspace, execution.id);
     return true;

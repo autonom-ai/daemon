@@ -1,6 +1,7 @@
 module tests.events.common;
 
 import daemon.agent : Profile, ProfileStore;
+import daemon.agent.starts : ProfileStarts;
 import daemon.config : Config;
 import daemon.coord : Bus, Entry;
 import daemon.events.api : schedules;
@@ -9,7 +10,7 @@ import daemon.events.schedule : ScheduleStore;
 import daemon.events.scheduler : Scheduler;
 import daemon.interop.call : Call, CallStatus;
 import daemon.interop.devin.bridge : Bridge;
-import tests.common : Fixture, installFake, waitUntil, routerConfig;
+import tests.common : Fixture, installFake, waitUntil;
 
 import arsd.sqlite : Database, Sqlite, SQLITE_OPEN_READWRITE, SQLITE_OPEN_CREATE;
 import unit_threaded : should;
@@ -110,6 +111,7 @@ struct WakeFixture
     Config config;
     Bridge bridge;
     ProfileStore store;
+    ProfileStarts starts;
     Bus bus;
     EventStore events;
     ScheduleStore schedules;
@@ -118,19 +120,19 @@ struct WakeFixture
     static WakeFixture create(string extra = null)
     {
         WakeFixture ret;
-        ret.fixture = Fixture.create();
+        ret.fixture = Fixture.create("./devin", extra);
         scope(failure)
             ret.fixture.close();
 
-        write(ret.fixture.path, "dataDir: data\nsessionLockDir: locks\ndevinCommand: "~
-            JSONValue("./devin").toString()~"\n"~(extra is null ? "" : extra)~routerConfig);
-        ret.config = new Config(ret.fixture.path);
-        ret.bridge = new Bridge(ret.config);
-        ret.store = new ProfileStore(ret.config, ret.bridge);
+        ret.config = ret.fixture.config;
+        ret.bridge = ret.fixture.bridge;
+        ret.store = ret.fixture.store;
+        ret.starts = ret.fixture.starts;
         ret.events = new EventStore(ret.config, ret.store);
         ret.bus = new Bus(ret.config, ret.store);
         ret.schedules = new ScheduleStore(ret.config, ret.store);
-        ret.scheduler = new Scheduler(ret.config, ret.bridge, ret.store, ret.events, ret.schedules);
+        ret.scheduler = new Scheduler(ret.config, ret.bridge, ret.store, ret.events, ret.schedules,
+            ret.starts);
         return ret;
     }
 
@@ -146,6 +148,7 @@ struct WakeFixture
     void close()
     {
         scheduler.stop();
+        starts.close();
         bridge.close();
         fixture.close();
     }

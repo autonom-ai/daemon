@@ -1,6 +1,7 @@
 module daemon.events.scheduler;
 
 import daemon.agent;
+import daemon.agent.starts : ProfileStarts;
 import daemon.config;
 import daemon.coord.stream : stdTimeTicksPerMillisecond;
 import daemon.coord;
@@ -36,6 +37,7 @@ package(daemon.events):
     ProfileStore store;
     EventStore events;
     ScheduleStore schedules;
+    ProfileStarts starts;
     PendingWake[] pendingWakes;
     Thread thread;
     shared bool stopping;
@@ -49,6 +51,7 @@ public:
         ProfileStore store,
         EventStore events,
         ScheduleStore schedules,
+        ProfileStarts starts,
         string port = null
     )
     {
@@ -57,6 +60,7 @@ public:
         this.store = store;
         this.events = events;
         this.schedules = schedules;
+        this.starts = starts;
         this.port = port.length ? port.idup : environment.get("AUTONOM_PORT", "8080");
         this.loadWakes();
         publishNextDue();
@@ -173,7 +177,7 @@ package(daemon.events):
         try
         {
             Call execution = bridge.resume(session.id, prompt, info.directory, info.model, compact);
-            this.recordWake(execution.id, profile.name, session.id, null, batch);
+            this.recordWake(execution, profile.name, session.id, null, batch);
             return true;
         }
         catch (Exception)
@@ -189,8 +193,9 @@ package(daemon.events):
     {
         try
         {
-            Call execution = bridge.start(wakePrompt(batch, from.name), workspace, targetModel(profile));
-            this.recordWake(execution.id, profile.name, null, workspace, batch);
+            Call execution = starts.start(profile.name, wakePrompt(batch, from.name),
+                workspace, targetModel(profile));
+            this.recordWake(execution, profile.name, null, workspace, batch);
             return true;
         }
         catch (Exception)
@@ -251,7 +256,7 @@ package(daemon.events):
             try
             {
                 Call call = session.deliver(wakePrompt(batch, null));
-                this.recordWake(call.id, profile.name, session.id, null, batch);
+                this.recordWake(call, profile.name, session.id, null, batch);
                 delivered = true;
             }
             catch (Exception)

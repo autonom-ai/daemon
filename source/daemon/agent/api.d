@@ -3,6 +3,8 @@ module daemon.agent.api;
 import daemon.agent;
 import daemon.api;
 import daemon.http;
+import daemon.interop.call : Call;
+import daemon.interop.session : Session;
 
 import serverino;
 
@@ -52,10 +54,26 @@ void profileSession(Request request, Output output)
     else if (request.method == Request.Method.Post)
     {
         string session = readField!"id"(request);
-        if (!bridge.access.client(request.header.read("x-autonom-client")) &&
-            bridge.authenticate(request.header.read("x-autonom-run"), session) is null &&
-            bridge.access.mcpSession(request.header.read("x-autonom-mcp")) != session)
-            throw new ProfileConflictException("A session can register only its own managed identity");
+        if (!bridge.access.client(request.header.read("x-autonom-client")))
+        {
+            Call execution = bridge.authenticate(request.header.read("x-autonom-run"), session);
+            if (execution is null &&
+                bridge.access.mcpSession(request.header.read("x-autonom-mcp")) != session)
+                throw new ProfileConflictException("A session can register only its own managed identity");
+            if (execution is null)
+            {
+                Session bound = bridge.findSession(session);
+                execution = bound is null ? null : bound.execution;
+            }
+            if (execution !is null && execution.profileName.length)
+            {
+                if (execution.profileName != profile.name || !profileStarts.bind(execution))
+                    throw new ProfileConflictException(
+                        "The admitted profile start is no longer current");
+                respond(output, profile.toJSON());
+                return;
+            }
+        }
 
         respond(output, profileStore.register(profile.name, session).toJSON());
     }

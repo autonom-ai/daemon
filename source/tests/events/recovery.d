@@ -1,6 +1,7 @@
 module tests.events.recovery;
 
 import daemon.agent : Profile, ProfileStore;
+import daemon.agent.starts : ProfileStarts;
 import daemon.coord : Entry, Room;
 import daemon.events.delivery : posted;
 import daemon.events.event : Event, EventType;
@@ -51,12 +52,17 @@ unittest
             ]).toString());
         }
 
+        fixture.starts.close();
         fixture.bridge.close();
         fixture.bridge = new Bridge(fixture.config);
         fixture.store = new ProfileStore(fixture.config, fixture.bridge);
+        fixture.starts = new ProfileStarts(fixture.store, fixture.bridge);
+        fixture.fixture.bridge = fixture.bridge;
+        fixture.fixture.store = fixture.store;
+        fixture.fixture.starts = fixture.starts;
         target = fixture.store.get("target");
         fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
-            fixture.events, fixture.schedules);
+            fixture.events, fixture.schedules, fixture.starts);
         fixture.scheduler.refresh();
         target.session.id.should == (status == "succeeded" ? "late-session" : "old-session");
         fixture.events.unread(target).length.should == (status == "succeeded" ? 0 : 1);
@@ -83,7 +89,8 @@ unittest
     Entry entry = postedEntry(sender, "single-wake", room.name);
     fixture.scheduler.posted(room, entry, sender, [target]);
     waitForPrompt(fixture, "single-wake");
-    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store, fixture.events, fixture.schedules);
+    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
+        fixture.events, fixture.schedules, fixture.starts);
     fixture.scheduler.refresh();
     fixture.scheduler.posted(room, entry, sender, [target]);
     promptTexts(fixture.fixture.root).length.should == 2;
@@ -94,7 +101,8 @@ unittest
     fixture.events.unread(target).length.should == 1;
     fixture.events.unread(target)[0].deferred.should == false;
     parseJSON(readText(path))["wakes"].array.length.should == 0;
-    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store, fixture.events, fixture.schedules);
+    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
+        fixture.events, fixture.schedules, fixture.starts);
     fixture.scheduler.refresh();
     fixture.events.unread(target).length.should == 1;
     promptTexts(fixture.fixture.root).length.should == 2;

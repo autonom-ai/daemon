@@ -50,10 +50,13 @@ unittest
     invocations(fixture.fixture.root).length.should == 2;
     fixture.events.unread(target).length.should == 0;
     fixture.bridge.collect();
+    fixture.starts.refresh();
+    fixture.scheduler.refresh();
     target.session.hasActiveCall().should == true;
 
     fixture.events = new EventStore(fixture.config, fixture.store);
-    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store, fixture.events, fixture.schedules);
+    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
+        fixture.events, fixture.schedules, fixture.starts);
     fixture.scheduler.posted(room, entry, sender, [target]);
     promptTexts(fixture.fixture.root).length.should == 3;
     fixture.events.unread(target).length.should == 0;
@@ -68,7 +71,7 @@ unittest
     Profile target = fixture.store.register("target", "target-session");
     fixture.schedules.add(target, Schedule.create(EventType.Clock, null, null, null, 0, 1));
     fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
-        fixture.events, fixture.schedules, "0");
+        fixture.events, fixture.schedules, fixture.starts, "0");
     fixture.scheduler.start();
     fixture.scheduler.start();
     Thread.sleep(1100.msecs);
@@ -154,7 +157,8 @@ unittest
     fixture.events.unread(target)[0].deferred.should == true;
     promptTexts(fixture.fixture.root).length.should == 2;
     fixture.events = new EventStore(fixture.config, fixture.store);
-    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store, fixture.events, fixture.schedules);
+    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
+        fixture.events, fixture.schedules, fixture.starts);
     fixture.scheduler.refresh();
     promptTexts(fixture.fixture.root).length.should == 2;
     JSONValue pending = target.session.execution.connection.permissions(target.session.id);
@@ -183,7 +187,8 @@ unittest
     fixture.scheduler.refresh();
     fixture.schedules.add(target, clock);
     fixture.events = new EventStore(fixture.config, fixture.store);
-    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store, fixture.events, fixture.schedules);
+    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
+        fixture.events, fixture.schedules, fixture.starts);
     fixture.scheduler.refresh();
     promptTexts(fixture.fixture.root).length.should == 2;
     fixture.schedules.list(target).length.should == 0;
@@ -201,7 +206,8 @@ unittest
     string path = buildPath(fixture.schedules.directory, "wakes.json");
     string damaged = `{"version":1,"wakes":[`;
     write(path, damaged);
-    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store, fixture.events, fixture.schedules);
+    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
+        fixture.events, fixture.schedules, fixture.starts);
     exists(path).should == false;
     size_t preserved;
     foreach (entry; dirEntries(fixture.schedules.directory, "wakes.json.corrupt-*", SpanMode.shallow))
@@ -231,7 +237,8 @@ unittest
     string path = buildPath(fixture.schedules.directory, "wakes.json");
     mkdirRecurse(fixture.schedules.directory);
     write(path, JSONValue(["version": JSONValue(1), "wakes": JSONValue([JSONValue(7), row])]).toString());
-    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store, fixture.events, fixture.schedules);
+    fixture.scheduler = new Scheduler(fixture.config, fixture.bridge, fixture.store,
+        fixture.events, fixture.schedules, fixture.starts);
     fixture.scheduler.refresh();
     fixture.events.unread(target).length.should == 1;
     fixture.events.unread(target)[0].deferred.should == false;
