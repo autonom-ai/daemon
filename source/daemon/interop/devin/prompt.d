@@ -16,12 +16,18 @@ class DeliveryDeferredException : Exception
     }
 }
 
+/// Decode a terminal peer result; a cancellation request alone is not confirmation.
 CallResult promptResult(JSONValue result)
 {
     CallResult ret;
-    ret.stopReason = "stopReason" in result.object && result["stopReason"].type == JSONType.string
-        ? result["stopReason"].str
-        : null;
+    if (result.type != JSONType.object || "stopReason" !in result.object ||
+        result["stopReason"].type != JSONType.string)
+    {
+        ret.error = "Invalid ACP prompt result";
+        return ret;
+    }
+
+    ret.stopReason = result["stopReason"].str;
     ret.cancelled = ret.stopReason == "cancelled";
     if (!ret.cancelled && ret.stopReason != "end_turn")
         ret.error = "Agent stopped: "~(ret.stopReason.length ? ret.stopReason : "unknown");

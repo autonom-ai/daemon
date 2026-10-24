@@ -16,6 +16,8 @@ import daemon.exception;
 import daemon.hooks;
 import daemon.http;
 import daemon.interop.api;
+import daemon.interop.access : Access;
+import daemon.interop.call : Call;
 import daemon.interop.devin.bridge : Bridge;
 import daemon.interop.devin.calls;
 import daemon.interop.devin.connection;
@@ -28,6 +30,7 @@ import daemon.interop.devin.session;
 import daemon.mcp;
 import daemon.policy.access;
 import daemon.policy;
+import daemon.worker : WorkerWake;
 static import daemon.interop.devin.bridge;
 
 import serverino;
@@ -52,12 +55,15 @@ Bus bus;
 EventStore events;
 ScheduleStore scheduleStore;
 Scheduler scheduler;
+private WorkerWake workerWake;
 
 void setupDomain()
 {
     configuration = Config.get(environment.get("AUTONOM_CONFIG", Config.defaultPath));
     installHooks();
-    bridge = new Bridge(configuration);
+    Access access = new Access(configuration.dataDir);
+    workerWake = new WorkerWake(environment.get("AUTONOM_PORT", "8080"), access.clientToken);
+    bridge = new Bridge(configuration, access, &workerWake.notify);
     profileStore = new ProfileStore(configuration, bridge);
     events = new EventStore(configuration, profileStore);
     bus = new Bus(configuration, profileStore);
@@ -74,6 +80,8 @@ void closeDomain()
 {
     if (scheduler !is null)
         scheduler.stop();
+    if (workerWake !is null)
+        workerWake.stop();
     if (bridge !is null)
         bridge.close();
 }
@@ -156,9 +164,25 @@ void stop(Request request, Output output)
 
 @onWorkerStart void setupWorker()
 {
+    scope(failure)
+        closeDomain();
+
     setupDomain();
     refresh(Request.init);
     scheduler.start();
+    workerWake.start();
+}
+
+/// Authenticated internal wake endpoint; refresh runs on the worker before this handler.
+@endpoint @route!"/api/worker/refresh"
+void refreshWorker(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Post]))
+        return;
+    if (readBody(request).object.length != 0)
+        throw new InvalidInputException("Expected an empty JSON object");
+
+    respond(output, JSONValue.emptyObject);
 }
 
 @endpoint @priority(200)
@@ -199,14 +223,15 @@ void refresh(Request request)
 {
     foreach (id; bridge.collect())
         profileStore.unlinkSession(id);
-    foreach (execution; bridge.listCalls())
+    foreach (session; bridge.retainedSessions())
     {
-        if (!execution.profileName.length || !execution.sessionId.length || !bridge.access.managed(execution.sessionId))
+        Call execution = session.execution;
+        if (execution is null || !execution.profileName.length || !bridge.access.managed(session.id))
             continue;
-        if (profileStore.assigned(execution.sessionId))
+        if (profileStore.assigned(session.id))
             continue;
 
-        profileStore.register(execution.profileName, execution.sessionId);
+        profileStore.register(execution.profileName, session.id);
     }
 
     if (scheduler !is null)

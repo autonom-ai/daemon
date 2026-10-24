@@ -5,13 +5,202 @@ import tests.http.common;
 
 import unit_threaded : Name, Serial, should;
 
+static import core.sys.posix.signal;
+
+import core.stdc.errno : errno, ESRCH;
+import core.time : seconds;
+
 import std.array : replicate;
+import std.algorithm.searching : canFind;
 import std.conv : to;
-import std.file : exists, mkdirRecurse, readText, write;
-import std.json : JSONValue;
+import std.file : append, exists, mkdirRecurse, readText, write;
+import std.json : JSONType, JSONValue, parseJSON;
 import std.net.curl : HTTP;
 import std.path : buildPath;
 import std.process;
+import std.string : strip;
+
+@Name("Backend completion refreshes worker-owned bindings without unrelated HTTP traffic") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+    installFake(fixture);
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    request("/api/sessions", 202, JSONValue([
+        "prompt": JSONValue("quiet completion"),
+        "directory": JSONValue(fixture.root),
+        "profile": JSONValue("quiet")
+    ]).toString());
+    string statePath = buildPath(fixture.config.dataDir, "agents", "state.json");
+    // Observe disk only: an HTTP poll would itself perform the refresh being tested.
+    waitUntil(delegate bool() {
+        if (!exists(statePath))
+            return false;
+
+        JSONValue state = parseJSON(readText(statePath));
+        return "quiet" in state["bindings"].object && state["bindings"]["quiet"].type == JSONType.string;
+    });
+    (request("/api/profiles/quiet")["session"]["id"].str.length > 0).should == true;
+    request("/api/worker/refresh", 405);
+    request("/api/worker/refresh", 400, `{"extra":true}`);
+    request("/api/worker/refresh", 403, "{}", "application/json", HTTP.Method.post, null, null, false);
+}
+
+@Name("Ten simultaneous completions progress without traffic and retain bindings under pressure") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+    installFake(fixture);
+    // Retention pressure tests binding preservation; this does not force overflow or a full batch.
+    append(fixture.path, "maxConcurrentCalls: 12\ncallCapacity: 4\n");
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    string[] executions;
+    foreach (i; 0..10)
+    {
+        string sessionId = "burst-" ~ i.to!string;
+        write(buildPath(fixture.root, "next-session-id"), sessionId);
+        JSONValue reply = request("/api/sessions", 202, JSONValue([
+            "prompt": JSONValue("barrier"),
+            "directory": JSONValue(fixture.root),
+            "profile": JSONValue(sessionId)
+        ]).toString());
+        executions ~= reply["id"].str;
+        // The marker proves the fake consumed next-session-id before it is rewritten.
+        waitUntil(delegate bool() {
+            return exists(buildPath(fixture.root, "barrier-" ~ sessionId));
+        });
+    }
+
+    write(buildPath(fixture.root, "release-completions"), "release");
+
+    string indexPath = buildPath(fixture.config.dataDir, "executions", "index.json");
+    string statePath = buildPath(fixture.config.dataDir, "agents", "state.json");
+    // Observe disk only: any HTTP request would itself run the refresh under test.
+    waitUntil(delegate bool() {
+        if (!exists(indexPath) || !exists(statePath))
+            return false;
+
+        JSONValue index = parseJSON(readText(indexPath));
+        JSONValue state = parseJSON(readText(statePath));
+        foreach (id; executions)
+        {
+            JSONValue* record = id in index["executions"].object;
+            if (record is null || (*record)["status"].str != "succeeded")
+                return false;
+        }
+        foreach (i; 0..10)
+        {
+            string name = "burst-" ~ i.to!string;
+            JSONValue* bound = name in state["bindings"].object;
+            if (bound is null || bound.type != JSONType.string || bound.str != name)
+                return false;
+        }
+        return true;
+    });
+}
+
+@Name("Profile binding survives provider-catalog omission and call eviction") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+    installFake(fixture);
+    write(buildPath(fixture.root, "omit-catalog"), "");
+    append(fixture.path, "callCapacity: 1\n");
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    string firstSession = "unlisted-completed";
+    write(buildPath(fixture.root, "next-session-id"), firstSession);
+    JSONValue first = request("/api/sessions", 202, JSONValue([
+        "prompt": JSONValue("complete without catalog"),
+        "directory": JSONValue(fixture.root),
+        "profile": JSONValue("unlisted-profile")
+    ]).toString());
+    string firstExecution = first["id"].str;
+    string indexPath = buildPath(fixture.config.dataDir, "executions", "index.json");
+    string statePath = buildPath(fixture.config.dataDir, "agents", "state.json");
+    waitUntil(delegate bool() {
+        if (!exists(indexPath) || !exists(statePath))
+            return false;
+
+        JSONValue index = parseJSON(readText(indexPath));
+        JSONValue state = parseJSON(readText(statePath));
+        JSONValue* record = firstExecution in index["executions"].object;
+        JSONValue* binding = "unlisted-profile" in state["bindings"].object;
+        return record !is null && (*record)["status"].str == "succeeded" &&
+            binding !is null && binding.type == JSONType.string && binding.str == firstSession;
+    });
+
+    write(buildPath(fixture.root, "next-session-id"), "evictor-session");
+    JSONValue second = request("/api/sessions", 202, JSONValue([
+        "prompt": JSONValue("evict first execution"),
+        "directory": JSONValue(fixture.root),
+        "profile": JSONValue("evictor")
+    ]).toString());
+    string secondExecution = second["id"].str;
+    waitUntil(delegate bool() {
+        if (!exists(indexPath) || !exists(statePath))
+            return false;
+
+        JSONValue index = parseJSON(readText(indexPath));
+        JSONValue state = parseJSON(readText(statePath));
+        JSONValue* firstRecord = firstExecution in index["executions"].object;
+        JSONValue* secondRecord = secondExecution in index["executions"].object;
+        JSONValue* binding = "unlisted-profile" in state["bindings"].object;
+        return firstRecord !is null && (*firstRecord)["status"].str == "succeeded" &&
+            secondRecord !is null && (*secondRecord)["status"].str == "succeeded" &&
+            binding !is null && binding.type == JSONType.string && binding.str == firstSession;
+    });
+
+    exists(fixture.config.sessionDatabase).should == false;
+    request("/api/profiles/unlisted-profile")["session"]["id"].str.should == firstSession;
+}
+
+@Name("Closing the fixture daemon reaps its hanging fake backend") @Serial
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+    installFake(fixture);
+    RunningDaemon daemon = startDaemon(fixture);
+    scope(exit)
+        daemon.close();
+
+    string sessionId = "teardown-hang";
+    write(buildPath(fixture.root, "next-session-id"), sessionId);
+    request("/api/sessions", 202, JSONValue([
+        "prompt": JSONValue("hang"),
+        "directory": JSONValue(fixture.root),
+        "profile": JSONValue("teardown")
+    ]).toString());
+
+    string callsPath = buildPath(fixture.root, "acp-calls.jsonl");
+    string pidPath = buildPath(fixture.root, "hanging-backend-" ~ sessionId ~ ".pid");
+    waitUntil(delegate bool() {
+        return exists(callsPath) && readText(callsPath).canFind(`"text": "hang"`) && exists(pidPath);
+    });
+    int backendPid = to!int(readText(pidPath).strip);
+
+    daemon.close();
+    daemon.close();
+    waitUntil(delegate bool() {
+        return core.sys.posix.signal.kill(backendPid, 0) == -1 && errno == ESRCH;
+    }, 10.seconds);
+}
 
 @Name("Refresh does not rebind a profile to an earlier daemon-launched session") @Serial
 unittest

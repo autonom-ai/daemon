@@ -1,6 +1,8 @@
 module tests.interop.devin.bridge;
 
+import daemon.interop.call : CallResult;
 import daemon.interop.devin.bridge : Bridge;
+import daemon.interop.devin.prompt : promptResult;
 import daemon.interop.devin.session.control : remove;
 import daemon.interop;
 import tests.common;
@@ -10,6 +12,7 @@ import unit_threaded : Name, should, shouldThrow;
 import core.time : msecs;
 import std.algorithm.searching : canFind;
 import std.file;
+import std.json : parseJSON;
 import std.path : buildPath;
 import std.string : splitLines;
 
@@ -59,8 +62,38 @@ unittest
     fixture.bridge.executionTimeout = 100.msecs;
     Call timedOut = fixture.bridge.print("hang", fixture.root);
     timedOut.wait();
-    timedOut.status.should == CallStatus.Failed;
+    timedOut.status.should == CallStatus.Interrupted;
     timedOut.toJSON()["error"].str.canFind("timed out").should == true;
+}
+
+@Name("Confirmed completion wins a cancellation request that the peer did not confirm")
+unittest
+{
+    Fixture fixture = Fixture.create();
+    scope(exit)
+        fixture.close();
+    installFake(fixture);
+
+    Call execution = fixture.bridge.print("complete-on-cancel", fixture.root);
+    waitUntil(delegate bool() {
+        string calls = buildPath(fixture.root, "acp-calls.jsonl");
+        return exists(calls) && readText(calls).canFind("complete-on-cancel");
+    });
+    execution.stop();
+    execution.status.should == CallStatus.Succeeded;
+    execution.toJSON()["stopReason"].str.should == "end_turn";
+}
+
+@Name("Prompt result decoding rejects malformed terminal replies and preserves confirmed outcomes")
+unittest
+{
+    foreach (reply; [`null`, `[]`, `{}`, `{"stopReason":7}`, `{"stopReason":"unknown"}`])
+        (promptResult(parseJSON(reply)).error.length > 0).should == true;
+
+    promptResult(parseJSON(`{"stopReason":"cancelled"}`)).cancelled.should == true;
+    CallResult completed = promptResult(parseJSON(`{"stopReason":"end_turn","future":true}`));
+    completed.cancelled.should == false;
+    completed.error.length.should == 0;
 }
 
 @Name("Session removal deletes the CLI session and its log")
@@ -73,9 +106,9 @@ unittest
     installFake(fixture);
     Session session = fixture.bridge.session("session-1");
     session.resume("work", fixture.root);
-    waitUntil(delegate bool() {
-        return session.status == SessionStatus.Offline;
-    });
+    session.execution.wait();
+    session.execution.status.should == CallStatus.Succeeded;
+    session.status.should == SessionStatus.Offline;
     string log = buildPath(fixture.bridge.logDir, "session-1.log");
     exists(log).should == true;
     session.remove();

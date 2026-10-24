@@ -227,6 +227,10 @@ public:
     bool running()
         => status == CallStatus.Running || status == CallStatus.Stopping;
 
+    /// Whether the worker has recorded this completion and applied its transitions.
+    bool isCollected() const
+        => collected;
+
     string outputPath() const
         => buildPath(directory, id~".out");
 
@@ -343,10 +347,9 @@ private:
             _state.finishedAt = Clock.currTime(UTC()).toISOExtString();
             _state.error = result.error;
             _state.stopReason = result.stopReason;
-            _state.status = result.cancelled || stopRequested
-                ? CallStatus.Stopped
-                : result.deferred ? CallStatus.Deferred
+            _state.status = result.deferred ? CallStatus.Deferred
                 : result.interrupted ? CallStatus.Interrupted
+                : result.cancelled ? CallStatus.Stopped
                 : result.error.length ? CallStatus.Failed : CallStatus.Succeeded;
         }
         appendLog();

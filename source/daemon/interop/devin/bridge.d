@@ -5,6 +5,7 @@ import daemon.exception;
 import daemon.interop.access : Access;
 import daemon.interop.acp : AcpDisconnectedException;
 import daemon.interop.call;
+import daemon.interop.completion : CompletionHandoff, CompletionNotice;
 import daemon.interop.devin.acp : runAcp;
 import daemon.interop.devin.calls;
 import daemon.interop.devin.connection;
@@ -56,6 +57,7 @@ package(daemon.interop.devin):
     JSONValue[string] executionRecords;
     string[] executionOrder;
     enum maxIndexedExecutions = 10_000;
+    CompletionHandoff completions;
 
 public:
     Duration executionTimeout = 30 * 60.seconds;
@@ -66,7 +68,7 @@ public:
     const string logDir;
     const string executionDir;
 
-    this(DaemonConfig configuration)
+    this(DaemonConfig configuration, Access access = null, void delegate() completionWake = null)
     {
         command = configuration.devinCommand;
         logDir = buildPath(configuration.dataDir, "sessions");
@@ -79,12 +81,13 @@ public:
         callSettleTimeout = configuration.callSettleTimeout;
         maxConcurrentCalls = configuration.maxConcurrentCalls;
         controlMutex = new Mutex();
-        _access = new Access(dirName(logDir));
+        _access = access is null ? new Access(dirName(logDir)) : access;
         executionDir = buildPath(dirName(logDir), "executions");
         if ((exists(logDir) && isSymlink(logDir)) ||
             (exists(executionDir) && isSymlink(executionDir)))
             throw new Exception("Backend storage must not be a symlink");
 
+        completions = new CompletionHandoff(completionWake);
         this.loadExecutionIndex();
         collect();
     }
@@ -163,6 +166,19 @@ public:
             }
         }
 
+        return ret;
+    }
+
+    /// Return retained canonical handles, including offline handles absent from discovery.
+    /// Retention grants no control over the represented sessions.
+    SessionBase[] retainedSessions()
+    {
+        SessionBase[] ret;
+        foreach (id, instance; sessions)
+        {
+            if (id !in removed)
+                ret ~= instance;
+        }
         return ret;
     }
 
@@ -251,6 +267,7 @@ package(daemon.interop.devin):
         Call previous = null, string connection = null, bool automatic = false)
     {
         this.checkCapacity();
+        CompletionNotice notice = completions.capture(call.id);
         string database = catalog.databaseFor(call.sessionId);
         call.automatic = automatic;
         string runToken = access.begin(call);
@@ -294,6 +311,7 @@ package(daemon.interop.devin):
             catch (Exception error)
                 result.error = error.msg.idup;
             call.finish(result);
+            completions.post(notice);
         });
         call.monitor.start();
     }

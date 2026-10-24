@@ -5,6 +5,7 @@ import daemon.interop.acp;
 import daemon.interop.call : Call, CallResult;
 import daemon.interop.devin.options;
 import daemon.interop.devin.process : cliEnvironment;
+import daemon.interop.devin.prompt : promptResult;
 import daemon.interop.mcp : injectCoord;
 import daemon.storage;
 
@@ -123,6 +124,12 @@ CallResult runAcp(
     bound = execution.sessionId;
     access.admitMcp(mcpToken, bound);
     applyOptions(agent, created, bound, model, mode);
+    if (execution.stopped)
+    {
+        CallResult ret;
+        ret.cancelled = true;
+        return ret;
+    }
 
     bool compacting = compactFirst;
     bool accepting = !compacting;
@@ -207,17 +214,15 @@ CallResult runAcp(
                 break;
             }
 
-            string reason = "stopReason" in result.object && result["stopReason"].type == JSONType.string
-                ? result["stopReason"].str
-                : null;
-            stopReason = reason;
-            if (reason == "cancelled")
+            CallResult outcome = promptResult(result);
+            stopReason = outcome.stopReason;
+            if (outcome.cancelled)
                 cancelled = true;
-            else if (reason != "end_turn")
+            else if (outcome.error.length)
             {
                 failed = true;
                 if (!failure.length)
-                    failure = "Agent stopped: "~(reason.length ? reason : "unknown");
+                    failure = outcome.error;
             }
 
             break;
@@ -234,11 +239,16 @@ CallResult runAcp(
         }
 
         if (cancelDeadline != MonoTime.init && MonoTime.currTime >= cancelDeadline)
+        {
+            interrupted = true;
+            failure = "Agent did not confirm cancellation; outcome is uncertain";
             break;
+        }
         if (MonoTime.currTime >= deadline && !failed)
         {
             failed = true;
-            failure = "Agent turn timed out";
+            interrupted = true;
+            failure = "Agent turn timed out; outcome is uncertain";
             try
                 agent.notify("session/cancel", JSONValue(["sessionId": JSONValue(bound)]));
             catch (Exception)
@@ -253,13 +263,12 @@ CallResult runAcp(
     execution.markSteerable(false);
     agent.close();
     CallResult ret;
-    ret.interrupted = interrupted;
+    ret.interrupted = interrupted || pending.length != 0;
     ret.stopReason = stopReason;
     ret.reply = reply;
     ret.exitStatus = JSONValue(agent.exitStatus);
-    if (cancelled || execution.stopped)
-        ret.cancelled = true;
-    if (failed && !ret.cancelled)
+    ret.cancelled = !ret.interrupted && (cancelled || (execution.stopped && compacting));
+    if ((failed || ret.interrupted) && !ret.cancelled)
         ret.error = failure.length ? failure : "Agent turn failed";
 
     return ret;

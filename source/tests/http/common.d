@@ -2,7 +2,10 @@ module tests.http.common;
 
 import tests.common;
 
+import daemon.interop.process : createProcessGroup, terminate;
+
 import core.sync.mutex : Mutex;
+import core.time : seconds;
 import std.array : join;
 import std.file : exists, readText, write;
 import std.json : JSONValue;
@@ -21,6 +24,7 @@ shared static this()
 struct RunningDaemon
 {
     Pid process;
+    int processGroup;
     File log;
     bool ownsPort;
 
@@ -36,14 +40,12 @@ struct RunningDaemon
         }
         if (process !is null)
         {
-            if (!tryWait(process).terminated)
-            {
-                kill(process);
-                wait(process);
-            }
-
+            if (processGroup <= 0)
+                throw new Exception("Fixture daemon has no owned process group");
+            terminate(process, 2.seconds);
             process = null;
         }
+        processGroup = 0;
 
         if (log.isOpen)
             log.close();
@@ -61,6 +63,8 @@ RunningDaemon startDaemon(Fixture fixture)
         ret.close();
     string path = buildPath(fixture.root, "daemon.log");
     ret.log = File(path, "w");
+    Config options = Config.retainStdin | Config.retainStdout | Config.retainStderr;
+    options.preExecFunction = &createProcessGroup;
     ret.process = spawnProcess(
         ["bin/autonom", "daemon"],
         stdin,
@@ -68,8 +72,9 @@ RunningDaemon startDaemon(Fixture fixture)
         ret.log,
         ["AUTONOM_CONFIG": fixture.path, "AUTONOM_PORT": "18080",
             "XDG_CONFIG_HOME": buildPath(fixture.root, "xdg-config")],
-        Config.retainStdin | Config.retainStdout | Config.retainStderr
+        options
     );
+    ret.processGroup = ret.process.processID;
     waitUntil(delegate bool() {
         if (tryWait(ret.process).terminated)
             throw new Exception(readText(path));

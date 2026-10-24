@@ -41,6 +41,7 @@ CONFIG_OPTIONS = [
 
 locks = {}
 pending = {}
+complete_on_cancel = set()
 timers = {}
 permitted = {}
 probes = {}
@@ -52,6 +53,9 @@ def path(name):
 
 
 def save_session(session_id, directory=None, meta=None):
+    if os.path.exists(path("omit-catalog")):
+        return
+
     os.makedirs(os.path.dirname(DATABASE), exist_ok=True)
     with sqlite3.connect(DATABASE) as connection:
         connection.execute("create table if not exists sessions (id text primary key, model text default '', "
@@ -130,6 +134,17 @@ def finish(request_id, session_id, stop_reason="end_turn"):
     send_result(request_id, {"sessionId": session_id, "stopReason": stop_reason})
 
 
+def barrier_wait(request_id, session_id):
+    """Hold one prompt until release-completions appears or a bounded deadline passes."""
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        if os.path.exists(path("release-completions")):
+            finish(request_id, session_id)
+            return
+        time.sleep(0.01)
+    send_error(request_id, -32603, "barrier wait timed out")
+
+
 def on_prompt(request_id, params):
     session_id = params.get("sessionId", "")
     text = "\n".join(block.get("text", "") for block in params.get("prompt", []))
@@ -145,6 +160,18 @@ def on_prompt(request_id, params):
     if text == "exit-after-reply":
         finish(request_id, session_id)
         raise SystemExit(0)
+
+    if text == "barrier":
+        with open(path("barrier-" + session_id), "w") as handle:
+            handle.write(session_id)
+        threading.Thread(target=barrier_wait, args=(request_id, session_id), daemon=True).start()
+        return
+
+    if text == "hang":
+        with open(path("hanging-backend-" + session_id + ".pid"), "w") as handle:
+            handle.write(str(os.getpid()))
+        pending[request_id] = session_id
+        return
 
     if os.path.exists(path("fail-prompt")) or text == "fail":
         update(session_id, text)
@@ -193,8 +220,10 @@ def on_prompt(request_id, params):
         pending[request_id] = session_id
         timer.start()
         return
-    if text.startswith("auth:") or text == "hang":
+    if text.startswith("auth:") or text == "complete-on-cancel":
         pending[request_id] = session_id
+        if text == "complete-on-cancel":
+            complete_on_cancel.add(request_id)
         return
     if text == "/compact":
         if os.path.exists(path("fail-compact")):
@@ -302,8 +331,10 @@ def acp_main():
             for key, session_id in list(pending.items()):
                 if key in timers:
                     timers[key].cancel()
-                send_result(key, {"sessionId": session_id, "stopReason": "cancelled"})
+                reason = "end_turn" if key in complete_on_cancel else "cancelled"
+                send_result(key, {"sessionId": session_id, "stopReason": reason})
             pending.clear()
+            complete_on_cancel.clear()
             timers.clear()
         elif method == "$/cancel_request":
             identity = params.get("requestId")

@@ -2,6 +2,7 @@ module daemon.interop.devin.calls;
 
 import daemon.exception : ConflictException;
 import daemon.interop.call : Call, CallKind, CallStatus;
+import daemon.interop.completion : completionBatchLimit, CompletionBatch;
 import daemon.interop.devin.bridge : Bridge;
 import daemon.interop.devin.connection : sweepObserved;
 import daemon.interop.devin.history : recordExecution;
@@ -55,11 +56,42 @@ Call[] listCalls(Bridge owner, string directory = null)
 string[] collectCalls(Bridge owner)
 {
     owner.sweepObserved();
+    CompletionBatch batch = owner.completions.drain();
+    scope(failure)
+        owner.completions.requestRescan();
+
     Call[] ready;
-    foreach (execution; owner.executions)
+    bool[string] seen;
+    ulong generation = owner.completions.currentGeneration;
+    foreach (notice; batch.notices)
     {
-        if (!execution.running && !execution.collected)
+        if (notice.generation != generation || (notice.executionId in seen) !is null)
+            continue;
+
+        Call* found = notice.executionId in owner.executions;
+        if (found is null || (*found).running || (*found).collected)
+            continue;
+
+        seen[notice.executionId] = true;
+        ready ~= *found;
+    }
+
+    bool moreRescan;
+    if (batch.rescan)
+    {
+        foreach (id, execution; owner.executions)
+        {
+            if (execution.running || execution.collected || (id in seen) !is null)
+                continue;
+            if (ready.length >= completionBatchLimit)
+            {
+                moreRescan = true;
+                break;
+            }
+
+            seen[id] = true;
             ready ~= execution;
+        }
     }
 
     ready.sort!((left, right) {
@@ -90,14 +122,14 @@ string[] collectCalls(Bridge owner)
             }
         }
 
-        execution.collected = true;
         owner.recordExecution(execution);
+        execution.collected = true;
     }
 
     Call[] settledCalls;
     foreach (call; owner.executions.byValue)
     {
-        if (!call.running)
+        if (!call.running && call.collected)
             settledCalls ~= call;
     }
 
@@ -122,6 +154,8 @@ string[] collectCalls(Bridge owner)
         else
             break;
     }
+    if (batch.more || moreRescan)
+        owner.completions.requestRescan();
     owner.access.collect();
     return owner.removed.keys;
 }
@@ -134,6 +168,7 @@ void stopCalls(Bridge owner)
 
 void closeCalls(Bridge owner)
 {
+    owner.completions.close();
     Exception failure;
     foreach (execution; owner.executions)
     {
@@ -149,7 +184,10 @@ void closeCalls(Bridge owner)
     foreach (execution; owner.executions)
     {
         try
+        {
             execution.wait();
+            owner.recordExecution(execution);
+        }
         catch (Exception error)
         {
             if (failure is null)
