@@ -89,11 +89,17 @@ unittest
         "token": JSONValue(capability)
     ]).toString());
 
-    request("/api/mcp/session", 403);
+    request("/api/mcp/session", 403)["error"].str.should == "MCP capability is not bound to a session";
     request("/api/mcp/session", 403, null, "application/json", HTTP.Method.undefined,
         null, null, true, "b".replicate(64));
-    request("/api/mcp/session", 200, null, "application/json", HTTP.Method.undefined,
-        null, null, true, capability)["id"].str.should == "obs-1";
+    request("/api/mcp/session", 403, null, "application/json", HTTP.Method.get,
+        null, null, false);
+    JSONValue identity = request("/api/mcp/session?session=other", 200, null, "application/json",
+        HTTP.Method.get, null, null, false, capability);
+    identity.object.length.should == 1;
+    identity["id"].str.should == "obs-1";
+    request("/api/mcp/session", 405, "{}", "application/json", HTTP.Method.post,
+        null, null, false, capability)["error"].str.should == "Method not allowed";
 
     string tokenPath = buildPath(fixture.config.dataDir, "mcp", "obs-1.token");
     readText(tokenPath).should == capability;
@@ -129,5 +135,7 @@ unittest
     ]).toString());
     request("/api/mcp/session", 403, null, "application/json", HTTP.Method.undefined,
         null, null, true, capability);
+    request("/api/mcp/session", 403, null, "application/json", HTTP.Method.get,
+        null, null, false, capability);
     exists(tokenPath).should == false;
 }

@@ -26,6 +26,20 @@ void profiles(Request request, Output output)
         respond(output, profileStore.create(readField!"name"(request)).toJSON(), 201);
 }
 
+/// Inspect a profile through the same API authority as the profile directory.
+@endpoint @route!(matchesPath!"/api/profiles/<name>")
+void getProfile(Request request, Output output)
+{
+    if (!acceptMethod(request, output, [Request.Method.Get]))
+        return;
+
+    Profile profile = profileStore.get(routeParameter!"/api/profiles/<name>"(request));
+    if (profile is null)
+        respondError(output, 404, "Profile not found");
+    else
+        respond(output, profile.toJSON());
+}
+
 @endpoint @route!(matchesPath!"/api/profiles/<name>/session")
 void profileSession(Request request, Output output)
 {

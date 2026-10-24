@@ -1,28 +1,13 @@
 module daemon.agent.profile;
 
-import daemon.api;
-import daemon.http;
 import daemon.interop.session : Session;
-
-import serverino;
 
 import std.json : JSONValue;
 
+/// Reserved local operator identity, never a managed profile name.
 enum humanName = "human";
 
-@endpoint @route!(matchesPath!"/api/profiles/<name>")
-void getProfile(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get]))
-        return;
-
-    Profile profile = profileStore.get(routeParameter!"/api/profiles/<name>"(request));
-    if (profile is null)
-        respondError(output, 404, "Profile not found");
-    else
-        respond(output, profile.toJSON());
-}
-
+/// Domain profile identity and its current provider session, without HTTP assembly.
 class Profile
 {
 private:

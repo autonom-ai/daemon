@@ -2,7 +2,6 @@
 module daemon.api;
 
 import daemon.agent.api;
-import daemon.agent.profile;
 import daemon.agent.store;
 import daemon.agent;
 import daemon.config;
@@ -26,7 +25,7 @@ import daemon.interop.devin.session.control;
 import daemon.interop.devin.session.permissions;
 import daemon.interop.devin.session.transcript;
 import daemon.interop.devin.session;
-import daemon.interop.mcp;
+import daemon.mcp;
 import daemon.policy.access;
 import daemon.policy;
 static import daemon.interop.devin.bridge;
@@ -80,7 +79,6 @@ void closeDomain()
 }
 
 alias apiModules = AliasSeq!(
-    daemon.agent.profile,
     daemon.agent.api,
     daemon.coord.rooms,
     daemon.coord.messages,
@@ -93,7 +91,7 @@ alias apiModules = AliasSeq!(
     daemon.interop.devin.session.control,
     daemon.interop.devin.session.permissions,
     daemon.interop.devin.session.transcript,
-    daemon.interop.mcp
+    daemon.mcp
 );
 
 mixin ServerinoLoop!apiModules;

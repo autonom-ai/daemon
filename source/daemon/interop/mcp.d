@@ -1,14 +1,11 @@
 module daemon.interop.mcp;
 
-import daemon.api;
-import daemon.http;
-
-import serverino;
-
 import std.json : JSONType, JSONValue;
 
+/// Name of the session-scoped coordination MCP server.
 enum mcpServerName = "autonom-coord";
 
+/// Build the MCP launch entry without forwarding operator or run authority.
 JSONValue coordServer(string port, string token)
 {
     return JSONValue([
@@ -24,6 +21,7 @@ JSONValue coordServer(string port, string token)
     ]);
 }
 
+/// Replace the coordination entry while preserving unrelated MCP servers.
 JSONValue injectCoord(JSONValue params, string port, string token)
 {
     JSONValue[] servers;
@@ -40,20 +38,4 @@ JSONValue injectCoord(JSONValue params, string port, string token)
     servers ~= coordServer(port, token);
     params["mcpServers"] = JSONValue(servers);
     return params;
-}
-
-@endpoint @route!"/api/mcp/session"
-void mcpSession(Request request, Output output)
-{
-    if (!acceptMethod(request, output, [Request.Method.Get]))
-        return;
-
-    string session = bridge.access.mcpSession(request.header.read("x-autonom-mcp"));
-    if (!session.length)
-    {
-        respondError(output, 403, "MCP capability is not bound to a session");
-        return;
-    }
-
-    respond(output, JSONValue(["id": JSONValue(session)]));
 }
