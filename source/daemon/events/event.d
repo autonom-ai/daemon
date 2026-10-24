@@ -72,6 +72,35 @@ public:
         return ret;
     }
 
+    /// Acknowledge only matching IDs in this profile's inbox; repeated or foreign IDs are harmless.
+    string[] acknowledge(Profile profile, string[] ids)
+    {
+        bool[string] observed;
+        foreach (id; ids)
+            observed[id] = true;
+
+        string[] ret;
+        Event[] remaining;
+        foreach (event; unread(profile))
+        {
+            if (event.id in observed)
+                ret ~= event.id;
+            else
+                remaining ~= event;
+        }
+        if (!ret.length)
+            return ret;
+
+        bool committed;
+        scope(exit)
+        {
+            if (committed)
+                pending[profile.name] = remaining;
+        }
+        save(profile.name, remaining, committed);
+        return ret;
+    }
+
     bool accept(Profile profile, Event event)
     {
         if (receipts.get(profile.name, null).canFind(event.id))
@@ -184,16 +213,23 @@ private:
 
     void save(string profileName)
     {
+        save(profileName, pending.get(profileName, null));
+    }
+
+    void save(string profileName, Event[] batch)
+    {
+        bool committed;
+        save(profileName, batch, committed);
+    }
+
+    void save(string profileName, Event[] batch, out bool committed)
+    {
         JSONValue data = JSONValue.emptyArray;
-        Event[]* found = profileName in pending;
-        if (found !is null)
-        {
-            foreach (event; *found)
-                data.array ~= event.toJSON();
-        }
+        foreach (event; batch)
+            data.array ~= event.toJSON();
 
         mkdirRecurse(inboxDir(profileName));
-        atomicWrite(eventsPath(profileName), data.toString());
+        atomicWrite(eventsPath(profileName), data.toString(), committed);
     }
 }
 

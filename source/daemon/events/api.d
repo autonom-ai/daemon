@@ -4,7 +4,7 @@ import daemon.agent;
 import daemon.api;
 import daemon.coord.stream : stdTimeTicksPerMillisecond;
 import daemon.coord;
-import daemon.events.event : EventType, parseEventType;
+import daemon.events.event : Event, EventType, maxEvents, parseEventType;
 import daemon.events.schedule : Schedule, maxEvery;
 import daemon.exception;
 import daemon.http;
@@ -18,16 +18,43 @@ import std.file;
 import std.json : JSONType, JSONValue;
 import std.typecons : Nullable;
 
+/// Peek without consumption, acknowledge observed IDs, or retain the legacy consuming GET.
 @endpoint @route!"/api/events"
 void readEvents(Request request, Output output)
 {
-    if (!acceptMethod(request, output, [Request.Method.Get]))
+    if (!acceptMethod(request, output, [Request.Method.Get, Request.Method.Post]))
         return;
 
     Profile profile = caller(request);
+    if (request.method == Request.Method.Post)
+    {
+        JSONValue data = readBody(request);
+        onlyFields(data, ["ids"]);
+        if ("ids" !in data.object || data["ids"].type != JSONType.array ||
+            data["ids"].array.length > maxEvents)
+            throw new InvalidInputException("Expected up to "~maxEvents.to!string~" event IDs");
+
+        string[] ids;
+        foreach (id; data["ids"].array)
+        {
+            if (id.type != JSONType.string || !id.str.length || id.str.length > 256)
+                throw new InvalidInputException("Event IDs must be nonempty strings up to 256 bytes");
+
+            ids ~= id.str;
+        }
+
+        respond(output, JSONValue(["acknowledged": JSONValue(events.acknowledge(profile, ids))]));
+        return;
+    }
+
+    string peek = request.get.read("peek");
+    if (request.get.has("peek") && peek != "true" && peek != "false")
+        throw new InvalidInputException("peek must be true or false");
+
+    Event[] batch = peek == "true" ? events.unread(profile) : events.read(profile);
     JSONValue ret = JSONValue.emptyObject;
     ret["events"] = JSONValue.emptyArray;
-    foreach (event; events.read(profile))
+    foreach (event; batch)
         ret["events"].array ~= event.toJSON();
 
     respond(output, ret);
