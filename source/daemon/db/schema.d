@@ -1,6 +1,8 @@
 /// Versioned schema for Autonom-owned facts, never for the provider's catalog.
 module daemon.db.schema;
 
+import daemon.db.coordschema : migrateCoordination;
+
 import arsd.sqlite : Sqlite, queryOneColumn;
 
 import std.conv : to;
@@ -8,7 +10,7 @@ import std.conv : to;
 package(daemon.db):
 
 enum applicationId = 0x4155544F;
-enum schemaVersion = 1;
+enum schemaVersion = 2;
 
 void migrate(Sqlite connection)
 {
@@ -16,7 +18,9 @@ void migrate(Sqlite connection)
     int identity = connection.queryOneColumn!int("pragma application_id");
     if (storedVersion == schemaVersion && identity == applicationId)
         return;
-    if (storedVersion != 0 || identity != 0)
+    bool v1 = storedVersion == 1 && identity == applicationId;
+    bool v0 = storedVersion == 0 && identity == 0;
+    if (!v1 && !v0)
         throw new Exception("Unsupported Autonom database identity or schema version");
 
     connection.query("begin immediate");
@@ -27,6 +31,13 @@ void migrate(Sqlite connection)
     identity = connection.queryOneColumn!int("pragma application_id");
     if (storedVersion == schemaVersion && identity == applicationId)
     {
+        connection.query("commit");
+        return;
+    }
+    if (storedVersion == 1 && identity == applicationId)
+    {
+        migrateCoordination(connection);
+        connection.query("pragma user_version = "~schemaVersion.to!string);
         connection.query("commit");
         return;
     }
@@ -60,6 +71,7 @@ void migrate(Sqlite connection)
         "create table imports (domain text primary key not null, "~
         "source_version integer not null, source text not null)"
     );
+    migrateCoordination(connection);
     connection.query("pragma application_id = "~applicationId.to!string);
     connection.query("pragma user_version = "~schemaVersion.to!string);
     connection.query("commit");

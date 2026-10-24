@@ -7,9 +7,9 @@
 >
 > Autonom Daemon currently targets and is validated on Linux only. macOS and Windows are not supported.
 
-Autonom Daemon is a native D service and CLI that supervises local Devin CLI sessions as long-lived, addressable, and policy-governed agents. It owns the session and profile store, rooms and direct messages, policy screening, schedules and wakes, the loopback HTTP API, the ACP stdio host, the coordination MCP proxy, and the Devin CLI lifecycle hooks.
+Autonom supervises Devin CLI sessions as addressable, policy-governed agents: session and profile stores, rooms and direct messages, policy screening, schedules and wakes, the loopback HTTP API, the ACP stdio host, the coordination MCP proxy, and the Devin CLI lifecycle hooks.
 
-Sessions run the real Devin CLI over ACP. Autonom supervises them and records their coordination state without replacing the underlying model or CLI runtime. The Desktop launcher that renders the Command Center sidebar in Devin Desktop lives in [autonom-ai/devin](https://github.com/autonom-ai/devin) and reaches this service through the `autonom` command.
+Sessions run the real Devin CLI over ACP. File stores are the production authority; the SQL schema in `daemon.db` is staged foundation only.
 
 ## Domain Model
 
@@ -110,7 +110,7 @@ The `router` block is used through [Intuit](https://github.com/cetio/intuit) to 
 | `daemon.events` | `Event`, `Schedule`, `Scheduler`, wake delivery, session adoption, and `/api/events` and `/api/schedules` endpoints. |
 | `daemon.policy` | `.devin/policy.yml` rule compilation, Intuit predicate screening, and `/api/policy` endpoints. |
 | `daemon.hooks` | Authenticated Devin CLI hook handlers (`/api/hooks/*`), policy enforcement on `PreToolUse`, and unread event reminders. |
-| `daemon.acp` | Stdio ACP host bridging Devin Desktop to daemon-managed sessions. |
+| `daemon.acp` | Existing stdio ACP bridge to daemon-managed Devin CLI sessions. |
 | `daemon.interop` | Devin CLI process management, ACP client framing and routing, read-only CLI SQLite inspection, and capability tokens. |
 | `source/mcp/` | Stdio JSON-RPC MCP proxy (`autonom-coord`) and `--ensure` loopback bootstrapper. |
 | `templates/` | Packaged `config.yml`, `policy.yml`, `hooks.v1.json`, and `hook.py` runtime assets. |
@@ -120,17 +120,6 @@ The `router` block is used through [Intuit](https://github.com/cetio/intuit) to 
 - [Testing](TESTING.md)
 - [Contributing](CONTRIBUTING.md)
 - [Third-Party Notices](NOTICE)
-
-## Roadmap
-
-- [x] Single-worker HTTP daemon and capability-scoped session control
-- [x] Durable profiles, rooms, direct messages, pings, and cursor-tracked streams
-- [x] Scheduled wakes (`ping`, `dm`, `room`, `clock`) and interrupted-call reconciliation
-- [x] Workspace `.devin/policy.yml` screening via Intuit and fail-closed `PreToolUse` hooks
-- [x] Unified `autonom` CLI (`daemon`, `acp`, `mcp`, `hook`) and user-level installer
-- [ ] Unified SQLite domain store (`autonom.db`) replacing file-backed JSON/JSONL streams
-- [ ] Automated GitHub Pages API documentation generated from Ddoc and Python docstrings
-- [ ] macOS and Windows platform validation
 
 ## License
 
